@@ -292,7 +292,7 @@ if (!gotTheLock) {
     win.focus()
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.workpulse')
 
     if (process.platform === 'darwin' && app.dock) {
@@ -303,7 +303,7 @@ if (!gotTheLock) {
       optimizer.watchWindowShortcuts(window)
     })
 
-    initDatabase()
+    await initDatabase()
     configureAutoUpdater()
     registerIpcHandlers()
     registerShortcutIpc()

@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, copyFileSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
+
+import { backupDatabase, openDatabase, runMigrations } from './database/connection'
 
 let db: Database.Database
 
@@ -38,132 +40,32 @@ function runIntegrityCheck(): boolean {
   }
 }
 
-function createBackup(): void {
+async function createBackup(): Promise<void> {
   const backupPath = getBackupPath()
   if (!existsSync(backupPath)) {
+    await backupDatabase(db, backupPath)
+  }
+}
+
+export async function initDatabase(): Promise<void> {
+  const dbPath = getDbPath()
+  const existedBeforeStartup = existsSync(dbPath)
+  db = openDatabase(dbPath)
+
+  if (existedBeforeStartup) {
     try {
-      copyFileSync(getDbPath(), backupPath)
-    } catch {
-      // backup failure is non-critical
+      await createBackup()
+    } catch (error) {
+      console.error('Database backup failed before migration', error)
+      throw error
     }
   }
-}
 
-function createTables(): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS work_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      content TEXT NOT NULL,
-      category TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-      task_id INTEGER,
-      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done', 'draft')),
-      board_column TEXT NOT NULL DEFAULT 'todo',
-      position INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-      completed_at TEXT,
-      due_date TEXT DEFAULT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL CHECK(type IN ('weekly', 'monthly', 'quarterly', 'custom')),
-      date_from TEXT NOT NULL,
-      date_to TEXT NOT NULL,
-      content TEXT NOT NULL,
-      generated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_work_logs_created_at ON work_logs(created_at);
-    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_reports_dates ON reports(date_from, date_to);
-  `)
-}
-
-function runMigrations(): void {
-  const colInfo = db.prepare("PRAGMA table_info('tasks')").all() as { name: string }[]
-  const hasDueDate = colInfo.some((c) => c.name === 'due_date')
-
-  // SQLite can't ALTER CHECK constraints, so recreate table if needed
-  const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string } | undefined
-  if (tableInfo?.sql && !tableInfo.sql.includes("'draft'")) {
-    const dueDateSelect = hasDueDate ? 'due_date' : 'NULL as due_date'
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS tasks_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        description TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in_progress', 'done', 'draft')),
-        board_column TEXT NOT NULL DEFAULT 'todo',
-        position INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        completed_at TEXT,
-        due_date TEXT DEFAULT NULL
-      );
-      INSERT INTO tasks_new (
-        id,
-        title,
-        description,
-        status,
-        board_column,
-        position,
-        created_at,
-        updated_at,
-        completed_at,
-        due_date
-      )
-      SELECT
-        id,
-        title,
-        description,
-        status,
-        board_column,
-        position,
-        created_at,
-        updated_at,
-        completed_at,
-        ${dueDateSelect}
-      FROM tasks;
-      DROP TABLE tasks;
-      ALTER TABLE tasks_new RENAME TO tasks;
-      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-    `)
-    return
-  }
-
-  if (!hasDueDate) {
-    db.exec("ALTER TABLE tasks ADD COLUMN due_date TEXT DEFAULT NULL")
-  }
-}
-
-export function initDatabase(): void {
-  const dbPath = getDbPath()
-  db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-
-  createTables()
-  runMigrations()
+  runMigrations(db)
 
   if (!runIntegrityCheck()) {
-    console.error('Database integrity check failed!')
+    throw new Error('Database integrity check failed')
   }
-
-  createBackup()
 }
 
 export function getDatabase(): Database.Database {
