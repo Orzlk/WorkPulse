@@ -17,6 +17,87 @@ interface Report {
   generated_at: string
 }
 
+interface Page<T> {
+  items: T[]
+  total: number
+}
+
+interface Project {
+  public_id: string
+  name: string
+  description: string
+  color: string
+  archived_at: string | null
+}
+
+interface InboxSuggestion {
+  target: 'work_log' | 'task' | 'ignore'
+  title: string
+  summary: string
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
+  include_in_reports: boolean
+}
+
+interface InboxItem {
+  public_id: string
+  content: string
+  project_id: string | null
+  repository_id: string | null
+  state: 'unorganized' | 'confirmed' | 'ignored' | 'archived'
+  include_in_reports: boolean
+  ai_suggestion: InboxSuggestion | null
+  created_at: string
+  updated_at: string
+}
+
+interface Tag {
+  public_id: string
+  name: string
+  path: string
+  parent_id: string | null
+}
+
+interface Repository {
+  public_id: string
+  name: string
+  remote_url: string | null
+  project_id: string | null
+  local_path: string
+  branch: string | null
+  enabled: boolean
+  scan_interval_minutes: number | null
+  last_scanned_at: string | null
+  last_failed_at: string | null
+  last_scan_error: string | null
+}
+
+interface ReportRequest {
+  type: 'weekly' | 'monthly'
+  anchorDate: string
+  timeZone: string
+  projectIds?: string[]
+  repositoryIds?: string[]
+}
+
+interface PeriodReport {
+  public_id: string
+  type: string
+  period_start: string
+  period_end: string
+  timezone: string
+  project_scope: string[]
+  repository_scope: string[]
+  content: string
+  version: number
+  status: 'generating' | 'ready' | 'error'
+  error_message: string | null
+  retry_count: number
+  generated_at: string | null
+  updated_at: string
+}
+
 interface Task {
   id: number
   title: string
@@ -93,9 +174,44 @@ interface API {
     }>
   }
   report: {
-    generate: (dateFrom: string, dateTo: string) => Promise<Report>
-    list: (limit?: number) => Promise<Report[]>
-    update: (id: number, content: string) => Promise<Report | null>
+    generate: (request: ReportRequest) => Promise<PeriodReport>
+    list: (limit?: number) => Promise<PeriodReport[]>
+    get: (publicId: string) => Promise<PeriodReport | null>
+    update: (publicId: string, input: { content: string }) => Promise<PeriodReport | null>
+  }
+  project: {
+    list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Project>>
+    create: (input: Omit<Project, 'public_id' | 'archived_at'>) => Promise<Project>
+    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>) => Promise<Project | null>
+    archive: (publicId: string) => Promise<Project | null>
+  }
+  inbox: {
+    list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<InboxItem>>
+    create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => Promise<InboxItem>
+    update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => Promise<InboxItem | null>
+    organize: (publicId: string) => Promise<{ target: string; target_public_id: string | null }>
+    ignore: (publicId: string) => Promise<InboxItem | null>
+    archive: (publicId: string) => Promise<InboxItem | null>
+  }
+  tag: {
+    list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Tag>>
+    create: (name: string) => Promise<Tag>
+    rename: (publicId: string, name: string) => Promise<Tag | null>
+    search: (query: string, pagination?: { limit?: number; offset?: number }) => Promise<Page<Tag>>
+  }
+  search: {
+    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => Promise<Page<InboxItem>>
+  }
+  repository: {
+    list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>
+    create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository>
+    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<Repository | null>
+    scan: (publicId: string) => Promise<unknown>
+    scanAll: () => Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
+  }
+  database: {
+    export: () => Promise<{ filePath: string; preview: unknown } | null>
+    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<unknown>
   }
   settings: {
     get: (key: string) => Promise<string | null>

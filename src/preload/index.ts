@@ -33,6 +33,87 @@ interface Task {
   due_date: string | null
 }
 
+interface Page<T> {
+  items: T[]
+  total: number
+}
+
+interface Project {
+  public_id: string
+  name: string
+  description: string
+  color: string
+  archived_at: string | null
+}
+
+interface InboxSuggestion {
+  target: 'work_log' | 'task' | 'ignore'
+  title: string
+  summary: string
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
+  include_in_reports: boolean
+}
+
+interface InboxItem {
+  public_id: string
+  content: string
+  project_id: string | null
+  repository_id: string | null
+  state: 'unorganized' | 'confirmed' | 'ignored' | 'archived'
+  include_in_reports: boolean
+  ai_suggestion: InboxSuggestion | null
+  created_at: string
+  updated_at: string
+}
+
+interface Tag {
+  public_id: string
+  name: string
+  path: string
+  parent_id: string | null
+}
+
+interface Repository {
+  public_id: string
+  name: string
+  remote_url: string | null
+  project_id: string | null
+  local_path: string
+  branch: string | null
+  enabled: boolean
+  scan_interval_minutes: number | null
+  last_scanned_at: string | null
+  last_failed_at: string | null
+  last_scan_error: string | null
+}
+
+interface ReportRequest {
+  type: 'weekly' | 'monthly'
+  anchorDate: string
+  timeZone: string
+  projectIds?: string[]
+  repositoryIds?: string[]
+}
+
+interface PeriodReport {
+  public_id: string
+  type: string
+  period_start: string
+  period_end: string
+  timezone: string
+  project_scope: string[]
+  repository_scope: string[]
+  content: string
+  version: number
+  status: 'generating' | 'ready' | 'error'
+  error_message: string | null
+  retry_count: number
+  generated_at: string | null
+  updated_at: string
+}
+
 const api = {
   app: {
     setLanguage: (language: AppLanguage) => ipcRenderer.invoke('app:language:update', language),
@@ -63,7 +144,7 @@ const api = {
     add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string) =>
       ipcRenderer.invoke('task:add', title, description, status, createdAt),
     list: () => ipcRenderer.invoke('task:list'),
-    update: (id: number, updates: Record<string, unknown>) =>
+    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>>) =>
       ipcRenderer.invoke('task:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('task:delete', id),
     reorder: (taskIds: number[], status: string) =>
@@ -77,11 +158,46 @@ const api = {
     get: (days?: number) => ipcRenderer.invoke('stats:get', days)
   },
   report: {
-    generate: (dateFrom: string, dateTo: string) =>
-      ipcRenderer.invoke('report:generate', dateFrom, dateTo),
+    generate: (request: ReportRequest) =>
+      ipcRenderer.invoke('report:generate', request) as Promise<PeriodReport>,
     list: (limit?: number) => ipcRenderer.invoke('report:list', limit),
-    update: (id: number, content: string) =>
-      ipcRenderer.invoke('report:update', id, content)
+    get: (publicId: string) => ipcRenderer.invoke('report:get', publicId) as Promise<PeriodReport | null>,
+    update: (publicId: string, input: { content: string }) =>
+      ipcRenderer.invoke('report:update', publicId, input) as Promise<PeriodReport | null>
+  },
+  project: {
+    list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('project:list', pagination) as Promise<Page<Project>>,
+    create: (input: Omit<Project, 'public_id' | 'archived_at'>) => ipcRenderer.invoke('project:create', input) as Promise<Project>,
+    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>) => ipcRenderer.invoke('project:update', publicId, input) as Promise<Project | null>,
+    archive: (publicId: string) => ipcRenderer.invoke('project:archive', publicId) as Promise<Project | null>
+  },
+  inbox: {
+    list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('inbox:list', pagination) as Promise<Page<InboxItem>>,
+    create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => ipcRenderer.invoke('inbox:create', input) as Promise<InboxItem>,
+    update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => ipcRenderer.invoke('inbox:update', publicId, input) as Promise<InboxItem | null>,
+    organize: (publicId: string) => ipcRenderer.invoke('inbox:organize', publicId) as Promise<{ target: string; target_public_id: string | null }>,
+    ignore: (publicId: string) => ipcRenderer.invoke('inbox:ignore', publicId) as Promise<InboxItem | null>,
+    archive: (publicId: string) => ipcRenderer.invoke('inbox:archive', publicId) as Promise<InboxItem | null>
+  },
+  tag: {
+    list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('tag:list', pagination) as Promise<Page<Tag>>,
+    create: (name: string) => ipcRenderer.invoke('tag:create', name) as Promise<Tag>,
+    rename: (publicId: string, name: string) => ipcRenderer.invoke('tag:rename', publicId, name) as Promise<Tag | null>,
+    search: (query: string, pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('tag:search', query, pagination) as Promise<Page<Tag>>
+  },
+  search: {
+    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => ipcRenderer.invoke('search:query', input) as Promise<Page<InboxItem>>
+  },
+  repository: {
+    list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,
+    create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:create', input) as Promise<Repository>,
+    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
+    scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId),
+    scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
+  },
+  database: {
+    export: () => ipcRenderer.invoke('database:export') as Promise<{ filePath: string; preview: unknown } | null>,
+    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request)
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),

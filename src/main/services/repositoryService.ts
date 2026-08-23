@@ -44,6 +44,11 @@ export interface CreateRepositoryInput {
   scan_interval_minutes?: number | null
 }
 
+export interface UpdateRepositoryInput {
+  project_id?: string | null
+  enabled?: boolean
+}
+
 export interface RepositoryScanResult {
   repository_id: string
   status: 'succeeded' | 'failed' | 'skipped'
@@ -162,6 +167,12 @@ export class RepositoryService {
   setEnabled(publicId: string, enabled: boolean): Repository | null {
     this.assertWorkspace()
     return this.updateRepository(publicId, 'enabled', Number(enabled))
+  }
+
+  update(publicId: string, input: UpdateRepositoryInput): Repository | null {
+    if (input.project_id !== undefined) return this.assignProject(publicId, input.project_id)
+    if (input.enabled !== undefined) return this.setEnabled(publicId, input.enabled)
+    return this.findRow(publicId) ? toRepository(this.findRow(publicId)!) : null
   }
 
   async scanOne(publicId: string, nowValue?: string): Promise<RepositoryScanResult> {

@@ -120,6 +120,11 @@ export const translations = {
     'report.regenerate': '重新生成',
     'report.idle': '选择日期范围，一键生成工作报告',
     'report.history': '历史报告',
+    'report.weekly': '周报',
+    'report.monthly': '月报',
+    'report.inboxReminder': '未整理记录不会自动发送给 AI',
+    'database.export': '导出数据',
+    'database.importPreview': '导入预览',
 
     'stats.dailyActivity': '每日活动',
     'stats.logLegend': '日志',
@@ -326,6 +331,11 @@ export const translations = {
     'report.regenerate': 'Regenerate',
     'report.idle': 'Choose a date range and generate a work report',
     'report.history': 'Report history',
+    'report.weekly': 'Weekly report',
+    'report.monthly': 'Monthly report',
+    'report.inboxReminder': 'Unorganized items are never sent to AI automatically',
+    'database.export': 'Export data',
+    'database.importPreview': 'Import preview',
 
     'stats.dailyActivity': 'Daily activity',
     'stats.logLegend': 'Logs',

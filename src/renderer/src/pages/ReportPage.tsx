@@ -19,12 +19,12 @@ import { useToast } from '../components/Toast'
 import { useI18n } from '../stores/languageStore'
 
 interface Report {
-  id: number
+  public_id: string
   type: string
-  date_from: string
-  date_to: string
+  period_start: string
+  period_end: string
   content: string
-  generated_at: string
+  generated_at: string | null
 }
 
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
@@ -80,7 +80,11 @@ function ReportPage(): JSX.Element {
     setActiveReport(null)
 
     try {
-      const report = await window.api.report.generate(dateFrom, dateTo)
+      const report = await window.api.report.generate({
+        type: dateFrom.endsWith('-01') ? 'monthly' : 'weekly',
+        anchorDate: dateTo,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      })
       setReportContent(report.content)
       setActiveReport(report)
       setStatus('success')
@@ -127,14 +131,14 @@ function ReportPage(): JSX.Element {
     if (!activeReport) return
 
     try {
-      const updated = await window.api.report.update(activeReport.id, reportContent)
+      const updated = await window.api.report.update(activeReport.public_id, { content: reportContent })
       if (!updated) {
         toast.error(t('report.saveFailed'))
         return
       }
 
       setActiveReport(updated)
-      if (viewingReport?.id === updated.id) {
+      if (viewingReport?.public_id === updated.public_id) {
         setViewingReport(updated)
       }
       setReportContent(updated.content)
@@ -145,7 +149,8 @@ function ReportPage(): JSX.Element {
     }
   }
 
-  const formatReportDate = (dateStr: string): string => {
+  const formatReportDate = (dateStr: string | null): string => {
+    if (!dateStr) return '-'
     const d = new Date(dateStr)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   }
@@ -173,7 +178,7 @@ function ReportPage(): JSX.Element {
           </button>
           <span className="text-sm text-zinc-400">|</span>
           <span className="text-sm text-zinc-600 dark:text-zinc-400">
-            {viewingReport.date_from} {t('common.to')} {viewingReport.date_to}
+            {viewingReport.period_start.slice(0, 10)} {t('common.to')} {viewingReport.period_end.slice(0, 10)}
           </span>
           <span className="text-xs text-zinc-400">
             {t('report.generatedAt', { time: formatReportDate(viewingReport.generated_at) })}
@@ -342,7 +347,7 @@ function ReportPage(): JSX.Element {
             <button
               onClick={async () => {
                 const range = viewingReport
-                  ? `${viewingReport.date_from}-${viewingReport.date_to}`
+                  ? `${viewingReport.period_start.slice(0, 10)}-${viewingReport.period_end.slice(0, 10)}`
                   : `${dateFrom}-${dateTo}`
                 const path = await window.api.export.report(reportContent, range)
                 if (path) toast.success(t('report.exported'))
@@ -405,7 +410,7 @@ function ReportPage(): JSX.Element {
             <div className="space-y-2">
               {history.map((report) => (
                 <button
-                  key={report.id}
+                  key={report.public_id}
                   onClick={() => handleViewReport(report)}
                   className="w-full text-left flex items-center justify-between px-4 py-3 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-sm transition-all group"
                 >
@@ -413,7 +418,7 @@ function ReportPage(): JSX.Element {
                     <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
                       <span className="text-sm text-zinc-700 dark:text-zinc-300">
-                        {report.date_from} {t('common.to')} {report.date_to}
+                        {report.period_start.slice(0, 10)} {t('common.to')} {report.period_end.slice(0, 10)}
                       </span>
                     </div>
                     <p className="text-xs text-zinc-400 mt-1 ml-6 truncate">

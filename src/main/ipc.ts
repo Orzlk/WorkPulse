@@ -1,5 +1,5 @@
 import { ipcMain, dialog, app, shell } from 'electron'
-import { writeFileSync, readFileSync } from 'fs'
+import { writeFileSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import {
   addWorkLog,
@@ -13,9 +13,6 @@ import {
   updateWorkLog,
   deleteWorkLog,
   restoreWorkLog,
-  saveReport,
-  getReports,
-  updateReportContent,
   getSetting,
   setSetting,
   deleteSetting,
@@ -27,9 +24,61 @@ import {
   workLogExists,
   type Task
 } from './db'
-import { generateReport } from './ai'
 import { deleteStoredApiKey, getStoredApiKey, setStoredApiKey } from './secureSettings'
 import { tMain } from './i18n'
+import { getDatabase, getDefaultWorkspaceContext } from './db'
+import { ProjectService } from './services/projectService'
+import { InboxService } from './services/inboxService'
+import { TagService } from './services/tagService'
+import { SearchService } from './services/searchService'
+import { RepositoryService } from './services/repositoryService'
+import { ReportService } from './reports/reportService'
+import {
+  IpcContractError,
+  id,
+  integerId,
+  parseInboxInput,
+  parsePagination,
+  parseProjectInput,
+  parseReportRequest,
+  parseRepositoryCreateInput,
+  parseInboxState,
+  toIpcContractError
+} from './ipcContracts'
+import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
+
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024
+const pendingImports = new Map<string, unknown>()
+
+function services(): {
+  projects: ProjectService
+  inbox: InboxService
+  tags: TagService
+  search: SearchService
+  repositories: RepositoryService
+  reports: ReportService
+} {
+  const database = getDatabase()
+  const context = getDefaultWorkspaceContext()
+  return {
+    projects: new ProjectService(database, context),
+    inbox: new InboxService(database, context),
+    tags: new TagService(database, context),
+    search: new SearchService(database, context),
+    repositories: new RepositoryService(database, context),
+    reports: new ReportService(database, context)
+  }
+}
+
+function guarded<TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult | Promise<TResult>) {
+  return async (_event: Electron.IpcMainInvokeEvent, ...args: TArgs): Promise<TResult> => {
+    try {
+      return await handler(...args)
+    } catch (error) {
+      throw toIpcContractError(error)
+    }
+  }
+}
 
 export function registerIpcHandlers(): void {
   // --- Work Logs ---
@@ -79,31 +128,147 @@ export function registerIpcHandlers(): void {
 
   // --- Reports ---
 
-  ipcMain.handle(
-    'report:generate',
-    async (_event, dateFrom: string, dateTo: string) => {
-      const logs = getWorkLogsByDateRange(dateFrom, dateTo)
-      if (logs.length === 0) {
-        throw new Error(tMain('noWorkLogsInRange'))
-      }
-      const tasks = getTasks().filter((task) => {
-        if (task.status !== 'done') return true
-        const completedDate = task.completed_at?.slice(0, 10)
-        return Boolean(completedDate && completedDate >= dateFrom && completedDate <= dateTo)
-      })
-      const content = await generateReport(logs, dateFrom, dateTo, tasks)
-      const report = saveReport('custom', dateFrom, dateTo, content)
-      return report
+  ipcMain.handle('report:generate', guarded(async (request: unknown) => {
+    return services().reports.generate(parseReportRequest(request))
+  }))
+
+  ipcMain.handle('report:list', guarded((pagination?: unknown) => {
+    const value = pagination === undefined || typeof pagination === 'number'
+      ? { limit: pagination ?? 50, offset: 0 }
+      : parsePagination(pagination)
+    return services().reports.list(value.limit)
+  }))
+
+  ipcMain.handle('report:get', guarded((publicId: unknown) => services().reports.get(id(publicId, 'report id'))))
+
+  ipcMain.handle('report:update', guarded((publicId: unknown, input: unknown) => {
+    const value = input && typeof input === 'object' && !Array.isArray(input) ? input as { content?: unknown } : null
+    if (!value || Object.keys(value).some((key) => key !== 'content') || typeof value.content !== 'string' || !value.content.trim()) {
+      throw new IpcContractError('INVALID_ARGUMENT', 'Report content is required')
     }
-  )
+    return services().reports.updateContent(id(publicId, 'report id'), value.content)
+  }))
 
-  ipcMain.handle('report:list', (_event, limit?: number) => {
-    return getReports(limit)
-  })
+  // --- Project / inbox / tag / search / repository domain APIs ---
 
-  ipcMain.handle('report:update', (_event, id: number, content: string) => {
-    return updateReportContent(id, content)
-  })
+  ipcMain.handle('project:list', guarded((pagination?: unknown) => services().projects.list(parsePagination(pagination))))
+  ipcMain.handle('project:create', guarded((input: unknown) => {
+    const project = parseProjectInput(input)
+    return services().projects.create({ name: project.name!, description: project.description ?? '', color: project.color ?? '#64748b' })
+  }))
+  ipcMain.handle('project:update', guarded((publicId: unknown, input: unknown) => services().projects.update(id(publicId, 'project id'), parseProjectInput(input, true))))
+  ipcMain.handle('project:archive', guarded((publicId: unknown) => services().projects.softDelete(id(publicId, 'project id'))))
+
+  ipcMain.handle('inbox:list', guarded((pagination?: unknown) => services().inbox.list(parsePagination(pagination))))
+  ipcMain.handle('inbox:create', guarded((input: unknown) => {
+    const item = parseInboxInput(input)
+    if (!item.content) throw new IpcContractError('INVALID_ARGUMENT', 'Inbox content is required')
+    return services().inbox.create({ ...item, content: item.content! })
+  }))
+  ipcMain.handle('inbox:update', guarded((publicId: unknown, input: unknown) => services().inbox.update(id(publicId, 'inbox id'), parseInboxInput(input))))
+  ipcMain.handle('inbox:organize', guarded((publicId: unknown) => services().inbox.confirm(id(publicId, 'inbox id'))))
+  ipcMain.handle('inbox:ignore', guarded((publicId: unknown) => services().inbox.ignore(id(publicId, 'inbox id'))))
+  ipcMain.handle('inbox:archive', guarded((publicId: unknown) => services().inbox.archive(id(publicId, 'inbox id'))))
+
+  ipcMain.handle('tag:list', guarded((pagination?: unknown) => services().tags.list(parsePagination(pagination))))
+  ipcMain.handle('tag:create', guarded((name: unknown) => {
+    if (typeof name !== 'string' || !name.trim()) throw new IpcContractError('INVALID_ARGUMENT', 'Tag name is required')
+    return services().tags.create(name)
+  }))
+  ipcMain.handle('tag:rename', guarded((publicId: unknown, name: unknown) => {
+    if (typeof name !== 'string' || !name.trim()) throw new IpcContractError('INVALID_ARGUMENT', 'Tag name is required')
+    return services().tags.rename(id(publicId, 'tag id'), name)
+  }))
+  ipcMain.handle('tag:search', guarded((query: unknown, pagination?: unknown) => {
+    if (typeof query !== 'string' || query.length > 200) throw new IpcContractError('INVALID_ARGUMENT', 'Tag query is invalid')
+    return services().tags.search(query, parsePagination(pagination))
+  }))
+
+  ipcMain.handle('search:query', guarded((input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new IpcContractError('INVALID_ARGUMENT', 'Search query is invalid')
+    const query = input as Record<string, unknown>
+    if (Object.keys(query).some((key) => !['text', 'tag_names', 'project_id', 'repository_id', 'state', 'limit', 'offset'].includes(key))) {
+      throw new IpcContractError('INVALID_ARGUMENT', 'Unknown search field')
+    }
+    const pagination = parsePagination({ limit: query.limit, offset: query.offset })
+    if (query.text !== undefined && (typeof query.text !== 'string' || query.text.length > 500)) throw new IpcContractError('INVALID_ARGUMENT', 'Search text is invalid')
+    if (query.project_id !== undefined && query.project_id !== null) id(query.project_id, 'project id')
+    if (query.repository_id !== undefined && query.repository_id !== null) id(query.repository_id, 'repository id')
+    return services().search.searchInbox({
+      ...pagination,
+      text: query.text as string | undefined,
+      tag_names: query.tag_names as string[] | undefined,
+      project_id: query.project_id as string | null | undefined,
+      repository_id: query.repository_id as string | null | undefined,
+      state: query.state === undefined ? undefined : parseInboxState(query.state)
+    })
+  }))
+
+  ipcMain.handle('repository:list', guarded((pagination?: unknown) => services().repositories.list(parsePagination(pagination))))
+  ipcMain.handle('repository:create', guarded((input: unknown) => services().repositories.create(parseRepositoryCreateInput(input))))
+  ipcMain.handle('repository:update', guarded((publicId: unknown, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new IpcContractError('INVALID_ARGUMENT', 'Repository update is invalid')
+    const value = input as Record<string, unknown>
+    if (Object.keys(value).some((key) => !['project_id', 'enabled'].includes(key))) throw new IpcContractError('INVALID_ARGUMENT', 'Unknown repository field')
+    if (value.project_id !== undefined && value.project_id !== null) id(value.project_id, 'project id')
+    if (value.enabled !== undefined && typeof value.enabled !== 'boolean') throw new IpcContractError('INVALID_ARGUMENT', 'enabled must be a boolean')
+    return services().repositories.update(id(publicId, 'repository id'), value as { project_id?: string | null; enabled?: boolean })
+  }))
+  ipcMain.handle('repository:scan', guarded((publicId: unknown) => services().repositories.scanOne(id(publicId, 'repository id'))))
+  ipcMain.handle('repository:scanAll', guarded(async () => {
+    const results = await services().repositories.scanAllEnabled()
+    return {
+      succeeded: results.filter((result) => result.status === 'succeeded').length,
+      commits: results.reduce((total, result) => total + result.inserted_count, 0),
+      errors: results.filter((result) => result.status === 'failed').map((result) => ({ repository_id: result.repository_id, error: result.error ?? '' }))
+    }
+  }))
+
+  // --- Local database transfer ---
+
+  ipcMain.handle('database:export', guarded(async () => {
+    const result = await dialog.showSaveDialog({
+      title: tMain('exportDatabaseTitle'),
+      defaultPath: 'workpulse-data.json',
+      filters: [{ name: tMain('databasePackageFilter'), extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const database = getDatabase()
+    const payload = createDatabaseExport(database, getDefaultWorkspaceContext())
+    writeFileSync(result.filePath, JSON.stringify(payload), 'utf8')
+    return { filePath: result.filePath, preview: previewDatabaseImport(payload) }
+  }))
+
+  ipcMain.handle('database:import', guarded(async (request: unknown) => {
+    const action = request && typeof request === 'object' && !Array.isArray(request) ? request as Record<string, unknown> : null
+    if (!action || Object.keys(action).some((key) => !['action', 'token'].includes(key)) || (action.action !== 'preview' && action.action !== 'merge')) {
+      throw new IpcContractError('INVALID_ARGUMENT', 'Import request is invalid')
+    }
+    if (action.action === 'preview') {
+      const result = await dialog.showOpenDialog({
+        title: tMain('importDatabaseTitle'),
+        filters: [{ name: tMain('databasePackageFilter'), extensions: ['json'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const filePath = result.filePaths[0]
+      if (statSync(filePath).size > MAX_IMPORT_BYTES) throw new IpcContractError('IMPORT_TOO_LARGE', 'Data package is too large')
+      let payload: unknown
+      try {
+        payload = JSON.parse(readFileSync(filePath, 'utf8'))
+      } catch {
+        throw new IpcContractError('IMPORT_INVALID', 'Invalid data package')
+      }
+      const token = crypto.randomUUID()
+      const preview = previewDatabaseImport(payload)
+      pendingImports.set(token, payload)
+      return { token, preview }
+    }
+    if (typeof action.token !== 'string' || !pendingImports.has(action.token)) throw new IpcContractError('IMPORT_NOT_READY', 'Import preview is required')
+    const payload = pendingImports.get(action.token)
+    pendingImports.delete(action.token)
+    return mergeDatabaseImport(getDatabase(), getDefaultWorkspaceContext(), payload)
+  }))
 
   // --- Tasks ---
 

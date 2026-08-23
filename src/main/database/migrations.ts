@@ -586,6 +586,13 @@ const migrations: SchemaMigration[] = [
           ON reports(workspace_id, deleted_at, type, period_start, period_end_exclusive, version DESC);
       `)
     }
+  },
+  {
+    version: 10,
+    name: '010_repository_binding_validity',
+    up: (database) => {
+      addColumnIfMissing(database, 'repository_bindings', 'is_valid', 'INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0, 1))')
+    }
   }
 ]
 

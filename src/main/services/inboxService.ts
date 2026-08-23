@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 
 import type Database from 'better-sqlite3'
 
-import type { InboxItem, InboxSuggestion, InboxTarget } from '../domain/types'
-import type { WorkspaceContext } from '../repositories/contracts'
+import type { InboxItem, InboxSuggestion, InboxTarget, Page } from '../domain/types'
+import type { Pagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
 import { LocalTagRepository, normalizeTagName } from '../repositories/localTagRepository'
 
@@ -65,6 +65,37 @@ export class InboxService {
       return item
     })
     return create()
+  }
+
+  list(pagination?: Pagination): Page<InboxItem> {
+    this.assertWorkspace()
+    return this.inbox.list(this.context, pagination)
+  }
+
+  update(publicId: string, input: Omit<Partial<CreateInboxInput>, 'content' | 'tag_names'>): InboxItem | null {
+    this.assertWorkspace()
+    this.assertProject(input.project_id ?? null)
+    this.assertRepository(input.repository_id ?? null)
+    const suggestion = input.ai_suggestion === undefined ? undefined : this.validateSuggestion(input.ai_suggestion)
+    const update = this.database.transaction(() => {
+      const item = this.inbox.update(this.context, publicId, {
+        project_id: input.project_id,
+        repository_id: input.repository_id,
+        include_in_reports: input.include_in_reports,
+        ai_suggestion: suggestion
+      })
+      if (item) this.enqueueSync('inbox_item', item.public_id, 'update', item)
+      return item
+    })
+    return update()
+  }
+
+  ignore(publicId: string): InboxItem | null {
+    return this.setState(publicId, 'ignored')
+  }
+
+  archive(publicId: string): InboxItem | null {
+    return this.setState(publicId, 'archived')
   }
 
   confirm(publicId: string): InboxConfirmation {
@@ -139,6 +170,16 @@ export class InboxService {
       repository_id: suggestion.repository_id
     })
     return { target: 'work_log', target_public_id: row.public_id }
+  }
+
+  private setState(publicId: string, state: 'ignored' | 'archived'): InboxItem | null {
+    this.assertWorkspace()
+    const update = this.database.transaction(() => {
+      const item = this.inbox.update(this.context, publicId, { state })
+      if (item) this.enqueueSync('inbox_item', item.public_id, 'update', item)
+      return item
+    })
+    return update()
   }
 
   private createTask(item: InboxItem, suggestion: InboxSuggestion): InboxConfirmation {
