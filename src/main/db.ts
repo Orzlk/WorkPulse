@@ -5,6 +5,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'node:crypto'
 
 import { backupDatabase, getDatabaseVersion, initializeDatabase, runMigrations } from './database/connection'
+import type { WorkspaceContext } from './repositories/contracts'
 
 let db: Database.Database
 
@@ -90,6 +91,19 @@ export async function initDatabase(): Promise<void> {
 
 export function getDatabase(): Database.Database {
   return db
+}
+
+export function getDefaultWorkspaceContext(): WorkspaceContext {
+  const context = db.prepare(`
+    SELECT workspaces.id AS workspace_id, users.id AS user_id
+    FROM workspaces
+    INNER JOIN users ON users.workspace_id = workspaces.id
+    WHERE workspaces.deleted_at IS NULL AND users.deleted_at IS NULL
+    ORDER BY workspaces.id, users.id
+    LIMIT 1
+  `).get() as WorkspaceContext | undefined
+  if (!context) throw new Error('Default local workspace is not initialized')
+  return context
 }
 
 // --- Work Logs CRUD ---

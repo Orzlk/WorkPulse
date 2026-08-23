@@ -57,7 +57,7 @@ describe('SQLite migrations', () => {
       .all() as Array<{ name: string }>
     const tableNames = tables.map((table) => table.name)
 
-    expect(getDatabaseVersion(database)).toBe(6)
+    expect(getDatabaseVersion(database)).toBe(7)
     expect(tableNames).toEqual(expect.arrayContaining([
       'schema_migrations',
       'workspaces',
@@ -131,7 +131,7 @@ describe('SQLite migrations', () => {
     const database = openDatabase(databasePath)
     runMigrations(database, { now: () => new Date('2026-08-23T12:34:56.000Z') })
 
-    expect(getDatabaseVersion(database)).toBe(6)
+    expect(getDatabaseVersion(database)).toBe(7)
     expect(database.prepare('SELECT id, title FROM tasks').all()).toEqual([{ id: 1, title: '保留的旧任务' }])
     expect(database.prepare('SELECT id, content, task_id FROM work_logs').all()).toEqual([
       { id: 1, content: '保留的旧日志', task_id: 1 }
@@ -315,7 +315,7 @@ describe('legacy CRUD identity defaults', () => {
 
     const backups = readdirSync(backupDirectory).filter((name) => name.startsWith('workpulse-'))
     expect(backups).toHaveLength(2)
-    expect(backups.some((name) => name.includes('-v6-') && name.includes('T'))).toBe(true)
+    expect(backups.some((name) => name.includes('-v7-') && name.includes('T'))).toBe(true)
     getDatabase().close()
   })
 })

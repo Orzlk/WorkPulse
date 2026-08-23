@@ -447,6 +447,28 @@ const migrations: SchemaMigration[] = [
         CREATE INDEX IF NOT EXISTS idx_sync_operations_pending ON sync_operations(workspace_id, completed_at, created_at);
       `)
     }
+  },
+  {
+    version: 7,
+    name: '007_project_inbox_contract',
+    up: (database) => {
+      addColumnIfMissing(database, 'projects', 'color', "TEXT NOT NULL DEFAULT '#64748b'")
+      addColumnIfMissing(database, 'inbox_items', 'state', "TEXT NOT NULL DEFAULT 'unorganized' CHECK(state IN ('unorganized', 'confirmed', 'ignored', 'archived'))")
+      addColumnIfMissing(database, 'inbox_items', 'include_in_reports', 'INTEGER NOT NULL DEFAULT 1 CHECK(include_in_reports IN (0, 1))')
+      addColumnIfMissing(database, 'inbox_items', 'ai_suggestion', 'TEXT')
+      database.exec(`
+        UPDATE inbox_items
+        SET state = CASE status
+          WHEN 'organized' THEN 'confirmed'
+          WHEN 'archived' THEN 'archived'
+          ELSE 'unorganized'
+        END
+        WHERE state IS NULL OR state = 'unorganized';
+        CREATE INDEX IF NOT EXISTS idx_projects_workspace_active ON projects(workspace_id, deleted_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_inbox_items_workspace_active ON inbox_items(workspace_id, deleted_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tags_workspace_active_path ON tags(workspace_id, deleted_at, path);
+      `)
+    }
   }
 ]
 
