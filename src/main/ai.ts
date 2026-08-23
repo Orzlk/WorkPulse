@@ -1,6 +1,15 @@
 import { getSetting } from './db'
 import { getStoredApiKey } from './secureSettings'
 import { getResolvedLanguage, tMain } from './i18n'
+import type { ReportPeriod, ReportType } from './lib/period'
+import type { ReportSourceSnapshot } from './reports/reportTypes'
+import {
+  generatePeriodReportContent as generatePurePeriodReportContent,
+  type PeriodReportOptions,
+  type PeriodReportProvider
+} from './reports/periodReportAi'
+
+export type { PeriodReportOptions, PeriodReportProvider } from './reports/periodReportAi'
 
 interface Message {
   role: 'system' | 'user' | 'assistant'
@@ -109,6 +118,30 @@ export async function generateReport(
   return callOpenAI(apiKey, baseUrl, model, messages)
 }
 
+export async function generatePeriodReportContent(
+  snapshot: Pick<ReportSourceSnapshot, 'schema_version' | 'projects'> & Partial<Pick<ReportSourceSnapshot, 'period'>>,
+  reportType: ReportType,
+  period: ReportPeriod,
+  options: Partial<PeriodReportOptions> = {}
+): Promise<string> {
+  const provider: PeriodReportProvider = options.provider ?? ((input) =>
+    callConfiguredPeriodProvider(input.systemPrompt, input.userPrompt, input.signal)
+  )
+  return generatePurePeriodReportContent(snapshot, reportType, period, { provider, timeoutMs: options.timeoutMs })
+}
+
+async function callConfiguredPeriodProvider(systemPrompt: string, userPrompt: string, signal: AbortSignal): Promise<string> {
+  const apiKey = getStoredApiKey()
+  if (!apiKey) throw new Error(tMain('apiKeyMissing'))
+  const provider = getSetting('ai_provider') || 'openai'
+  const baseUrl = getSetting('ai_base_url') || ''
+  const model = getSetting('ai_model') || ''
+  const messages: Message[] = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
+  if (provider === 'anthropic') return callAnthropic(apiKey, baseUrl, model, messages, signal)
+  if (provider === 'deepseek') return callDeepSeek(apiKey, baseUrl, model, messages, signal)
+  return callOpenAI(apiKey, baseUrl, model, messages, signal)
+}
+
 function replaceVars(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '')
 }
@@ -142,7 +175,8 @@ async function callOpenAI(
   apiKey: string,
   baseUrl: string,
   model: string,
-  messages: Message[]
+  messages: Message[],
+  signal?: AbortSignal
 ): Promise<string> {
   const url = baseUrl
     ? `${baseUrl.replace(/\/+$/, '')}/chat/completions`
@@ -159,7 +193,8 @@ async function callOpenAI(
       messages,
       temperature: 0.7,
       max_tokens: 2000
-    })
+    }),
+    signal
   })
 
   if (!response.ok) {
@@ -175,7 +210,8 @@ async function callAnthropic(
   apiKey: string,
   baseUrl: string,
   model: string,
-  messages: Message[]
+  messages: Message[],
+  signal?: AbortSignal
 ): Promise<string> {
   const systemMsg = messages.find((m) => m.role === 'system')
   const userMsg = messages.find((m) => m.role === 'user')
@@ -196,7 +232,8 @@ async function callAnthropic(
       max_tokens: 2000,
       system: systemMsg?.content || '',
       messages: [{ role: 'user', content: userMsg?.content || '' }]
-    })
+    }),
+    signal
   })
 
   if (!response.ok) {
@@ -212,7 +249,8 @@ async function callDeepSeek(
   apiKey: string,
   baseUrl: string,
   model: string,
-  messages: Message[]
+  messages: Message[],
+  signal?: AbortSignal
 ): Promise<string> {
   const url = baseUrl
     ? `${baseUrl.replace(/\/+$/, '')}/chat/completions`
@@ -229,7 +267,8 @@ async function callDeepSeek(
       messages,
       temperature: 0.7,
       max_tokens: 2000
-    })
+    }),
+    signal
   })
 
   if (!response.ok) {

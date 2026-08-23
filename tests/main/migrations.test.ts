@@ -57,7 +57,7 @@ describe('SQLite migrations', () => {
       .all() as Array<{ name: string }>
     const tableNames = tables.map((table) => table.name)
 
-    expect(getDatabaseVersion(database)).toBe(8)
+    expect(getDatabaseVersion(database)).toBe(9)
     expect(tableNames).toEqual(expect.arrayContaining([
       'schema_migrations',
       'workspaces',
@@ -143,7 +143,7 @@ describe('SQLite migrations', () => {
     const database = openDatabase(databasePath)
     runMigrations(database, { now: () => new Date('2026-08-23T12:34:56.000Z') })
 
-    expect(getDatabaseVersion(database)).toBe(8)
+    expect(getDatabaseVersion(database)).toBe(9)
     expect(database.prepare('SELECT id, title FROM tasks').all()).toEqual([{ id: 1, title: '保留的旧任务' }])
     expect(database.prepare('SELECT id, content, task_id FROM work_logs').all()).toEqual([
       { id: 1, content: '保留的旧日志', task_id: 1 }
@@ -183,7 +183,7 @@ describe('SQLite migrations', () => {
     const before = database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()
 
     runMigrations(database)
-    expect(getDatabaseVersion(database)).toBe(8)
+    expect(getDatabaseVersion(database)).toBe(9)
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual(before)
     expect(database.prepare('SELECT title FROM tasks').all()).toEqual([{ title: '不应重复的数据' }])
@@ -401,13 +401,15 @@ describe('SQLite migrations', () => {
 
     runMigrations(database)
 
-    expect(getDatabaseVersion(database)).toBe(8)
+    expect(getDatabaseVersion(database)).toBe(9)
     expect(database.prepare('SELECT project_id, enabled, last_scanned_at FROM repositories WHERE id = 1').get())
       .toEqual({ project_id: null, enabled: 1, last_scanned_at: null })
     expect(database.prepare('SELECT workspace_id, created_by, updated_by FROM repository_bindings WHERE id = 1').get())
       .toEqual({ workspace_id: 1, created_by: 1, updated_by: 1 })
     expect(database.prepare('SELECT created_by, updated_by, deleted_at FROM git_commits WHERE id = 1').get())
       .toEqual({ created_by: 1, updated_by: 1, deleted_at: null })
+    expect(database.prepare('SELECT timezone, project_scope, repository_scope, source_snapshot, version, status, retry_count FROM reports').all())
+      .toEqual([])
     database.close()
   })
 
@@ -549,7 +551,7 @@ describe('legacy CRUD identity defaults', () => {
 
     const backups = readdirSync(backupDirectory).filter((name) => name.startsWith('workpulse-'))
     expect(backups).toHaveLength(2)
-    expect(backups.some((name) => name.includes('-v8-') && name.includes('T'))).toBe(true)
+    expect(backups.some((name) => name.includes('-v9-') && name.includes('T'))).toBe(true)
     getDatabase().close()
   })
 })

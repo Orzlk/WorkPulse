@@ -529,6 +529,32 @@ const migrations: SchemaMigration[] = [
           ON git_commits(workspace_id, committed_at DESC);
       `)
     }
+  },
+  {
+    version: 9,
+    name: '009_report_snapshots',
+    up: (database) => {
+      addColumnIfMissing(database, 'reports', 'timezone', 'TEXT')
+      addColumnIfMissing(database, 'reports', 'project_scope', "TEXT NOT NULL DEFAULT '[]'")
+      addColumnIfMissing(database, 'reports', 'repository_scope', "TEXT NOT NULL DEFAULT '[]'")
+      addColumnIfMissing(database, 'reports', 'source_snapshot', "TEXT NOT NULL DEFAULT '{}'")
+      addColumnIfMissing(database, 'reports', 'version', 'INTEGER NOT NULL DEFAULT 1')
+      addColumnIfMissing(database, 'reports', 'status', "TEXT NOT NULL DEFAULT 'ready' CHECK(status IN ('generating', 'ready', 'error'))")
+      addColumnIfMissing(database, 'reports', 'error_message', 'TEXT')
+      addColumnIfMissing(database, 'reports', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
+      database.exec(`
+        UPDATE reports
+        SET timezone = COALESCE(timezone, time_zone, 'UTC'),
+            project_scope = COALESCE(project_scope, '[]'),
+            repository_scope = COALESCE(repository_scope, '[]'),
+            source_snapshot = COALESCE(source_snapshot, '{}'),
+            version = COALESCE(version, 1),
+            status = COALESCE(status, 'ready'),
+            retry_count = COALESCE(retry_count, 0);
+        CREATE INDEX IF NOT EXISTS idx_reports_workspace_period_version
+          ON reports(workspace_id, deleted_at, type, period_start, period_end_exclusive, version DESC);
+      `)
+    }
   }
 ]
 
