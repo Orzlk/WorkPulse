@@ -1,10 +1,27 @@
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { backupDatabase, getDatabaseVersion, openDatabase, runMigrations } from '../../src/main/database/connection'
+
+let electronUserDataPath = ''
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => electronUserDataPath
+  }
+}))
+
+import {
+  addTask,
+  addWorkLog,
+  getDatabase,
+  initDatabase,
+  saveReport,
+  setSetting
+} from '../../src/main/db'
 
 const temporaryDirectories: string[] = []
 
@@ -102,6 +119,12 @@ describe('SQLite migrations', () => {
     legacyDatabase
       .prepare('INSERT INTO work_logs (content, created_at, task_id) VALUES (?, ?, ?)')
       .run('保留的旧日志', '2026-08-01 09:30:00', 1)
+    legacyDatabase
+      .prepare('INSERT INTO reports (type, date_from, date_to, content, generated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('monthly', '2026-08-01', '2026-08-31', '保留的旧报告', '2026-08-01 10:00:00')
+    legacyDatabase
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+      .run('保留的旧设置', '旧值')
     legacyDatabase.close()
 
     const database = openDatabase(databasePath)
@@ -121,6 +144,18 @@ describe('SQLite migrations', () => {
       }))
     expect(database.prepare("SELECT value FROM settings WHERE key = 'migration.timezone'").get())
       .toEqual({ value: expect.any(String) })
+    const report = database.prepare('SELECT created_at, updated_at, public_id, workspace_id, created_by, updated_by FROM reports WHERE id = 1').get() as Record<string, unknown>
+    const setting = database.prepare('SELECT created_at, updated_at, public_id, workspace_id, created_by, updated_by FROM settings WHERE key = ?').get('保留的旧设置') as Record<string, unknown>
+    for (const row of [report, setting]) {
+      expect(row.public_id).toEqual(expect.any(String))
+      expect(row.workspace_id).toEqual(expect.any(Number))
+      expect(row.created_by).toEqual(expect.any(Number))
+      expect(row.updated_by).toEqual(expect.any(Number))
+      expect(row.created_at).toEqual(expect.stringMatching(/Z$/))
+      expect(row.updated_at).toEqual(expect.stringMatching(/Z$/))
+      expect(Number.isNaN(Date.parse(row.created_at as string))).toBe(false)
+      expect(Number.isNaN(Date.parse(row.updated_at as string))).toBe(false)
+    }
     database.close()
   })
 
@@ -165,5 +200,69 @@ describe('SQLite backup', () => {
     expect(backup.prepare('SELECT content FROM work_logs').all()).toEqual([{ content: 'WAL 中的记录' }])
     backup.close()
     source.close()
+  })
+
+  it('cleans the temporary backup when backup integrity validation fails', async () => {
+    const backupDirectory = createTemporaryPath('invalid-backup')
+    const targetPath = join(backupDirectory, 'workpulse.db')
+    const invalidSource = {
+      backup: async (temporaryPath: string) => {
+        writeFileSync(temporaryPath, 'not a sqlite database')
+      }
+    } as unknown as Database.Database
+
+    await expect(backupDatabase(invalidSource, targetPath)).rejects.toThrow()
+
+    expect(existsSync(targetPath)).toBe(false)
+    expect(readdirSync(backupDirectory).filter((name) => name.includes('.workpulse.db.tmp-'))).toEqual([])
+  })
+})
+
+describe('legacy CRUD identity defaults', () => {
+  it('fills sync identity and UTC audit fields when old CRUD creates rows after migration', async () => {
+    electronUserDataPath = createTemporaryPath('crud-user-data')
+    await initDatabase()
+
+    const log = addWorkLog('新日志')
+    const task = addTask('新任务')
+    const report = saveReport('monthly', '2026-08-01', '2026-08-31', '新报告')
+    setSetting('新设置', '新值')
+
+    const database = getDatabase()
+    const rows = [
+      database.prepare('SELECT public_id, workspace_id, created_by, updated_by, created_at, updated_at FROM work_logs WHERE id = ?').get(log.id),
+      database.prepare('SELECT public_id, workspace_id, created_by, updated_by, created_at, updated_at FROM tasks WHERE id = ?').get(task.id),
+      database.prepare('SELECT public_id, workspace_id, created_by, updated_by, created_at, updated_at FROM reports WHERE id = ?').get(report.id),
+      database.prepare('SELECT public_id, workspace_id, created_by, updated_by, created_at, updated_at FROM settings WHERE key = ?').get('新设置')
+    ] as Array<Record<string, unknown>>
+
+    for (const row of rows) {
+      expect(row.public_id).toEqual(expect.any(String))
+      expect(row.workspace_id).toEqual(expect.any(Number))
+      expect(row.created_by).toEqual(expect.any(Number))
+      expect(row.updated_by).toEqual(expect.any(Number))
+      expect(row.created_at).toEqual(expect.stringMatching(/Z$/))
+      expect(row.updated_at).toEqual(expect.stringMatching(/Z$/))
+      expect(Number.isNaN(Date.parse(row.created_at as string))).toBe(false)
+      expect(Number.isNaN(Date.parse(row.updated_at as string))).toBe(false)
+    }
+    database.close()
+  })
+
+  it('creates a fresh migration backup even when the daily backup file already exists', async () => {
+    electronUserDataPath = createTemporaryPath('backup-user-data')
+    await initDatabase()
+    getDatabase().close()
+
+    const backupDirectory = join(electronUserDataPath, 'backups')
+    mkdirSync(backupDirectory, { recursive: true })
+    writeFileSync(join(backupDirectory, 'workpulse-2026-08-23.db'), 'old daily backup')
+
+    await initDatabase()
+
+    const backups = readdirSync(backupDirectory).filter((name) => name.startsWith('workpulse-'))
+    expect(backups).toHaveLength(2)
+    expect(backups.some((name) => name.includes('-v6-') && name.includes('T'))).toBe(true)
+    getDatabase().close()
   })
 })

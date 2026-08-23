@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 
 import { getDatabaseVersion, runMigrations } from './migrations'
 
@@ -28,15 +29,28 @@ export async function backupDatabase(
     mkdirSync(directory, { recursive: true })
   }
 
-  await database.backup(targetPath)
-
-  const backup = new Database(targetPath, { readonly: true })
+  const temporaryPath = join(
+    directory,
+    `.${basename(targetPath)}.tmp-${Date.now()}-${randomUUID()}`
+  )
   try {
-    const result = backup.pragma('integrity_check') as Array<{ integrity_check: string }>
-    if (result[0]?.integrity_check !== 'ok') {
-      throw new Error(`Backup integrity check failed: ${targetPath}`)
+    await database.backup(temporaryPath)
+
+    const backup = new Database(temporaryPath, { readonly: true })
+    try {
+      const result = backup.pragma('integrity_check') as Array<{ integrity_check: string }>
+      if (result[0]?.integrity_check !== 'ok') {
+        throw new Error(`Backup integrity check failed: ${targetPath}`)
+      }
+    } finally {
+      backup.close()
     }
-  } finally {
-    backup.close()
+
+    renameSync(temporaryPath, targetPath)
+  } catch (error) {
+    if (existsSync(temporaryPath)) {
+      rmSync(temporaryPath, { force: true })
+    }
+    throw error
   }
 }

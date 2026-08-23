@@ -2,8 +2,9 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
+import { randomUUID } from 'node:crypto'
 
-import { backupDatabase, openDatabase, runMigrations } from './database/connection'
+import { backupDatabase, getDatabaseVersion, openDatabase, runMigrations } from './database/connection'
 
 let db: Database.Database
 
@@ -21,14 +22,15 @@ function getDbPath(): string {
   return join(userDataPath, DB_NAME)
 }
 
-function getBackupPath(): string {
+function getBackupPath(migrationVersion: number): string {
   const userDataPath = app.getPath('userData')
   const backupDir = join(userDataPath, 'backups')
   if (!existsSync(backupDir)) {
     mkdirSync(backupDir, { recursive: true })
   }
   const date = formatLocalDate(new Date())
-  return join(backupDir, `workpulse-${date}.db`)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  return join(backupDir, `workpulse-${date}-v${migrationVersion}-${timestamp}-${randomUUID()}.db`)
 }
 
 function runIntegrityCheck(): boolean {
@@ -41,9 +43,38 @@ function runIntegrityCheck(): boolean {
 }
 
 async function createBackup(): Promise<void> {
-  const backupPath = getBackupPath()
-  if (!existsSync(backupPath)) {
-    await backupDatabase(db, backupPath)
+  const backupPath = getBackupPath(getDatabaseVersion(db))
+  await backupDatabase(db, backupPath)
+}
+
+interface WriteMetadata {
+  publicId: string
+  workspaceId: number
+  userId: number
+  timestamp: string
+}
+
+function getWriteMetadata(createdAt?: string): WriteMetadata {
+  const context = db.prepare(`
+    SELECT workspaces.id AS workspace_id, users.id AS user_id
+    FROM workspaces
+    INNER JOIN users ON users.workspace_id = workspaces.id
+    ORDER BY workspaces.id, users.id
+    LIMIT 1
+  `).get() as { workspace_id: number; user_id: number } | undefined
+  if (!context) {
+    throw new Error('Default local workspace is not initialized')
+  }
+
+  const parsedCreatedAt = createdAt ? new Date(createdAt) : new Date()
+  const timestamp = Number.isNaN(parsedCreatedAt.getTime())
+    ? new Date().toISOString()
+    : parsedCreatedAt.toISOString()
+  return {
+    publicId: randomUUID(),
+    workspaceId: context.workspace_id,
+    userId: context.user_id,
+    timestamp
   }
 }
 
@@ -95,17 +126,24 @@ export function addWorkLog(
   createdAt?: string
 ): WorkLog {
   const resolvedTaskId = resolveWorkLogTaskId(taskId)
-  if (createdAt) {
-    const stmt = db.prepare(
-      'INSERT INTO work_logs (content, category, task_id, created_at) VALUES (?, ?, ?, ?) RETURNING *'
-    )
-    return stmt.get(content, category, resolvedTaskId, createdAt) as WorkLog
-  }
-
+  const metadata = getWriteMetadata(createdAt)
   const stmt = db.prepare(
-    'INSERT INTO work_logs (content, category, task_id) VALUES (?, ?, ?) RETURNING *'
+    `INSERT INTO work_logs (
+      content, category, task_id, created_at, updated_at,
+      public_id, workspace_id, created_by, updated_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   )
-  return stmt.get(content, category, resolvedTaskId) as WorkLog
+  return stmt.get(
+    content,
+    category,
+    resolvedTaskId,
+    metadata.timestamp,
+    metadata.timestamp,
+    metadata.publicId,
+    metadata.workspaceId,
+    metadata.userId,
+    metadata.userId
+  ) as WorkLog
 }
 
 export function getWorkLogs(limit = 200, offset = 0): WorkLog[] {
@@ -169,10 +207,26 @@ export function saveReport(
   dateTo: string,
   content: string
 ): Report {
+  const metadata = getWriteMetadata()
   const stmt = db.prepare(
-    'INSERT INTO reports (type, date_from, date_to, content) VALUES (?, ?, ?, ?) RETURNING *'
+    `INSERT INTO reports (
+      type, date_from, date_to, content, generated_at, created_at, updated_at,
+      public_id, workspace_id, created_by, updated_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   )
-  return stmt.get(type, dateFrom, dateTo, content) as Report
+  return stmt.get(
+    type,
+    dateFrom,
+    dateTo,
+    content,
+    metadata.timestamp,
+    metadata.timestamp,
+    metadata.timestamp,
+    metadata.publicId,
+    metadata.workspaceId,
+    metadata.userId,
+    metadata.userId
+  ) as Report
 }
 
 export function getReports(limit = 50): Report[] {
@@ -181,8 +235,10 @@ export function getReports(limit = 50): Report[] {
 }
 
 export function updateReportContent(id: number, content: string): Report | null {
-  const stmt = db.prepare('UPDATE reports SET content = ? WHERE id = ? RETURNING *')
-  return stmt.get(content, id) as Report | null
+  const metadata = getWriteMetadata()
+  return db.prepare(
+    'UPDATE reports SET content = ?, updated_at = ?, updated_by = ? WHERE id = ? RETURNING *'
+  ).get(content, metadata.timestamp, metadata.userId, id) as Report | null
 }
 
 // --- Tasks CRUD ---
@@ -205,17 +261,26 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
     'SELECT COALESCE(MAX(position), -1) + 1 as next FROM tasks WHERE status = ?'
   ).get(status) as { next: number }
 
-  if (createdAt) {
-    const stmt = db.prepare(
-      'INSERT INTO tasks (title, description, status, board_column, position, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *'
-    )
-    return stmt.get(title, description, status, status, maxPos.next, createdAt) as Task
-  }
-
+  const metadata = getWriteMetadata(createdAt)
   const stmt = db.prepare(
-    'INSERT INTO tasks (title, description, status, board_column, position) VALUES (?, ?, ?, ?, ?) RETURNING *'
+    `INSERT INTO tasks (
+      title, description, status, board_column, position, created_at, updated_at,
+      public_id, workspace_id, created_by, updated_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   )
-  return stmt.get(title, description, status, status, maxPos.next) as Task
+  return stmt.get(
+    title,
+    description,
+    status,
+    status,
+    maxPos.next,
+    metadata.timestamp,
+    metadata.timestamp,
+    metadata.publicId,
+    metadata.workspaceId,
+    metadata.userId,
+    metadata.userId
+  ) as Task
 }
 
 export function getTasks(): Task[] {
@@ -256,7 +321,9 @@ export function updateTask(
     values.push(updates.due_date)
   }
 
-  fields.push("updated_at = datetime('now', 'localtime')")
+  const metadata = getWriteMetadata()
+  fields.push('updated_at = ?', 'updated_by = ?')
+  values.push(metadata.timestamp, metadata.userId)
   values.push(id)
 
   const stmt = db.prepare(
@@ -374,16 +441,19 @@ export function getCategories(): string[] {
 }
 
 export function updateWorkLogCategory(id: number, category: string): void {
-  db.prepare('UPDATE work_logs SET category = ? WHERE id = ?').run(category, id)
+  const metadata = getWriteMetadata()
+  db.prepare('UPDATE work_logs SET category = ?, updated_at = ?, updated_by = ? WHERE id = ?')
+    .run(category, metadata.timestamp, metadata.userId, id)
 }
 
 export function updateWorkLog(id: number, content: string, category: string, created_at?: string): WorkLog | null {
+  const metadata = getWriteMetadata(created_at)
   if (created_at) {
-    const stmt = db.prepare('UPDATE work_logs SET content = ?, category = ?, created_at = ? WHERE id = ? RETURNING *')
-    return stmt.get(content, category, created_at, id) as WorkLog | null
+    const stmt = db.prepare('UPDATE work_logs SET content = ?, category = ?, created_at = ?, updated_at = ?, updated_by = ? WHERE id = ? RETURNING *')
+    return stmt.get(content, category, metadata.timestamp, metadata.timestamp, metadata.userId, id) as WorkLog | null
   }
-  const stmt = db.prepare('UPDATE work_logs SET content = ?, category = ? WHERE id = ? RETURNING *')
-  return stmt.get(content, category, id) as WorkLog | null
+  const stmt = db.prepare('UPDATE work_logs SET content = ?, category = ?, updated_at = ?, updated_by = ? WHERE id = ? RETURNING *')
+  return stmt.get(content, category, metadata.timestamp, metadata.userId, id) as WorkLog | null
 }
 
 export function getSetting(key: string): string | null {
@@ -393,10 +463,26 @@ export function getSetting(key: string): string | null {
 }
 
 export function setSetting(key: string, value: string): void {
+  const metadata = getWriteMetadata()
   const stmt = db.prepare(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?'
+    `INSERT INTO settings (
+      key, value, public_id, workspace_id, created_by, updated_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_by = excluded.updated_by,
+      updated_at = excluded.updated_at`
   )
-  stmt.run(key, value, value)
+  stmt.run(
+    key,
+    value,
+    metadata.publicId,
+    metadata.workspaceId,
+    metadata.userId,
+    metadata.userId,
+    metadata.timestamp,
+    metadata.timestamp
+  )
 }
 
 export function deleteSetting(key: string): void {

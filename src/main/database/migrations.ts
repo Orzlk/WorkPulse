@@ -153,8 +153,10 @@ function addIdentityColumns(
   database: Database.Database,
   tableName: string,
   workspaceId: number,
-  userId: number
+  userId: number,
+  migrationTimestamp: string
 ): void {
+  const originalColumns = tableColumns(database, tableName)
   addColumnIfMissing(database, tableName, 'public_id', 'TEXT')
   addColumnIfMissing(database, tableName, 'workspace_id', 'INTEGER')
   addColumnIfMissing(database, tableName, 'created_by', 'INTEGER')
@@ -171,15 +173,14 @@ function addIdentityColumns(
     updatePublicId.run(randomUUID(), row.migration_rowid)
   }
 
-  const columns = tableColumns(database, tableName)
-  const updatedAtSource = columns.has('created_at')
-    ? 'created_at'
-    : columns.has('generated_at')
-      ? 'generated_at'
-      : UTC_NOW_SQL
+  const legacyTimeColumn = tableName === 'reports'
+    ? originalColumns.has('generated_at') ? 'generated_at' : undefined
+    : originalColumns.has('created_at') ? 'created_at' : undefined
+  const timeSource = legacyTimeColumn ?? '?'
+  const timeParameters = legacyTimeColumn ? [] : [migrationTimestamp]
   database
-    .prepare(`UPDATE ${tableName} SET workspace_id = ?, created_by = ?, updated_by = ?, created_at = COALESCE(created_at, ${updatedAtSource}), updated_at = COALESCE(updated_at, ${updatedAtSource}) WHERE workspace_id IS NULL OR created_by IS NULL OR updated_by IS NULL OR created_at IS NULL OR updated_at IS NULL`)
-    .run(workspaceId, userId, userId)
+    .prepare(`UPDATE ${tableName} SET workspace_id = ?, created_by = ?, updated_by = ?, created_at = COALESCE(created_at, ${timeSource}), updated_at = COALESCE(updated_at, ${timeSource}) WHERE workspace_id IS NULL OR created_by IS NULL OR updated_by IS NULL OR created_at IS NULL OR updated_at IS NULL`)
+    .run(workspaceId, userId, userId, ...timeParameters, ...timeParameters)
   database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${tableName}_public_id ON ${tableName}(public_id)`)
 }
 
@@ -212,12 +213,12 @@ function convertLegacyTimestamps(database: Database.Database, timeZone: string):
     const presentColumns = columns.filter((column) => tableColumns(database, tableName).has(column))
     for (const column of presentColumns) {
       const rows = database
-        .prepare(`SELECT rowid, ${column} AS value FROM ${tableName} WHERE ${column} IS NOT NULL`)
-        .all() as Array<{ rowid: number; value: string }>
+        .prepare(`SELECT rowid AS migration_rowid, ${column} AS value FROM ${tableName} WHERE ${column} IS NOT NULL`)
+        .all() as Array<{ migration_rowid: number; value: string }>
       const update = database.prepare(`UPDATE ${tableName} SET ${column} = ? WHERE rowid = ?`)
       for (const row of rows) {
         const converted = convertTimestamp(row.value, timeZone)
-        if (converted !== row.value) update.run(converted, row.rowid)
+        if (converted !== row.value) update.run(converted, row.migration_rowid)
       }
     }
   }
@@ -254,8 +255,9 @@ const migrations: SchemaMigration[] = [
         );
       `)
       const { workspaceId, userId } = createDefaultWorkspace(database)
+      const migrationTimestamp = new Date().toISOString()
       for (const tableName of CORE_TABLES) {
-        addIdentityColumns(database, tableName, workspaceId, userId)
+        addIdentityColumns(database, tableName, workspaceId, userId, migrationTimestamp)
       }
 
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -479,9 +481,12 @@ export function runMigrations(database: Database.Database): void {
 
   const firstMigration = migrations[0]
   if (!migrationApplied(database, firstMigration.version) && hasLegacyCoreSchema(database)) {
-    database
-      .prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ${UTC_NOW_SQL})`)
-      .run(firstMigration.version, firstMigration.name)
+    const registerBaseline = database.transaction(() => {
+      database
+        .prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ${UTC_NOW_SQL})`)
+        .run(firstMigration.version, firstMigration.name)
+    })
+    registerBaseline()
   }
 
   for (const migration of migrations) {
