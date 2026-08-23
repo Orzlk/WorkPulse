@@ -3,6 +3,25 @@ import { getReportAnchorDate } from './reportPeriod'
 export type WorkflowReportType = 'weekly' | 'monthly'
 export type ReportGenerationError = 'no_key' | 'timeout' | 'invalid_response' | 'unknown'
 
+export interface RetryReportRequest {
+  type: WorkflowReportType
+  anchorDate: string
+  timeZone: string
+  projectIds: string[]
+  repositoryIds: string[]
+}
+
+interface HistoricalReport {
+  type: string
+  display_start: string
+  timezone: string
+  project_scope: string[]
+  repository_scope: string[]
+  status: 'generating' | 'ready' | 'error'
+  error_message: string | null
+  retry_count: number
+}
+
 interface ExportableReport {
   type: string
   display_start: string
@@ -42,4 +61,40 @@ export function getReportGenerationError(error: unknown): ReportGenerationError 
   if (message.includes('timeout') || message.includes('timed out')) return 'timeout'
   if (message.includes('response is invalid') || message.includes('response content is empty')) return 'invalid_response'
   return 'unknown'
+}
+
+export function toggleReportScope(ids: string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]
+}
+
+export function getHistoryReportState(report: Pick<HistoricalReport, 'status' | 'error_message' | 'retry_count'>): {
+  status: HistoricalReport['status']
+  errorMessage: string | null
+  retryCount: number
+} {
+  return {
+    status: report.status,
+    errorMessage: report.error_message,
+    retryCount: report.retry_count
+  }
+}
+
+export function getRetryReportRequest(report: Pick<HistoricalReport, 'type' | 'display_start' | 'timezone' | 'project_scope' | 'repository_scope'>): RetryReportRequest {
+  if (report.type !== 'weekly' && report.type !== 'monthly') throw new RangeError('Invalid report type')
+  return {
+    type: report.type,
+    anchorDate: report.display_start,
+    timeZone: report.timezone,
+    projectIds: [...report.project_scope],
+    repositoryIds: [...report.repository_scope]
+  }
+}
+
+export function hasReportPreviewData(preview: {
+  work_log_count: number
+  task_count: number
+  inbox_count: number
+  git_commit_count: number
+}): boolean {
+  return preview.work_log_count + preview.task_count + preview.inbox_count + preview.git_commit_count > 0
 }

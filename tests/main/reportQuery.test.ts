@@ -211,6 +211,29 @@ describe('ReportService and period AI generation', () => {
     database.close()
   })
 
+  it('creates a new version when retrying an error without overwriting the failed history', async () => {
+    const database = createDatabase()
+    let attempts = 0
+    const service = new ReportService(database, context(database), {
+      generateContent: async () => {
+        attempts++
+        if (attempts === 1) throw new Error('temporary provider failure')
+        return '# 周报\n\n重试成功。'
+      }
+    })
+
+    await expect(service.generate(request())).rejects.toThrow('temporary provider failure')
+    const retry = await service.generate(request())
+    const rows = database.prepare('SELECT version, status, content FROM reports ORDER BY version').all() as Array<{ version: number; status: string; content: string }>
+
+    expect(retry.version).toBe(2)
+    expect(rows).toEqual([
+      { version: 1, status: 'error', content: '' },
+      { version: 2, status: 'ready', content: '# 周报\n\n重试成功。' }
+    ])
+    database.close()
+  })
+
   it('reads an old report as an explicitly unavailable legacy snapshot', () => {
     const database = createDatabase()
     const { workspace_id, user_id } = context(database)
