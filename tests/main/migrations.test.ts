@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { backupDatabase, getDatabaseVersion, openDatabase, runMigrations } from '../../src/main/database/connection'
+import { backupDatabase, getDatabaseVersion, initializeDatabase, openDatabase, runMigrations } from '../../src/main/database/connection'
 
 let electronUserDataPath = ''
 
@@ -19,6 +19,7 @@ import {
   addWorkLog,
   getDatabase,
   initDatabase,
+  reorderTasks,
   saveReport,
   setSetting
 } from '../../src/main/db'
@@ -121,7 +122,7 @@ describe('SQLite migrations', () => {
       .run('保留的旧日志', '2026-08-01 09:30:00', 1)
     legacyDatabase
       .prepare('INSERT INTO reports (type, date_from, date_to, content, generated_at) VALUES (?, ?, ?, ?, ?)')
-      .run('monthly', '2026-08-01', '2026-08-31', '保留的旧报告', '2026-08-01 10:00:00')
+      .run('monthly', '2026-08-01', '2026-08-31', '保留的旧报告', '2026-08-01T10:00:00-07:00')
     legacyDatabase
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
       .run('保留的旧设置', '旧值')
@@ -156,6 +157,9 @@ describe('SQLite migrations', () => {
       expect(Number.isNaN(Date.parse(row.created_at as string))).toBe(false)
       expect(Number.isNaN(Date.parse(row.updated_at as string))).toBe(false)
     }
+    expect(report.created_at).toBe('2026-08-01T17:00:00.000Z')
+    expect(report.updated_at).toBe('2026-08-01T17:00:00.000Z')
+    expect(setting.created_at).toBe(setting.updated_at)
     database.close()
   })
 
@@ -216,6 +220,28 @@ describe('SQLite backup', () => {
     expect(existsSync(targetPath)).toBe(false)
     expect(readdirSync(backupDirectory).filter((name) => name.includes('.workpulse.db.tmp-'))).toEqual([])
   })
+
+  it('does not migrate when the startup backup fails', async () => {
+    const databasePath = createTemporaryPath('startup-failure/workpulse.db')
+    const source = openDatabase(databasePath)
+    source.close()
+
+    let migrateCalled = false
+    await expect(initializeDatabase(
+      databasePath,
+      async () => {
+        throw new Error('backup failed')
+      },
+      () => {
+        migrateCalled = true
+      }
+    )).rejects.toThrow('backup failed')
+
+    const reopened = new Database(databasePath)
+    expect(migrateCalled).toBe(false)
+    expect(getDatabaseVersion(reopened)).toBe(0)
+    reopened.close()
+  })
 })
 
 describe('legacy CRUD identity defaults', () => {
@@ -246,6 +272,31 @@ describe('legacy CRUD identity defaults', () => {
       expect(Number.isNaN(Date.parse(row.created_at as string))).toBe(false)
       expect(Number.isNaN(Date.parse(row.updated_at as string))).toBe(false)
     }
+    database.close()
+  })
+
+  it('writes UTC audit fields and updated_by when tasks are reordered and completed', async () => {
+    electronUserDataPath = createTemporaryPath('reorder-user-data')
+    await initDatabase()
+
+    const task = addTask('待完成任务')
+    const database = getDatabase()
+    database.prepare('UPDATE tasks SET updated_by = ? WHERE id = ?').run(999, task.id)
+
+    reorderTasks([task.id], 'done')
+
+    const row = database.prepare('SELECT status, updated_at, updated_by, completed_at FROM tasks WHERE id = ?').get(task.id) as {
+      status: string
+      updated_at: string
+      updated_by: number
+      completed_at: string
+    }
+    const localUser = database.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number }
+    expect(row.status).toBe('done')
+    expect(row.updated_by).toBe(localUser.id)
+    expect(row.updated_by).not.toBe(999)
+    expect(row.updated_at).toEqual(expect.stringMatching(/Z$/))
+    expect(row.completed_at).toBe(row.updated_at)
     database.close()
   })
 

@@ -4,7 +4,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'node:crypto'
 
-import { backupDatabase, getDatabaseVersion, openDatabase, runMigrations } from './database/connection'
+import { backupDatabase, getDatabaseVersion, initializeDatabase, runMigrations } from './database/connection'
 
 let db: Database.Database
 
@@ -42,11 +42,6 @@ function runIntegrityCheck(): boolean {
   }
 }
 
-async function createBackup(): Promise<void> {
-  const backupPath = getBackupPath(getDatabaseVersion(db))
-  await backupDatabase(db, backupPath)
-}
-
 interface WriteMetadata {
   publicId: string
   workspaceId: number
@@ -80,19 +75,13 @@ function getWriteMetadata(createdAt?: string): WriteMetadata {
 
 export async function initDatabase(): Promise<void> {
   const dbPath = getDbPath()
-  const existedBeforeStartup = existsSync(dbPath)
-  db = openDatabase(dbPath)
-
-  if (existedBeforeStartup) {
-    try {
-      await createBackup()
-    } catch (error) {
-      console.error('Database backup failed before migration', error)
-      throw error
-    }
-  }
-
-  runMigrations(db)
+  db = await initializeDatabase(
+    dbPath,
+    async (database) => {
+      await backupDatabase(database, getBackupPath(getDatabaseVersion(database)))
+    },
+    (database) => runMigrations(database)
+  )
 
   if (!runIntegrityCheck()) {
     throw new Error('Database integrity check failed')
@@ -294,6 +283,7 @@ export function updateTask(
 ): Task | null {
   const fields: string[] = []
   const values: unknown[] = []
+  const metadata = getWriteMetadata()
 
   if (updates.title !== undefined) {
     fields.push('title = ?')
@@ -307,7 +297,8 @@ export function updateTask(
     fields.push('status = ?', 'board_column = ?')
     values.push(updates.status, updates.status)
     if (updates.status === 'done') {
-      fields.push("completed_at = datetime('now', 'localtime')")
+      fields.push('completed_at = ?')
+      values.push(metadata.timestamp)
     } else {
       fields.push('completed_at = NULL')
     }
@@ -321,7 +312,6 @@ export function updateTask(
     values.push(updates.due_date)
   }
 
-  const metadata = getWriteMetadata()
   fields.push('updated_at = ?', 'updated_by = ?')
   values.push(metadata.timestamp, metadata.userId)
   values.push(id)
@@ -338,15 +328,17 @@ export function deleteTask(id: number): boolean {
 }
 
 export function reorderTasks(taskIds: number[], status: string): void {
+  const metadata = getWriteMetadata()
   const stmt = db.prepare(`
     UPDATE tasks
     SET
       position = ?,
       board_column = ?,
       status = ?,
-      updated_at = datetime('now', 'localtime'),
+      updated_at = ?,
+      updated_by = ?,
       completed_at = CASE
-        WHEN ? = 'done' AND completed_at IS NULL THEN datetime('now', 'localtime')
+        WHEN ? = 'done' AND completed_at IS NULL THEN ?
         WHEN ? != 'done' THEN NULL
         ELSE completed_at
       END
@@ -354,7 +346,17 @@ export function reorderTasks(taskIds: number[], status: string): void {
   `)
   const tx = db.transaction((ids: number[]) => {
     ids.forEach((id, index) => {
-      stmt.run(index, status, status, status, status, id)
+      stmt.run(
+        index,
+        status,
+        status,
+        metadata.timestamp,
+        metadata.userId,
+        status,
+        metadata.timestamp,
+        status,
+        id
+      )
     })
   })
   tx(taskIds)

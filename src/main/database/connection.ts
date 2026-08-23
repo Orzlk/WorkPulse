@@ -7,6 +7,26 @@ import { getDatabaseVersion, runMigrations } from './migrations'
 
 export { getDatabaseVersion, runMigrations }
 
+export async function initializeDatabase(
+  path: string,
+  backup: (database: Database.Database) => Promise<void>,
+  migrate: (database: Database.Database) => void
+): Promise<Database.Database> {
+  const existedBeforeStartup = existsSync(path)
+  const database = openDatabase(path)
+
+  try {
+    if (existedBeforeStartup) {
+      await backup(database)
+    }
+    migrate(database)
+    return database
+  } catch (error) {
+    database.close()
+    throw error
+  }
+}
+
 export function openDatabase(path: string): Database.Database {
   const directory = dirname(path)
   if (!existsSync(directory)) {
