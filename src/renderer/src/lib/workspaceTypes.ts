@@ -11,6 +11,31 @@ export interface Project {
   description: string
   color: string
   archived_at: string | null
+  summary: {
+    work_logs: number
+    tasks: number
+    git_commits: number
+    reports: number
+  }
+}
+
+export interface WorkItemAssociations {
+  project_id?: string | null
+  repository_id?: string | null
+  tag_names?: string[]
+}
+
+export interface SearchResult {
+  source: 'inbox' | 'work_log' | 'task' | 'git_commit' | 'report'
+  public_id: string
+  title: string
+  excerpt: string
+  project_id: string | null
+  project_name: string | null
+  repository_id: string | null
+  repository_name: string | null
+  tags: string[]
+  time: string
 }
 
 export interface Repository {

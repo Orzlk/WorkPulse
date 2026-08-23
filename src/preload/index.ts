@@ -23,6 +23,7 @@ interface AppUpdateState {
 
 interface Task {
   id: number
+  public_id: string
   title: string
   description: string
   status: 'todo' | 'in_progress' | 'done' | 'draft'
@@ -32,6 +33,15 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
+}
+
+interface WorkItemAssociations {
+  project_id?: string | null
+  repository_id?: string | null
+  tag_names?: string[]
 }
 
 interface Page<T> {
@@ -45,6 +55,20 @@ interface Project {
   description: string
   color: string
   archived_at: string | null
+  summary: { work_logs: number; tasks: number; git_commits: number; reports: number }
+}
+
+interface SearchResult {
+  source: 'inbox' | 'work_log' | 'task' | 'git_commit' | 'report'
+  public_id: string
+  title: string
+  excerpt: string
+  project_id: string | null
+  project_name: string | null
+  repository_id: string | null
+  repository_name: string | null
+  tags: string[]
+  time: string
 }
 
 interface InboxSuggestion {
@@ -127,8 +151,8 @@ const api = {
     openBackupDir: () => ipcRenderer.invoke('app:open-backup-dir') as Promise<string>
   },
   worklog: {
-    add: (content: string, category?: string) =>
-      ipcRenderer.invoke('worklog:add', content, category),
+    add: (content: string, category?: string, associations?: WorkItemAssociations) =>
+      ipcRenderer.invoke('worklog:add', content, category, associations),
     list: (limit?: number, offset?: number) =>
       ipcRenderer.invoke('worklog:list', limit, offset),
     byDateRange: (from: string, to: string) =>
@@ -137,17 +161,17 @@ const api = {
     categories: () => ipcRenderer.invoke('worklog:categories') as Promise<string[]>,
     setCategory: (id: number, category: string) =>
       ipcRenderer.invoke('worklog:setCategory', id, category),
-    update: (id: number, content: string, category: string, created_at?: string) =>
-      ipcRenderer.invoke('worklog:update', id, content, category, created_at),
+    update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) =>
+      ipcRenderer.invoke('worklog:update', id, content, category, created_at, associations),
     delete: (id: number) => ipcRenderer.invoke('worklog:delete', id),
     restore: (log: { content: string; category: string; created_at: string; task_id: number | null }) =>
       ipcRenderer.invoke('worklog:restore', log)
   },
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string) =>
-      ipcRenderer.invoke('task:add', title, description, status, createdAt),
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) =>
+      ipcRenderer.invoke('task:add', title, description, status, createdAt, associations),
     list: () => ipcRenderer.invoke('task:list'),
-    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>>) =>
+    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) =>
       ipcRenderer.invoke('task:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('task:delete', id),
     reorder: (taskIds: number[], status: string) =>
@@ -170,8 +194,8 @@ const api = {
   },
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('project:list', pagination) as Promise<Page<Project>>,
-    create: (input: Omit<Project, 'public_id' | 'archived_at'>) => ipcRenderer.invoke('project:create', input) as Promise<Project>,
-    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>) => ipcRenderer.invoke('project:update', publicId, input) as Promise<Project | null>,
+    create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => ipcRenderer.invoke('project:create', input) as Promise<Project>,
+    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at' | 'summary'>>) => ipcRenderer.invoke('project:update', publicId, input) as Promise<Project | null>,
     archive: (publicId: string) => ipcRenderer.invoke('project:archive', publicId) as Promise<Project | null>
   },
   inbox: {
@@ -189,7 +213,7 @@ const api = {
     search: (query: string, pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('tag:search', query, pagination) as Promise<Page<Tag>>
   },
   search: {
-    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => ipcRenderer.invoke('search:query', input) as Promise<Page<InboxItem>>
+    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => ipcRenderer.invoke('search:query', input) as Promise<Page<SearchResult>>
   },
   repository: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,

@@ -3,6 +3,7 @@ import { mergePage } from '../lib/workspaceInteractions'
 import type { AsyncStatus, Repository } from '../lib/workspaceTypes'
 
 const PAGE_SIZE = 40
+let fetchPromise: Promise<void> | null = null
 
 interface RepositoryStore {
   items: Repository[]
@@ -20,13 +21,17 @@ interface RepositoryStore {
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   items: [], total: 0, status: 'idle', error: null,
   fetch: async () => {
-    set({ status: 'running', error: null })
-    try {
-      const page = await window.api.repository.list({ limit: PAGE_SIZE, offset: 0 })
-      set({ items: page.items, total: page.total, status: 'success' })
-    } catch (error) {
-      set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load repositories' })
-    }
+    if (fetchPromise) return fetchPromise
+    fetchPromise = (async () => {
+      set({ status: 'running', error: null })
+      try {
+        const page = await window.api.repository.list({ limit: PAGE_SIZE, offset: 0 })
+        set({ items: page.items, total: page.total, status: 'success' })
+      } catch (error) {
+        set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load repositories' })
+      }
+    })()
+    try { await fetchPromise } finally { fetchPromise = null }
   },
   loadMore: async () => {
     const state = get()

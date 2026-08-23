@@ -24,6 +24,10 @@ import { Plus, Trash2, GripVertical, Archive, ChevronRight, ChevronLeft, Calenda
 import { useTaskStore } from '../stores/taskStore'
 import { useToast } from '../components/Toast'
 import { useI18n } from '../stores/languageStore'
+import { useProjectStore } from '../stores/projectStore'
+import { useRepositoryStore } from '../stores/repositoryStore'
+import { extractHashTags } from '../lib/workspaceInteractions'
+import type { WorkItemAssociations } from '../lib/workspaceTypes'
 
 interface Task {
   id: number
@@ -32,6 +36,9 @@ interface Task {
   status: 'todo' | 'in_progress' | 'done' | 'draft'
   position: number
   due_date: string | null
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
 }
 
 type ColumnId = 'todo' | 'in_progress' | 'done'
@@ -140,13 +147,17 @@ function SortableTaskCard({
   onDelete,
   onSetDue,
   onUpdate,
-  onMove
+  onMove,
+  projects,
+  repositories
 }: {
   task: Task
   onDelete: (id: number) => void
   onSetDue?: (id: number, date: string | null) => void
-  onUpdate?: (id: number, updates: { title?: string; description?: string }) => void
+  onUpdate?: (id: number, updates: { title?: string; description?: string } & WorkItemAssociations) => void
   onMove?: (id: number, status: DroppableId) => void
+  projects: { public_id: string; name: string }[]
+  repositories: { public_id: string; name: string }[]
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id })
@@ -154,6 +165,9 @@ function SortableTaskCard({
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState(task.title)
   const [editDesc, setEditDesc] = useState(task.description)
+  const [editProjectId, setEditProjectId] = useState(task.project_id ?? '')
+  const [editRepositoryId, setEditRepositoryId] = useState(task.repository_id ?? '')
+  const [editTags, setEditTags] = useState(task.tag_names.map((tag) => `#${tag}`).join(' '))
   const titleInputRef = useRef<HTMLInputElement>(null)
   const { t } = useI18n()
 
@@ -176,6 +190,9 @@ function SortableTaskCard({
     if (!canEdit) return
     setEditTitle(task.title)
     setEditDesc(task.description)
+    setEditProjectId(task.project_id ?? '')
+    setEditRepositoryId(task.repository_id ?? '')
+    setEditTags(task.tag_names.map((tag) => `#${tag}`).join(' '))
     setEditing(true)
     requestAnimationFrame(() => titleInputRef.current?.focus())
   }, [canEdit, task.title, task.description])
@@ -183,12 +200,10 @@ function SortableTaskCard({
   const saveEdit = useCallback(() => {
     const trimmedTitle = editTitle.trim()
     if (!trimmedTitle) return // don't save empty title
-    const changes: { title?: string; description?: string } = {}
+    const changes: { title?: string; description?: string } & WorkItemAssociations = { project_id: editProjectId || null, repository_id: editRepositoryId || null, tag_names: extractHashTags(editTags).tags }
     if (trimmedTitle !== task.title) changes.title = trimmedTitle
     if (editDesc.trim() !== task.description) changes.description = editDesc.trim()
-    if (Object.keys(changes).length > 0) {
-      onUpdate?.(task.id, changes)
-    }
+    onUpdate?.(task.id, changes)
     setEditing(false)
   }, [editTitle, editDesc, task, onUpdate])
 
@@ -227,6 +242,8 @@ function SortableTaskCard({
         {...attributes}
         {...listeners}
         className="mt-0.5 p-0.5 text-zinc-300 hover:text-zinc-500 cursor-grab active:cursor-grabbing shrink-0"
+        aria-label={t('kanban.dragTask')}
+        aria-pressed={isDragging}
       >
         <GripVertical className="w-4 h-4" />
       </button>
@@ -248,6 +265,12 @@ function SortableTaskCard({
               placeholder={t('kanban.descriptionPlaceholder')}
               rows={2}
             />
+            <label className="sr-only" htmlFor={`task-project-${task.id}`}>{t('workspace.project')}</label>
+            <select id={`task-project-${task.id}`} value={editProjectId} onChange={(event) => setEditProjectId(event.target.value)} className="w-full px-2 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select>
+            <label className="sr-only" htmlFor={`task-repository-${task.id}`}>{t('workspace.repository')}</label>
+            <select id={`task-repository-${task.id}`} value={editRepositoryId} onChange={(event) => setEditRepositoryId(event.target.value)} className="w-full px-2 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select>
+            <label className="sr-only" htmlFor={`task-tags-${task.id}`}>{t('workspace.tags')}</label>
+            <input id={`task-tags-${task.id}`} value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder={t('workspace.tagsPlaceholder')} className="w-full px-2 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100" />
             <div className="flex items-center gap-1">
               <button
                 onClick={saveEdit}
@@ -292,7 +315,8 @@ function SortableTaskCard({
             ) : (
               <button
                 onClick={openPicker}
-                className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-500 transition-all"
+                className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-500 transition-all"
+                aria-label={t('kanban.due')}
               >
                 <Calendar className="w-3 h-3" />
                 {t('kanban.due')}
@@ -310,7 +334,7 @@ function SortableTaskCard({
         )}
         {!editing && onMove && task.status !== 'done' && (
           <label className="kanban-move-control">
-            <span>移动到</span>
+            <span>{t('kanban.moveTo')}</span>
             <select
               value=""
               onChange={(event) => {
@@ -319,9 +343,9 @@ function SortableTaskCard({
               }}
               className="mt-2 w-full text-xs"
             >
-              <option value="">移动到…</option>
+              <option value="">{t('kanban.moveToPlaceholder')}</option>
               {ALL_DROPPABLE_IDS.filter((status) => status !== task.status).map((status) => (
-                <option key={status} value={status}>{status === 'todo' ? '待办' : status === 'in_progress' ? '进行中' : status === 'done' ? '已完成' : '草稿'}</option>
+                <option key={status} value={status}>{status === 'todo' ? t('kanban.todo') : status === 'in_progress' ? t('kanban.inProgress') : status === 'done' ? t('kanban.done') : t('kanban.drafts')}</option>
               ))}
             </select>
           </label>
@@ -332,7 +356,7 @@ function SortableTaskCard({
           {canEdit && (
             <button
               onClick={startEdit}
-              className="opacity-0 group-hover:opacity-100 p-1 text-zinc-300 hover:text-blue-500 transition-all"
+              className="p-1 text-zinc-300 hover:text-blue-500 transition-all"
               aria-label={t('kanban.editTask')}
             >
               <Pencil className="w-3.5 h-3.5" />
@@ -340,7 +364,7 @@ function SortableTaskCard({
           )}
           <button
             onClick={() => onDelete(task.id)}
-            className="opacity-0 group-hover:opacity-100 p-1 text-zinc-300 hover:text-red-500 transition-all"
+            className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 p-1 text-zinc-300 hover:text-red-500 transition-all"
             aria-label={t('kanban.deleteTask')}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -437,9 +461,16 @@ function KanbanPage(): JSX.Element {
     useTaskStore()
   const toast = useToast()
   const { t } = useI18n()
+  const projects = useProjectStore((state) => state.items)
+  const fetchProjects = useProjectStore((state) => state.fetch)
+  const repositories = useRepositoryStore((state) => state.items)
+  const fetchRepositories = useRepositoryStore((state) => state.fetch)
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskDate, setNewTaskDate] = useState('')
+  const [newProjectId, setNewProjectId] = useState('')
+  const [newRepositoryId, setNewRepositoryId] = useState('')
+  const [newTags, setNewTags] = useState('')
   const [showDescInput, setShowDescInput] = useState(false)
   const [draftInput, setDraftInput] = useState('')
   const [activeTask, setActiveTask] = useState<Task | null>(null)
@@ -451,7 +482,9 @@ function KanbanPage(): JSX.Element {
   })
 
   useEffect(() => {
-    fetchTasks()
+    void fetchTasks()
+    void fetchProjects()
+    void fetchRepositories()
   }, [])
 
   useEffect(() => {
@@ -473,10 +506,13 @@ function KanbanPage(): JSX.Element {
   const handleAddTask = async (): Promise<void> => {
     if (!newTaskTitle.trim()) return
     const createdAt = newTaskDate ? `${newTaskDate} ${new Date().toTimeString().slice(0, 8)}` : undefined
-    await addTask(newTaskTitle.trim(), newTaskDesc.trim() || undefined, undefined, createdAt)
+    await addTask(newTaskTitle.trim(), newTaskDesc.trim() || undefined, undefined, createdAt, { project_id: newProjectId || null, repository_id: newRepositoryId || null, tag_names: extractHashTags(newTags).tags })
     setNewTaskTitle('')
     setNewTaskDesc('')
     setNewTaskDate('')
+    setNewProjectId('')
+    setNewRepositoryId('')
+    setNewTags('')
     setShowDescInput(false)
   }
 
@@ -590,7 +626,7 @@ function KanbanPage(): JSX.Element {
     await updateTask(id, { due_date: date })
   }
 
-  const handleUpdate = async (id: number, updates: { title?: string; description?: string }): Promise<void> => {
+  const handleUpdate = async (id: number, updates: { title?: string; description?: string } & WorkItemAssociations): Promise<void> => {
     await updateTask(id, updates)
   }
 
@@ -620,7 +656,7 @@ function KanbanPage(): JSX.Element {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 overflow-hidden">
+      <div className="kanban-layout flex gap-4">
         {/* Main Board Area */}
         <div className="flex-1 min-w-0">
           {/* Add task */}
@@ -644,7 +680,7 @@ function KanbanPage(): JSX.Element {
               </button>
             </div>
             {showDescInput && (
-              <div className="mt-2 flex gap-2 animate-slide-up">
+              <div className="mt-2 flex gap-2 animate-slide-up flex-wrap">
                 <input
                   type="text"
                   value={newTaskDesc}
@@ -653,6 +689,12 @@ function KanbanPage(): JSX.Element {
                   placeholder={t('kanban.newDescription')}
                   className="flex-1 px-3 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
                 />
+                <label className="sr-only" htmlFor="new-task-project">{t('workspace.project')}</label>
+                <select id="new-task-project" value={newProjectId} onChange={(event) => setNewProjectId(event.target.value)} className="px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs bg-white dark:bg-zinc-800 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select>
+                <label className="sr-only" htmlFor="new-task-repository">{t('workspace.repository')}</label>
+                <select id="new-task-repository" value={newRepositoryId} onChange={(event) => setNewRepositoryId(event.target.value)} className="px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs bg-white dark:bg-zinc-800 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select>
+                <label className="sr-only" htmlFor="new-task-tags">{t('workspace.tags')}</label>
+                <input id="new-task-tags" type="text" value={newTags} onChange={(event) => setNewTags(event.target.value)} placeholder={t('workspace.tagsPlaceholder')} className="px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs bg-white dark:bg-zinc-800 dark:text-zinc-100" />
                 <input
                   type="date"
                   value={newTaskDate}
@@ -664,7 +706,7 @@ function KanbanPage(): JSX.Element {
           </div>
 
           {/* Board */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="kanban-columns grid grid-cols-3 gap-4">
             {COLUMNS.map((col) => {
               const columnTasks = getColumnTasks(col.id)
               return (
@@ -689,6 +731,8 @@ function KanbanPage(): JSX.Element {
                             onSetDue={handleSetDue}
                             onUpdate={handleUpdate}
                             onMove={handleKeyboardMove}
+                            projects={projects}
+                            repositories={repositories}
                           />
                         ))}
                         {columnTasks.length === 0 && (
@@ -707,7 +751,7 @@ function KanbanPage(): JSX.Element {
 
         {/* Draft Box Sidebar */}
         <div
-          className={`shrink-0 border-l border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-lg transition-all flex flex-col ${
+          className={`kanban-drafts shrink-0 border-l border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-lg transition-all flex flex-col ${
             draftOpen ? 'w-56' : 'w-10'
           }`}
         >
@@ -738,7 +782,7 @@ function KanbanPage(): JSX.Element {
           )}
 
           {draftOpen && (
-            <div className="flex flex-col flex-1 overflow-hidden">
+            <div className="kanban-drafts-content flex flex-col flex-1">
               <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-200 dark:border-zinc-700">
                 <Archive className="w-4 h-4 text-zinc-400" />
                 <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('kanban.drafts')}</h3>
@@ -785,6 +829,8 @@ function KanbanPage(): JSX.Element {
                         onDelete={handleDelete}
                         onUpdate={handleUpdate}
                         onMove={handleKeyboardMove}
+                        projects={projects}
+                        repositories={repositories}
                       />
                     ))}
                     {draftTasks.length === 0 && (

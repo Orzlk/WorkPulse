@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { WorkItemAssociations } from '../lib/workspaceTypes'
 
 interface Task {
   id: number
@@ -11,14 +12,18 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  public_id: string
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
 }
 
 interface TaskStore {
   tasks: Task[]
   loading: boolean
   fetchTasks: () => Promise<void>
-  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string) => Promise<Task>
-  updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>>) => Promise<void>
+  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
+  updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<void>
   deleteTask: (id: number) => Promise<void>
   completeTask: (id: number, logContent: string) => Promise<void>
   completeTaskOnly: (id: number) => Promise<void>
@@ -40,8 +45,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  addTask: async (title, description, status, createdAt?) => {
-    const task = await window.api.task.add(title, description, status, createdAt)
+  addTask: async (title, description, status, createdAt?, associations?) => {
+    const task = await window.api.task.add(title, description, status, createdAt, associations)
     set({ tasks: [...get().tasks, task] })
     return task
   },

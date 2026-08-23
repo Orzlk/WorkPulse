@@ -3,6 +3,7 @@ import { mergePage } from '../lib/workspaceInteractions'
 import type { AsyncStatus, InboxItem } from '../lib/workspaceTypes'
 
 const PAGE_SIZE = 40
+let fetchPromise: Promise<void> | null = null
 type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'repository_id' | 'include_in_reports'> & {
   tag_names: string[]
   ai_suggestion: InboxItem['ai_suggestion']
@@ -25,13 +26,17 @@ interface InboxStore {
 export const useInboxStore = create<InboxStore>((set, get) => ({
   items: [], total: 0, status: 'idle', error: null, selectedId: null,
   fetch: async () => {
-    set({ status: 'running', error: null })
-    try {
-      const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0 })
-      set({ items: page.items, total: page.total, status: 'success' })
-    } catch (error) {
-      set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load inbox' })
-    }
+    if (fetchPromise) return fetchPromise
+    fetchPromise = (async () => {
+      set({ status: 'running', error: null })
+      try {
+        const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0 })
+        set({ items: page.items, total: page.total, status: 'success' })
+      } catch (error) {
+        set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load inbox' })
+      }
+    })()
+    try { await fetchPromise } finally { fetchPromise = null }
   },
   loadMore: async () => {
     const state = get()

@@ -1,4 +1,4 @@
-import type { InboxItem, Page, Project, Tag } from '../domain/types'
+import type { InboxItem, Page, Project, ProjectInput, Tag } from '../domain/types'
 
 export interface WorkspaceContext {
   workspace_id: number
@@ -17,8 +17,8 @@ export interface ReadOptions {
 export interface ProjectRepository {
   list(context: WorkspaceContext, pagination?: Pagination): Page<Project>
   get(context: WorkspaceContext, publicId: string, options?: ReadOptions): Project | null
-  create(context: WorkspaceContext, input: Omit<Project, 'public_id' | 'archived_at'>): Project
-  update(context: WorkspaceContext, publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>): Project | null
+  create(context: WorkspaceContext, input: ProjectInput): Project
+  update(context: WorkspaceContext, publicId: string, input: Partial<ProjectInput>): Project | null
   softDelete(context: WorkspaceContext, publicId: string): Project | null
 }
 

@@ -130,7 +130,7 @@ describe('database transfer package', () => {
 
     const exported = createDatabaseExport(database, context(database))
 
-    expect(exported.schema_version).toBe(10)
+    expect(exported.schema_version).toBe(11)
     expect(exported.tables.projects).toHaveLength(1)
     expect(JSON.stringify(exported)).not.toContain('secret-value')
     expect(exported.tables.settings).toBeUndefined()
@@ -153,7 +153,7 @@ describe('database transfer package', () => {
       future_secret: 'do-not-ignore'
     }]
     expect(() => previewDatabaseImport(packageWithSecret)).toThrow('IMPORT_INVALID')
-    expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 11 })).toThrow('IMPORT_INVALID')
+    expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 12 })).toThrow('IMPORT_INVALID')
 
     database.prepare(`INSERT INTO work_logs (public_id, workspace_id, content, created_at, updated_at)
       VALUES ('large-log', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)

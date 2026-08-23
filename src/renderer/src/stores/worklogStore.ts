@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { WorkItemAssociations } from '../lib/workspaceTypes'
 
 interface WorkLog {
   id: number
@@ -6,6 +7,10 @@ interface WorkLog {
   category: string
   created_at: string
   task_id: number | null
+  public_id: string
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
 }
 
 interface WorkLogStore {
@@ -18,11 +23,11 @@ interface WorkLogStore {
   loadMore: () => Promise<void>
   searchLogs: (keyword: string) => Promise<void>
   clearSearch: () => Promise<void>
-  addLog: (content: string, category?: string) => Promise<WorkLog>
+  addLog: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
   deleteLog: (id: number) => Promise<void>
   undoDelete: () => Promise<void>
   dismissUndo: () => void
-  updateLog: (id: number, content: string, category: string, created_at?: string) => Promise<void>
+  updateLog: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<void>
 }
 
 const PAGE_SIZE = 50
@@ -73,8 +78,8 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     await get().fetchLogs()
   },
 
-  addLog: async (content: string, category?: string) => {
-    const log = await window.api.worklog.add(content, category)
+  addLog: async (content: string, category?: string, associations?: WorkItemAssociations) => {
+    const log = await window.api.worklog.add(content, category, associations)
     // If searching, re-run search; otherwise prepend
     if (get().searchKeyword) {
       await get().searchLogs(get().searchKeyword)
@@ -107,8 +112,8 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     set({ lastDeleted: null })
   },
 
-  updateLog: async (id: number, content: string, category: string, created_at?: string) => {
-    const updated = await window.api.worklog.update(id, content, category, created_at)
+  updateLog: async (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => {
+    const updated = await window.api.worklog.update(id, content, category, created_at, associations)
     if (updated) {
       if (get().searchKeyword) {
         await get().searchLogs(get().searchKeyword)

@@ -1,96 +1,105 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Clock3, Search, X } from 'lucide-react'
 import { createLatestRequestGate } from '../lib/workspaceInteractions'
-import type { InboxItem, Project, Repository } from '../lib/workspaceTypes'
+import { useI18n } from '../stores/languageStore'
+import type { SearchResult } from '../lib/workspaceTypes'
 
 interface Props {
-  projects: Project[]
-  repositories: Repository[]
-  onOpenInbox: (publicId: string) => void
+  onOpenResult: (result: SearchResult) => void
 }
 
-export function GlobalSearch({ projects, repositories, onOpenInbox }: Props): JSX.Element {
+const PAGE_SIZE = 12
+
+export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
   const [query, setQuery] = useState('')
-  const [items, setItems] = useState<InboxItem[]>([])
+  const [items, setItems] = useState<SearchResult[]>([])
+  const [total, setTotal] = useState(0)
   const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle')
   const gate = useMemo(createLatestRequestGate, [])
   const controllerRef = useRef<AbortController | null>(null)
+  const { t, resolvedLanguage } = useI18n()
+
+  const runSearch = (text: string, offset: number, append: boolean): void => {
+    controllerRef.current?.abort()
+    const requestId = gate.next()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setStatus('running')
+    void window.api.search.query({ text, limit: PAGE_SIZE, offset })
+      .then((page) => {
+        if (controller.signal.aborted || !gate.isCurrent(requestId)) return
+        setItems((current) => append ? [...current, ...page.items] : page.items)
+        setTotal(page.total)
+        setStatus('idle')
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && gate.isCurrent(requestId)) setStatus('error')
+      })
+  }
 
   useEffect(() => {
     const text = query.trim()
     controllerRef.current?.abort()
     if (!text) {
       setItems([])
+      setTotal(0)
       setStatus('idle')
       return
     }
+    const timer = window.setTimeout(() => runSearch(text, 0, false), 280)
+    return () => window.clearTimeout(timer)
+  }, [query])
 
-    const requestId = gate.next()
-    const controller = new AbortController()
-    controllerRef.current = controller
-    setStatus('running')
-    const timer = window.setTimeout(() => {
-      void window.api.search.query({ text, limit: 12, offset: 0 })
-        .then((page) => {
-          if (!controller.signal.aborted && gate.isCurrent(requestId)) {
-            setItems(page.items)
-            setStatus('idle')
-          }
-        })
-        .catch(() => {
-          if (!controller.signal.aborted && gate.isCurrent(requestId)) setStatus('error')
-        })
-    }, 280)
+  const sourceLabel = (source: SearchResult['source']): string => {
+    const key = {
+      inbox: 'workspace.sourceInbox',
+      work_log: 'workspace.sourceLog',
+      task: 'workspace.sourceTask',
+      git_commit: 'workspace.sourceCommit',
+      report: 'workspace.sourceReport'
+    }[source] as Parameters<typeof t>[0]
+    return t(key)
+  }
 
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
-  }, [query, gate])
-
-  const projectNames = useMemo(() => new Map(projects.map((item) => [item.public_id, item.name])), [projects])
-  const repositoryNames = useMemo(() => new Map(repositories.map((item) => [item.public_id, item.name])), [repositories])
+  const formatTime = (value: string): string => new Date(value).toLocaleDateString(resolvedLanguage === 'zh' ? 'zh-CN' : 'en-US')
 
   return (
     <div className="global-search">
-      <label className="sr-only" htmlFor="global-search-input">全局搜索</label>
+      <label className="sr-only" htmlFor="global-search-input">{t('workspace.searchLabel')}</label>
       <Search aria-hidden="true" className="global-search-icon" />
       <input
         id="global-search-input"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="搜索收件箱、标签和项目"
+        placeholder={t('workspace.searchPlaceholder')}
         className="global-search-input"
         autoComplete="off"
+        aria-expanded={Boolean(query)}
+        aria-controls="global-search-results"
       />
-      {query && (
-        <button className="global-search-clear" onClick={() => setQuery('')} aria-label="清除搜索">
-          <X aria-hidden="true" />
-        </button>
-      )}
-      {query && (
-        <div className="global-search-results" role="status" aria-live="polite">
-          {status === 'running' && <p className="search-state">正在搜索…</p>}
-          {status === 'error' && <p className="search-state is-error">搜索失败，请重试。</p>}
-          {status === 'idle' && items.length === 0 && <p className="search-state">没有找到匹配记录。</p>}
-          {items.map((item) => (
-            <button
-              key={item.public_id}
-              className="global-search-result"
-              onClick={() => { onOpenInbox(item.public_id); setQuery('') }}
-            >
-              <span className="search-result-content">{item.content}</span>
+      {query && <button className="global-search-clear" onClick={() => setQuery('')} aria-label={t('workspace.clearSearch')}><X aria-hidden="true" /></button>}
+      {query && <>
+        <div className="global-search-status" role="status" aria-live="polite">
+          {status === 'running' && t('workspace.searching')}
+          {status === 'error' && t('workspace.searchFailed')}
+          {status === 'idle' && items.length === 0 && t('workspace.noSearchResults')}
+        </div>
+        <div id="global-search-results" className="global-search-results" role="list" aria-label={t('workspace.searchResults')}>
+          {items.map((item) => <div role="listitem" key={`${item.source}:${item.public_id}`}>
+            <button className="global-search-result" onClick={() => onOpenResult(item)}>
+              <span className="search-result-content"><strong>{item.title}</strong><span>{item.excerpt}</span></span>
               <span className="search-result-meta">
-                <span>收件箱</span>
-                {item.project_id && <span>{projectNames.get(item.project_id) ?? '未命名项目'}</span>}
-                {item.repository_id && <span>{repositoryNames.get(item.repository_id) ?? '未命名仓库'}</span>}
-                {item.ai_suggestion?.tag_names.map((tag) => <span key={tag}>#{tag}</span>)}
-                <time dateTime={item.created_at}><Clock3 aria-hidden="true" />{new Date(item.created_at).toLocaleDateString()}</time>
+                <span>{sourceLabel(item.source)}</span>
+                {item.project_name && <span>{item.project_name}</span>}
+                {item.repository_name && <span>{item.repository_name}</span>}
+                {item.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+                <time dateTime={item.time}><Clock3 aria-hidden="true" />{formatTime(item.time)}</time>
               </span>
             </button>
-          ))}
+          </div>)}
+          {items.length < total && <button className="load-more search-load-more" onClick={() => runSearch(query.trim(), items.length, true)} disabled={status === 'running'}>{t('workspace.loadMore')}</button>}
         </div>
-      )}
+      </>}
     </div>
   )
 }

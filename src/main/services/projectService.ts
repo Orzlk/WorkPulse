@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type Database from 'better-sqlite3'
 
-import type { Page, Project } from '../domain/types'
+import type { Page, Project, ProjectInput } from '../domain/types'
 import type { Pagination, ReadOptions, WorkspaceContext } from '../repositories/contracts'
 import { LocalProjectRepository } from '../repositories/localProjectRepository'
 
@@ -26,7 +26,7 @@ export class ProjectService {
     return this.projects.get(this.context, publicId, options)
   }
 
-  create(input: Omit<Project, 'public_id' | 'archived_at'>): Project {
+  create(input: ProjectInput): Project {
     this.assertWorkspace()
     if (!input.name.trim()) throw new Error('Project name is required')
     const create = this.database.transaction(() => {
@@ -41,7 +41,7 @@ export class ProjectService {
     return create()
   }
 
-  update(publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>): Project | null {
+  update(publicId: string, input: Partial<ProjectInput>): Project | null {
     this.assertWorkspace()
     const update = this.database.transaction(() => {
       const project = this.projects.update(this.context, publicId, input)

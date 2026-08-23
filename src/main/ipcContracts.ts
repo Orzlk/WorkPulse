@@ -102,6 +102,22 @@ export interface ParsedSearchQuery {
   offset: number
 }
 
+export interface ParsedWorkItemAssociations {
+  projectId?: string | null
+  repositoryId?: string | null
+  tagNames?: string[]
+}
+
+export function parseWorkItemAssociations(value: unknown): ParsedWorkItemAssociations {
+  if (value === undefined) return {}
+  const input = object(value, ['project_id', 'repository_id', 'tag_names'])
+  return {
+    projectId: nullableId(input.project_id, 'project_id'),
+    repositoryId: nullableId(input.repository_id, 'repository_id'),
+    tagNames: input.tag_names === undefined ? undefined : parseTagNames(input.tag_names)
+  }
+}
+
 export function parseSearchQueryInput(value: unknown): ParsedSearchQuery {
   const input = object(value, ['text', 'tag_names', 'project_id', 'repository_id', 'state', 'limit', 'offset'])
   const pagination = parsePagination({ limit: input.limit, offset: input.offset })

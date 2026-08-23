@@ -2,10 +2,14 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 
 interface WorkLog {
   id: number
+  public_id: string
   content: string
   category: string
   created_at: string
   task_id: number | null
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
 }
 
 interface Report {
@@ -28,6 +32,7 @@ interface Project {
   description: string
   color: string
   archived_at: string | null
+  summary: { work_logs: number; tasks: number; git_commits: number; reports: number }
 }
 
 interface InboxSuggestion {
@@ -102,6 +107,7 @@ interface PeriodReport {
 
 interface Task {
   id: number
+  public_id: string
   title: string
   description: string
   status: 'todo' | 'in_progress' | 'done' | 'draft'
@@ -111,10 +117,32 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
+}
+
+interface WorkItemAssociations {
+  project_id?: string | null
+  repository_id?: string | null
+  tag_names?: string[]
+}
+
+interface SearchResult {
+  source: 'inbox' | 'work_log' | 'task' | 'git_commit' | 'report'
+  public_id: string
+  title: string
+  excerpt: string
+  project_id: string | null
+  project_name: string | null
+  repository_id: string | null
+  repository_name: string | null
+  tags: string[]
+  time: string
 }
 
 type QuickCreateType = 'log' | 'task'
-type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings'
+type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type AppLanguage = 'system' | 'zh' | 'en'
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
 
@@ -147,22 +175,22 @@ export interface API {
     updateStatus: (cb: (state: AppUpdateState) => void) => () => void
   }
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string) => Promise<Task>
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
     list: () => Promise<Task[]>
-    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>>) => Promise<Task | null>
+    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<Task | null>
     delete: (id: number) => Promise<boolean>
     reorder: (taskIds: number[], status: string) => Promise<void>
     complete: (id: number, logContent: string) => Promise<Task | null>
     completeOnly: (id: number) => Promise<Task | null>
   }
   worklog: {
-    add: (content: string, category?: string) => Promise<WorkLog>
+    add: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
     list: (limit?: number, offset?: number) => Promise<WorkLog[]>
     byDateRange: (from: string, to: string) => Promise<WorkLog[]>
     search: (keyword: string) => Promise<WorkLog[]>
     categories: () => Promise<string[]>
     setCategory: (id: number, category: string) => Promise<void>
-    update: (id: number, content: string, category: string, created_at?: string) => Promise<WorkLog | null>
+    update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<WorkLog | null>
     delete: (id: number) => Promise<boolean>
     restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id'>) => Promise<WorkLog>
   }
@@ -183,8 +211,8 @@ export interface API {
   }
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Project>>
-    create: (input: Omit<Project, 'public_id' | 'archived_at'>) => Promise<Project>
-    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at'>>) => Promise<Project | null>
+    create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => Promise<Project>
+    update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at' | 'summary'>>) => Promise<Project | null>
     archive: (publicId: string) => Promise<Project | null>
   }
   inbox: {
@@ -202,7 +230,7 @@ export interface API {
     search: (query: string, pagination?: { limit?: number; offset?: number }) => Promise<Page<Tag>>
   }
   search: {
-    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => Promise<Page<InboxItem>>
+    query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => Promise<Page<SearchResult>>
   }
   repository: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>

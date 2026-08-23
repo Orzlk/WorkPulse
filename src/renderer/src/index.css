@@ -321,6 +321,21 @@ body {
 .kanban-move-control { display: inline-flex; align-items: center; gap: 5px; margin-top: 9px; color: var(--ink-muted); font-size: 11px; }.kanban-move-control select { min-height: 28px; font-size: 11px; }
 
 .quick-create-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: start center; padding-top: min(16vh, 160px); background: rgba(16, 18, 16, .5); }.quick-create-panel { width: min(600px, calc(100vw - 32px)); border: 1px solid var(--ink); background: var(--paper-raised); box-shadow: 12px 12px 0 var(--workspace-accent); }.quick-create-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }.quick-create-header button { width: 36px; height: 36px; border: 0; background: transparent; color: var(--ink-muted); cursor: pointer; }.quick-create-header svg { width: 18px; height: 18px; }.quick-create-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }.quick-create-tabs button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-right: 1px solid var(--rule); background: transparent; color: var(--ink-muted); cursor: pointer; font: inherit; font-size: 13px; }.quick-create-tabs button:last-child { border-right: 0; }.quick-create-tabs button[aria-selected=true] { background: var(--ink); color: var(--paper-raised); }.quick-create-tabs svg { width: 16px; height: 16px; }.quick-create-input { box-sizing: border-box; width: 100%; min-height: 62px; padding: 0 16px; border: 0 !important; border-bottom: 1px solid var(--rule) !important; border-radius: 0 !important; background: transparent !important; font-size: 17px; outline: none; }.quick-create-meta { min-height: 34px; display: flex; align-items: center; padding: 5px 16px; color: var(--ink-muted); font-size: 12px; }.quick-create-associations { display: flex; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--rule); }.quick-create-panel footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--rule); color: var(--ink-muted); font-size: 12px; }
+.quick-create-content-label { display: block; padding: 10px 16px 0; color: var(--ink-muted); font-size: 12px; }
+.kanban-layout { min-width: 0; }
+.kanban-drafts-content { min-width: 0; }
+.global-search-status { padding: 10px 16px; color: var(--ink-muted); font-size: 12px; }
+.search-result-content { display: grid; gap: 3px; min-width: 0; }
+.search-result-content > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
+.search-load-more { width: 100%; margin-top: 8px; }
+
+@media (max-width: 720px) {
+  .kanban-layout { display: block; overflow: visible; }
+  .kanban-columns { grid-template-columns: minmax(0, 1fr); }
+  .kanban-drafts { width: 100% !important; margin-top: 18px; border-top: 1px solid var(--rule); border-left: 0; overflow: visible !important; }
+  .kanban-drafts-content { overflow: visible !important; }
+  .kanban-drafts-content > [class*="overflow-y-auto"] { max-height: 320px; overflow-y: auto; }
+}
 
 .app-header {
   min-height: 76px;

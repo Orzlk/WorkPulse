@@ -43,6 +43,7 @@ import {
   parseReportRequest,
   parseRepositoryCreateInput,
   parseSearchQueryInput,
+  parseWorkItemAssociations,
   toIpcContractError
 } from './ipcContracts'
 import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
@@ -94,8 +95,8 @@ function guardedWithEvent<TArgs extends unknown[], TResult>(handler: (event: Ele
 export function registerIpcHandlers(): void {
   // --- Work Logs ---
 
-  ipcMain.handle('worklog:add', (_event, content: string, category?: string) => {
-    return addWorkLog(content, category)
+  ipcMain.handle('worklog:add', (_event, content: string, category?: string, associations?: unknown) => {
+    return addWorkLog(content, category, null, undefined, parseWorkItemAssociations(associations))
   })
 
   ipcMain.handle('worklog:list', (_event, limit?: number, offset?: number) => {
@@ -118,8 +119,8 @@ export function registerIpcHandlers(): void {
     updateWorkLogCategory(id, category)
   })
 
-  ipcMain.handle('worklog:update', (_event, id: number, content: string, category: string, created_at?: string) => {
-    return updateWorkLog(id, content, category, created_at)
+  ipcMain.handle('worklog:update', (_event, id: number, content: string, category: string, created_at?: string, associations?: unknown) => {
+    return updateWorkLog(id, content, category, created_at, parseWorkItemAssociations(associations))
   })
 
   ipcMain.handle('worklog:delete', (_event, id: number) => {
@@ -193,7 +194,7 @@ export function registerIpcHandlers(): void {
     return services().tags.search(query, parsePagination(pagination))
   }))
 
-  ipcMain.handle('search:query', guarded((input: unknown) => services().search.searchInbox(parseSearchQueryInput(input))))
+  ipcMain.handle('search:query', guarded((input: unknown) => services().search.search(parseSearchQueryInput(input))))
 
   ipcMain.handle('repository:list', guarded((pagination?: unknown) => services().repositories.list(parsePagination(pagination))))
   ipcMain.handle('repository:create', guarded((input: unknown) => services().repositories.create(parseRepositoryCreateInput(input))))
@@ -261,8 +262,8 @@ export function registerIpcHandlers(): void {
 
   // --- Tasks ---
 
-  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string) => {
-    return addTask(title, description, status, createdAt)
+  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown) => {
+    return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations))
   })
 
   ipcMain.handle('task:list', () => {
@@ -274,9 +275,9 @@ export function registerIpcHandlers(): void {
     (
       _event,
       id: number,
-      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>>
+      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date' | 'project_id' | 'repository_id' | 'tag_names'>>
     ) => {
-      return updateTask(id, updates)
+      return updateTask(id, { ...updates, ...parseWorkItemAssociations({ project_id: updates.project_id, repository_id: updates.repository_id, tag_names: updates.tag_names }) })
     }
   )
 

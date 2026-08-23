@@ -15,6 +15,9 @@ import { useToast } from '../components/Toast'
 import { useWorkLogStore } from '../stores/worklogStore'
 import { formatDate, formatTime, groupLogsByDate } from '../lib/dateUtils'
 import { useI18n } from '../stores/languageStore'
+import { useProjectStore } from '../stores/projectStore'
+import { useRepositoryStore } from '../stores/repositoryStore'
+import { extractHashTags } from '../lib/workspaceInteractions'
 
 function WorkLogPage(): JSX.Element {
   const { logs, fetchLogs, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, updateLog } =
@@ -28,14 +31,26 @@ function WorkLogPage(): JSX.Element {
   const [editContent, setEditContent] = useState('')
   const [editCategory, setEditCategory] = useState('')
   const [editDate, setEditDate] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [repositoryId, setRepositoryId] = useState('')
+  const [tagsInput, setTagsInput] = useState('')
+  const [editProjectId, setEditProjectId] = useState('')
+  const [editRepositoryId, setEditRepositoryId] = useState('')
+  const [editTagsInput, setEditTagsInput] = useState('')
   const [categorySuggestions, setCategorySuggestions] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const toast = useToast()
   const { resolvedLanguage, t } = useI18n()
+  const projects = useProjectStore((state) => state.items)
+  const fetchProjects = useProjectStore((state) => state.fetch)
+  const repositories = useRepositoryStore((state) => state.items)
+  const fetchRepositories = useRepositoryStore((state) => state.fetch)
 
   useEffect(() => {
-    fetchLogs()
+    void fetchLogs()
+    void fetchProjects()
+    void fetchRepositories()
     window.api.worklog.categories().then(setCategorySuggestions).catch(() => setCategorySuggestions([]))
     inputRef.current?.focus()
   }, [])
@@ -62,7 +77,7 @@ function WorkLogPage(): JSX.Element {
 
     try {
       const { content, category } = parseCategory(trimmed)
-      await addLog(content, category)
+      await addLog(content, category, { project_id: projectId || null, repository_id: repositoryId || null, tag_names: extractHashTags(`${trimmed} ${tagsInput}`).tags })
       setInput('')
     } catch {
       setError(t('worklog.saveError'))
@@ -112,9 +127,13 @@ function WorkLogPage(): JSX.Element {
     const log = logs.find((l) => l.id === editingId)
     const timePart = log ? log.created_at.slice(10) : ''
     const newCreatedAt = editDate ? editDate + timePart : undefined
-    await updateLog(editingId, trimmedContent, editCategory.trim(), newCreatedAt)
-    setEditingId(null)
-    toast.success(t('worklog.editSave'))
+    try {
+      await updateLog(editingId, trimmedContent, editCategory.trim(), newCreatedAt, { project_id: editProjectId || null, repository_id: editRepositoryId || null, tag_names: extractHashTags(editTagsInput).tags })
+      setEditingId(null)
+      toast.success(t('worklog.editSave'))
+    } catch {
+      setError(t('worklog.saveError'))
+    }
   }
 
   const handleEditCancel = (): void => {
@@ -142,6 +161,7 @@ function WorkLogPage(): JSX.Element {
           />
         </div>
         {error && <p className="quick-entry-error">{error}</p>}
+        <div className="quick-create-associations worklog-associations"><label>{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select></label><label>{t('workspace.tags')}<input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder="#tag1 #tag2" /></label></div>
       </div>
 
       {/* Search + Export */}
@@ -266,6 +286,11 @@ function WorkLogPage(): JSX.Element {
                             className="w-full sm:min-w-[180px] sm:flex-1 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:border-blue-400 bg-white dark:bg-zinc-700 dark:text-zinc-100"
                             autoFocus
                           />
+                          <label className="sr-only" htmlFor={`edit-project-${log.id}`}>{t('workspace.project')}</label>
+                          <select id={`edit-project-${log.id}`} value={editProjectId} onChange={(e) => setEditProjectId(e.target.value)} className="w-full sm:w-36 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select>
+                          <label className="sr-only" htmlFor={`edit-repository-${log.id}`}>{t('workspace.repository')}</label>
+                          <select id={`edit-repository-${log.id}`} value={editRepositoryId} onChange={(e) => setEditRepositoryId(e.target.value)} className="w-full sm:w-36 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select>
+                          <input type="text" value={editTagsInput} onChange={(e) => setEditTagsInput(e.target.value)} placeholder={t('workspace.tagsPlaceholder')} className="w-full sm:w-32 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100" />
                           <input
                             type="text"
                             value={editCategory}
@@ -337,6 +362,9 @@ function WorkLogPage(): JSX.Element {
                                   setEditContent(log.content)
                                   setEditCategory(log.category)
                                   setEditDate(log.created_at.slice(0, 10))
+                                  setEditProjectId(log.project_id ?? '')
+                                  setEditRepositoryId(log.repository_id ?? '')
+                                  setEditTagsInput(log.tag_names.map((tag) => `#${tag}`).join(' '))
                                 }}
                                 className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-blue-500 transition-all"
                                 aria-label={t('worklog.editAria')}

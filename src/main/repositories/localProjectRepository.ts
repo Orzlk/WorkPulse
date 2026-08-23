@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type Database from 'better-sqlite3'
 
-import type { Page, Project } from '../domain/types'
+import type { Page, Project, ProjectInput } from '../domain/types'
 import type { Pagination, ProjectRepository, ReadOptions, WorkspaceContext } from './contracts'
 
 const DEFAULT_LIMIT = 50
@@ -13,7 +13,13 @@ function toProject(row: Record<string, unknown>): Project {
     name: row.name as string,
     description: row.description as string,
     color: row.color as string,
-    archived_at: row.deleted_at as string | null
+    archived_at: row.deleted_at as string | null,
+    summary: {
+      work_logs: Number(row.work_log_count ?? 0),
+      tasks: Number(row.task_count ?? 0),
+      git_commits: Number(row.git_commit_count ?? 0),
+      reports: Number(row.report_count ?? 0)
+    }
   }
 }
 
@@ -30,7 +36,17 @@ export class LocalProjectRepository implements ProjectRepository {
   list(context: WorkspaceContext, pagination?: Pagination): Page<Project> {
     const { limit, offset } = resolvePagination(pagination)
     const items = this.database.prepare(`
-      SELECT public_id, name, description, color, deleted_at
+      SELECT public_id, name, description, color, deleted_at,
+        (SELECT COUNT(*) FROM work_logs WHERE work_logs.project_id = projects.id AND work_logs.workspace_id = projects.workspace_id AND work_logs.deleted_at IS NULL) AS work_log_count,
+        (SELECT COUNT(*) FROM tasks WHERE tasks.project_id = projects.id AND tasks.workspace_id = projects.workspace_id AND tasks.deleted_at IS NULL) AS task_count,
+        (SELECT COUNT(*) FROM git_commits
+          INNER JOIN repositories ON repositories.id = git_commits.repository_id
+          WHERE repositories.project_id = projects.id AND repositories.workspace_id = projects.workspace_id
+            AND repositories.deleted_at IS NULL AND git_commits.deleted_at IS NULL) AS git_commit_count,
+        (SELECT COUNT(DISTINCT reports.id) FROM report_projects
+          INNER JOIN reports ON reports.id = report_projects.report_id
+          WHERE report_projects.project_id = projects.id AND reports.workspace_id = projects.workspace_id
+            AND reports.deleted_at IS NULL) AS report_count
       FROM projects
       WHERE workspace_id = ? AND deleted_at IS NULL
       ORDER BY updated_at DESC, id DESC
@@ -45,14 +61,15 @@ export class LocalProjectRepository implements ProjectRepository {
 
   get(context: WorkspaceContext, publicId: string, options: ReadOptions = {}): Project | null {
     const row = this.database.prepare(`
-      SELECT public_id, name, description, color, deleted_at
+      SELECT public_id, name, description, color, deleted_at,
+        0 AS work_log_count, 0 AS task_count, 0 AS git_commit_count, 0 AS report_count
       FROM projects
       WHERE workspace_id = ? AND public_id = ? ${options.includeDeleted ? '' : 'AND deleted_at IS NULL'}
     `).get(context.workspace_id, publicId) as Record<string, unknown> | undefined
     return row ? toProject(row) : null
   }
 
-  create(context: WorkspaceContext, input: Omit<Project, 'public_id' | 'archived_at'>): Project {
+  create(context: WorkspaceContext, input: ProjectInput): Project {
     const now = new Date().toISOString()
     const publicId = randomUUID()
     const row = this.database.prepare(`
@@ -72,13 +89,13 @@ export class LocalProjectRepository implements ProjectRepository {
       now,
       now
     ) as Record<string, unknown>
-    return toProject(row)
+    return { ...toProject(row), summary: { work_logs: 0, tasks: 0, git_commits: 0, reports: 0 } }
   }
 
   update(
     context: WorkspaceContext,
     publicId: string,
-    input: Partial<Omit<Project, 'public_id' | 'archived_at'>>
+    input: Partial<ProjectInput>
   ): Project | null {
     const fields: string[] = []
     const values: unknown[] = []
@@ -95,7 +112,7 @@ export class LocalProjectRepository implements ProjectRepository {
       WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
       RETURNING public_id, name, description, color, deleted_at
     `).get(...values, context.user_id, now, context.workspace_id, publicId) as Record<string, unknown> | undefined
-    return row ? toProject(row) : null
+    return row ? { ...toProject(row), summary: { work_logs: 0, tasks: 0, git_commits: 0, reports: 0 } } : null
   }
 
   softDelete(context: WorkspaceContext, publicId: string): Project | null {
@@ -105,6 +122,6 @@ export class LocalProjectRepository implements ProjectRepository {
       WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
       RETURNING public_id, name, description, color, deleted_at
     `).get(now, context.user_id, now, context.workspace_id, publicId) as Record<string, unknown> | undefined
-    return row ? toProject(row) : null
+    return row ? { ...toProject(row), summary: { work_logs: 0, tasks: 0, git_commits: 0, reports: 0 } } : null
   }
 }

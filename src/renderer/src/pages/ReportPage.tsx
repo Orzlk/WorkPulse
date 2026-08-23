@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown'
 import { useToast } from '../components/Toast'
 import { getReportAnchorDate } from '../lib/reportPeriod'
 import { useI18n } from '../stores/languageStore'
+import { useProjectStore } from '../stores/projectStore'
 
 interface Report {
   public_id: string
@@ -27,11 +28,17 @@ interface Report {
   generated_at: string | null
   display_start: string
   display_end_inclusive: string
+  project_scope: string[]
 }
 
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
 
-function ReportPage(): JSX.Element {
+interface Props {
+  projectId: string | null
+  onProjectChange: (projectId: string | null) => void
+}
+
+function ReportPage({ projectId, onProjectChange }: Props): JSX.Element {
   const reportTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly')
   const [anchorDate, setAnchorDate] = useState(() => getReportAnchorDate(reportTimeZone))
@@ -46,11 +53,15 @@ function ReportPage(): JSX.Element {
   const [historyOpen, setHistoryOpen] = useState(true)
   const toast = useToast()
   const { t } = useI18n()
+  const projects = useProjectStore((state) => state.items)
+  const fetchProjects = useProjectStore((state) => state.fetch)
 
   useEffect(() => {
-    checkApiKey()
-    loadHistory()
-  }, [])
+    void checkApiKey()
+    void fetchProjects()
+  }, [fetchProjects])
+
+  useEffect(() => { void loadHistory() }, [projectId])
 
   const checkApiKey = async (): Promise<void> => {
     const key = await window.api.settings.get('api_key')
@@ -61,7 +72,7 @@ function ReportPage(): JSX.Element {
 
   const loadHistory = async (): Promise<void> => {
     const reports = await window.api.report.list(50)
-    setHistory(reports)
+    setHistory(projectId ? reports.filter((report) => report.project_scope.includes(projectId)) : reports)
   }
 
   const handleGenerate = async (): Promise<void> => {
@@ -77,7 +88,8 @@ function ReportPage(): JSX.Element {
       const report = await window.api.report.generate({
         type: reportType,
         anchorDate,
-        timeZone: reportTimeZone
+        timeZone: reportTimeZone,
+        projectIds: projectId ? [projectId] : []
       })
       setReportContent(report.content)
       setActiveReport(report)
@@ -175,6 +187,13 @@ function ReportPage(): JSX.Element {
       {/* Date Range — only show when not viewing history */}
       {!isViewingHistory && (
         <>
+          <div className="mb-4 flex items-center gap-2 text-sm text-zinc-500">
+            <label htmlFor="report-project-filter">{t('workspace.project')}</label>
+            <select id="report-project-filter" value={projectId ?? ''} onChange={(event) => onProjectChange(event.target.value || null)} className="px-2 py-1 border border-zinc-300 dark:border-zinc-600 rounded-md bg-white dark:bg-zinc-800 dark:text-zinc-100">
+              <option value="">{t('workspace.allProjects')}</option>
+              {projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}
+            </select>
+          </div>
           <div className="mb-6">
             <div className="flex flex-wrap gap-2 mb-3">
               {(['weekly', 'monthly'] as const).map((type) => (

@@ -7,7 +7,7 @@ import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-export const CURRENT_SCHEMA_VERSION = 10
+export const CURRENT_SCHEMA_VERSION = 11
 
 function tableExists(database: Database.Database, tableName: string): boolean {
   return Boolean(
@@ -589,10 +589,36 @@ const migrations: SchemaMigration[] = [
     }
   },
   {
-    version: CURRENT_SCHEMA_VERSION,
+    version: 10,
     name: '010_repository_binding_validity',
     up: (database) => {
       addColumnIfMissing(database, 'repository_bindings', 'is_valid', 'INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0, 1))')
+    }
+  },
+  {
+    version: CURRENT_SCHEMA_VERSION,
+    name: '011_work_item_associations',
+    up: (database) => {
+      addColumnIfMissing(database, 'work_logs', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
+      addColumnIfMissing(database, 'work_logs', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
+      addColumnIfMissing(database, 'tasks', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
+      addColumnIfMissing(database, 'tasks', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS work_log_tags (
+          work_log_id INTEGER NOT NULL REFERENCES work_logs(id) ON DELETE CASCADE,
+          tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+          PRIMARY KEY(work_log_id, tag_id)
+        );
+        CREATE TABLE IF NOT EXISTS task_tags (
+          task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+          PRIMARY KEY(task_id, tag_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_work_logs_project_active ON work_logs(workspace_id, project_id, deleted_at, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_project_active ON tasks(workspace_id, project_id, deleted_at, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_log_tags_tag ON work_log_tags(tag_id, work_log_id);
+        CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag_id, task_id);
+      `)
     }
   }
 ]
