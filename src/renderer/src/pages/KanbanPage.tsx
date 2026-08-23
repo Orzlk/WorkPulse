@@ -139,12 +139,14 @@ function SortableTaskCard({
   task,
   onDelete,
   onSetDue,
-  onUpdate
+  onUpdate,
+  onMove
 }: {
   task: Task
   onDelete: (id: number) => void
   onSetDue?: (id: number, date: string | null) => void
   onUpdate?: (id: number, updates: { title?: string; description?: string }) => void
+  onMove?: (id: number, status: DroppableId) => void
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id })
@@ -305,6 +307,24 @@ function SortableTaskCard({
               />
             )}
           </div>
+        )}
+        {!editing && onMove && task.status !== 'done' && (
+          <label className="kanban-move-control">
+            <span>移动到</span>
+            <select
+              value=""
+              onChange={(event) => {
+                const next = event.target.value as DroppableId
+                if (next) onMove(task.id, next)
+              }}
+              className="mt-2 w-full text-xs"
+            >
+              <option value="">移动到…</option>
+              {ALL_DROPPABLE_IDS.filter((status) => status !== task.status).map((status) => (
+                <option key={status} value={status}>{status === 'todo' ? '待办' : status === 'in_progress' ? '进行中' : status === 'done' ? '已完成' : '草稿'}</option>
+              ))}
+            </select>
+          </label>
         )}
       </div>
       {!editing && (
@@ -578,6 +598,17 @@ function KanbanPage(): JSX.Element {
     await deleteTask(id)
   }
 
+  const handleKeyboardMove = async (id: number, status: DroppableId): Promise<void> => {
+    const task = tasks.find((item) => item.id === id)
+    if (!task || task.status === status) return
+    if (status === 'done') {
+      setPendingComplete({ ...task, status: 'done' })
+      return
+    }
+    const destination = tasks.filter((item) => item.status === status && item.id !== id)
+    await reorderTasks([...destination.map((item) => item.id), id], status)
+  }
+
   const draftTasks = getColumnTasks('draft')
 
   return (
@@ -657,6 +688,7 @@ function KanbanPage(): JSX.Element {
                             onDelete={handleDelete}
                             onSetDue={handleSetDue}
                             onUpdate={handleUpdate}
+                            onMove={handleKeyboardMove}
                           />
                         ))}
                         {columnTasks.length === 0 && (
@@ -752,6 +784,7 @@ function KanbanPage(): JSX.Element {
                         task={task}
                         onDelete={handleDelete}
                         onUpdate={handleUpdate}
+                        onMove={handleKeyboardMove}
                       />
                     ))}
                     {draftTasks.length === 0 && (

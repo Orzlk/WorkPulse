@@ -28,6 +28,7 @@ function WorkLogPage(): JSX.Element {
   const [editContent, setEditContent] = useState('')
   const [editCategory, setEditCategory] = useState('')
   const [editDate, setEditDate] = useState('')
+  const [categorySuggestions, setCategorySuggestions] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const toast = useToast()
@@ -35,6 +36,7 @@ function WorkLogPage(): JSX.Element {
 
   useEffect(() => {
     fetchLogs()
+    window.api.worklog.categories().then(setCategorySuggestions).catch(() => setCategorySuggestions([]))
     inputRef.current?.focus()
   }, [])
 
@@ -135,6 +137,7 @@ function WorkLogPage(): JSX.Element {
             onKeyDown={handleKeyDown}
             placeholder={t('worklog.inputPlaceholder')}
             aria-label={t('worklog.inputAria')}
+            list="worklog-category-suggestions"
             className="quick-entry-input"
           />
         </div>
@@ -272,6 +275,7 @@ function WorkLogPage(): JSX.Element {
                               if (e.key === 'Escape') handleEditCancel()
                             }}
                             placeholder="#tag"
+                            list="worklog-category-suggestions"
                             className="w-full sm:w-28 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:border-blue-400 bg-white dark:bg-zinc-700 dark:text-zinc-100"
                           />
                           <input
@@ -391,6 +395,9 @@ function WorkLogPage(): JSX.Element {
           </button>
         </div>
       )}
+      <datalist id="worklog-category-suggestions">
+        {categorySuggestions.map((category) => <option key={category} value={`#${category}`} />)}
+      </datalist>
     </div>
   )
 }
