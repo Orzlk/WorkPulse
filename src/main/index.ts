@@ -113,7 +113,10 @@ function buildMenu(): void {
       label: tMain('navigation'),
       submenu: [
         { label: tMain('logs'), accelerator: 'CmdOrCtrl+1', click: () => sendToRenderer('navigate:worklog') },
+        { label: tMain('inbox'), click: () => sendToRenderer('navigate:inbox') },
         { label: tMain('board'), accelerator: 'CmdOrCtrl+2', click: () => sendToRenderer('navigate:kanban') },
+        { label: tMain('projects'), click: () => sendToRenderer('navigate:projects') },
+        { label: tMain('repositories'), click: () => sendToRenderer('navigate:repositories') },
         { label: tMain('reports'), accelerator: 'CmdOrCtrl+3', click: () => sendToRenderer('navigate:report') },
         { label: tMain('stats'), accelerator: 'CmdOrCtrl+4', click: () => sendToRenderer('navigate:stats') },
         { type: 'separator' },

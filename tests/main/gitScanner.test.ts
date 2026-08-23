@@ -262,6 +262,26 @@ describe('GitScanner', () => {
     database.close()
   })
 
+  it('在一个事务中应用仓库的组合更新 patch', () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const projects = new ProjectService(database, context)
+    const repositories = new RepositoryService(database, context)
+    const project = projects.create({ name: '组合更新项目', description: '', color: '#64748b' })
+    const repository = repositories.create({ name: '组合更新仓库', local_path: directory })
+
+    const updated = repositories.update(repository.public_id, {
+      project_id: project.public_id,
+      enabled: false,
+      scan_interval_minutes: 15
+    } as never)
+
+    expect(updated).toMatchObject({ project_id: project.public_id, enabled: false, scan_interval_minutes: 15 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = ? AND entity_public_id = ?').get('repository', repository.public_id))
+      .toEqual({ count: 2 })
+    database.close()
+  })
+
   it('对无效仓库保存失败状态且不阻断其他仓库扫描', async () => {
     const directory = createGitRepository()
     const { database, context } = createDatabase()

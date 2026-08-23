@@ -14,7 +14,7 @@ interface RepositoryStore {
   loadByPublicId: (publicId: string) => Promise<Repository | null>
   loadMore: () => Promise<void>
   create: (input: Parameters<Window['api']['repository']['create']>[0]) => Promise<Repository>
-  update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<void>
+  update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<void>
   scan: (publicId: string) => Promise<{ status: string; inserted_count: number; error?: string }>
   scanAll: () => Promise<{
     succeeded: number

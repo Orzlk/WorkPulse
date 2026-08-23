@@ -3,7 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type { API } from './index.d'
 
 type QuickCreateType = 'log' | 'task'
-type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings'
+type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type AppLanguage = 'system' | 'zh' | 'en'
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
 
@@ -234,7 +234,7 @@ const api = {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,
     get: (publicId: string) => ipcRenderer.invoke('repository:get', publicId) as Promise<Repository | null>,
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:create', input) as Promise<Repository>,
-    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
+    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
     scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId) as Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>,
     scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{
       succeeded: number
@@ -281,7 +281,7 @@ const api = {
       }
     },
     navigate: (cb: (page: NavigatePage) => void) => {
-      const pages: NavigatePage[] = ['worklog', 'kanban', 'report', 'stats', 'settings']
+      const pages: NavigatePage[] = ['worklog', 'kanban', 'report', 'stats', 'settings', 'inbox', 'projects', 'repositories']
       const handlers = pages.map((page) => {
         const handler = (): void => cb(page)
         ipcRenderer.on(`navigate:${page}`, handler)

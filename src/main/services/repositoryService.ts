@@ -47,6 +47,7 @@ export interface CreateRepositoryInput {
 export interface UpdateRepositoryInput {
   project_id?: string | null
   enabled?: boolean
+  scan_interval_minutes?: number | null
 }
 
 export interface RepositoryScanResult {
@@ -165,20 +166,48 @@ export class RepositoryService {
   }
 
   assignProject(publicId: string, projectId: string | null): Repository | null {
-    this.assertWorkspace()
-    this.assertProject(projectId)
-    return this.updateRepository(publicId, 'project_id', projectId)
+    return this.update(publicId, { project_id: projectId })
   }
 
   setEnabled(publicId: string, enabled: boolean): Repository | null {
-    this.assertWorkspace()
-    return this.updateRepository(publicId, 'enabled', Number(enabled))
+    return this.update(publicId, { enabled })
   }
 
   update(publicId: string, input: UpdateRepositoryInput): Repository | null {
-    if (input.project_id !== undefined) return this.assignProject(publicId, input.project_id)
-    if (input.enabled !== undefined) return this.setEnabled(publicId, input.enabled)
-    return this.findRow(publicId) ? toRepository(this.findRow(publicId)!) : null
+    this.assertWorkspace()
+    if (input.project_id !== undefined) this.assertProject(input.project_id)
+    if (input.scan_interval_minutes !== undefined && input.scan_interval_minutes !== null && input.scan_interval_minutes <= 0) {
+      throw new Error('Repository scan interval must be positive')
+    }
+    const fields: string[] = []
+    const values: unknown[] = []
+    if (input.project_id !== undefined) {
+      fields.push('project_id = (SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL)')
+      values.push(this.context.workspace_id, input.project_id)
+    }
+    if (input.enabled !== undefined) {
+      fields.push('enabled = ?')
+      values.push(Number(input.enabled))
+    }
+    if (input.scan_interval_minutes !== undefined) {
+      fields.push('scan_interval_minutes = ?')
+      values.push(input.scan_interval_minutes)
+    }
+    if (fields.length === 0) return this.get(publicId)
+
+    const now = new Date().toISOString()
+    const transaction = this.database.transaction(() => {
+      this.database.prepare(`
+        UPDATE repositories SET ${fields.join(', ')}, updated_by = ?, updated_at = ?
+        WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
+      `).run(...values, this.context.user_id, now, this.context.workspace_id, publicId)
+      const row = this.findRow(publicId)
+      if (!row) return null
+      const repository = toRepository(row)
+      this.enqueueSync('repository', repository.public_id, 'update', repository, now)
+      return repository
+    })
+    return transaction()
   }
 
   async scanOne(publicId: string, nowValue?: string): Promise<RepositoryScanResult> {
@@ -263,32 +292,6 @@ export class RepositoryService {
       WHERE repositories.workspace_id = ? AND repositories.public_id = ? AND repositories.deleted_at IS NULL
     `).get(this.context.workspace_id, publicId) as RepositoryRow | undefined
     return row ?? null
-  }
-
-  private updateRepository(
-    publicId: string,
-    field: 'project_id' | 'enabled',
-    value: string | number | null
-  ): Repository | null {
-    const now = new Date().toISOString()
-    const update = field === 'project_id'
-      ? `project_id = (SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL)`
-      : 'enabled = ?'
-    const values = field === 'project_id'
-      ? [this.context.workspace_id, value]
-      : [value]
-    const transaction = this.database.transaction(() => {
-      this.database.prepare(`
-        UPDATE repositories SET ${update}, updated_by = ?, updated_at = ?
-        WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
-      `).run(...values, this.context.user_id, now, this.context.workspace_id, publicId)
-      const row = this.findRow(publicId)
-      if (!row) return null
-      const repository = toRepository(row)
-      this.enqueueSync('repository', repository.public_id, 'update', repository, now)
-      return repository
-    })
-    return transaction()
   }
 
   private getSince(lastScannedAt: string | null, now: string): string {

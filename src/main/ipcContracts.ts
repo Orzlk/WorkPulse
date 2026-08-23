@@ -1,7 +1,7 @@
 import type { InboxState, InboxSuggestion } from './domain/types'
 import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
-import type { CreateRepositoryInput } from './services/repositoryService'
+import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
 import { format, isValid, parseISO } from 'date-fns'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -97,6 +97,7 @@ export interface ParsedSearchQuery {
   tag_names?: string[]
   project_id?: string | null
   repository_id?: string | null
+  /** Applies to the inbox branch; non-inbox sources intentionally ignore this field. */
   state?: InboxState
   limit: number
   offset: number
@@ -178,6 +179,23 @@ export function parseRepositoryCreateInput(value: unknown): CreateRepositoryInpu
     remote_url: optionalString(input.remote_url, 'remote_url', 2048),
     project_id: nullableId(input.project_id, 'project_id'),
     enabled: enabled as boolean | undefined,
+    scan_interval_minutes: interval as number | null | undefined
+  }
+}
+
+export function parseRepositoryUpdateInput(value: unknown): UpdateRepositoryInput {
+  const input = object(value, ['project_id', 'enabled', 'scan_interval_minutes'])
+  if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw invalid('enabled must be a boolean')
+  const interval = input.scan_interval_minutes
+  if (interval !== undefined && interval !== null && (!Number.isSafeInteger(interval) || (interval as number) < 1 || (interval as number) > 24 * 60)) {
+    throw invalid('scan_interval_minutes is invalid')
+  }
+  if (input.project_id === undefined && input.enabled === undefined && input.scan_interval_minutes === undefined) {
+    throw invalid('No repository fields to update')
+  }
+  return {
+    project_id: nullableId(input.project_id, 'project_id'),
+    enabled: input.enabled as boolean | undefined,
     scan_interval_minutes: interval as number | null | undefined
   }
 }

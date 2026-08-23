@@ -13,6 +13,26 @@ export interface InboxSearchQuery extends Pagination {
   state?: InboxItem['state']
 }
 
+/** state is evaluated only by the inbox branch; non-inbox entities have no compatible state field. */
+export interface UnifiedSearchQuery extends Pagination {
+  text?: string
+  tag_names?: string[]
+  project_id?: string | null
+  repository_id?: string | null
+  state?: InboxItem['state']
+}
+
+interface SearchFilterSpec {
+  textFields: string[]
+  tagTable: 'work_log_tags' | 'task_tags' | 'inbox_tags' | 'git_commit_tags' | 'report_tags'
+  tagColumn: 'work_log_id' | 'task_id' | 'inbox_item_id' | 'git_commit_id' | 'report_id'
+  projectMatch: string
+  projectUnassigned: string
+  repositoryMatch: string
+  repositoryUnassigned: string
+  inboxState?: boolean
+}
+
 export class SearchService {
   constructor(
     private readonly database: Database.Database,
@@ -89,15 +109,143 @@ export class SearchService {
     }
   }
 
-  search(query: Pagination & { text?: string }): Page<SearchResult> {
+  search(query: UnifiedSearchQuery = {}): Page<SearchResult> {
     this.assertWorkspace()
     const text = query.text?.trim() ?? ''
     const like = `%${text}%`
-    const tagSelect = (table: string, column: string): string => `
-      (SELECT GROUP_CONCAT(tags.path, ',') FROM ${table}
-       INNER JOIN tags ON tags.id = ${table}.tag_id
+    const tagSelect = (table: SearchFilterSpec['tagTable'], column: SearchFilterSpec['tagColumn']): string => `
+      (SELECT GROUP_CONCAT(tags.path, ',') FROM ${table} AS entity_tags
+       INNER JOIN tags ON tags.id = entity_tags.tag_id
          AND tags.workspace_id = entity.workspace_id AND tags.deleted_at IS NULL
-       WHERE ${table}.${column} = entity.id) AS tag_paths`
+       WHERE entity_tags.${column} = entity.id) AS tag_paths`
+
+    const entityRelation = (table: 'projects' | 'repositories', column: 'project_id' | 'repository_id'): { match: string; unassigned: string } => ({
+      match: `EXISTS (
+        SELECT 1 FROM ${table} AS filter_${table}
+        WHERE filter_${table}.id = entity.${column}
+          AND filter_${table}.workspace_id = entity.workspace_id
+          AND filter_${table}.public_id = ? AND filter_${table}.deleted_at IS NULL
+      )`,
+      unassigned: `NOT EXISTS (
+        SELECT 1 FROM ${table} AS filter_${table}
+        WHERE filter_${table}.id = entity.${column}
+          AND filter_${table}.workspace_id = entity.workspace_id
+          AND filter_${table}.deleted_at IS NULL
+      )`
+    })
+
+    const reportRelation = (table: 'projects' | 'repositories', linkTable: 'report_projects' | 'report_repositories', column: 'project_id' | 'repository_id'): { match: string; unassigned: string } => ({
+      match: `EXISTS (
+        SELECT 1 FROM ${linkTable} AS filter_links
+        INNER JOIN ${table} AS filter_${table} ON filter_${table}.id = filter_links.${column}
+        WHERE filter_links.report_id = entity.id
+          AND filter_${table}.workspace_id = entity.workspace_id
+          AND filter_${table}.public_id = ? AND filter_${table}.deleted_at IS NULL
+      )`,
+      unassigned: `NOT EXISTS (
+        SELECT 1 FROM ${linkTable} AS filter_links
+        INNER JOIN ${table} AS filter_${table} ON filter_${table}.id = filter_links.${column}
+        WHERE filter_links.report_id = entity.id
+          AND filter_${table}.workspace_id = entity.workspace_id
+          AND filter_${table}.deleted_at IS NULL
+      )`
+    })
+
+    const reportAggregate = (table: 'projects' | 'repositories', linkTable: 'report_projects' | 'report_repositories', column: 'project_id' | 'repository_id', field: 'public_id' | 'name'): string => `
+      (SELECT GROUP_CONCAT(value, ',') FROM (
+        SELECT DISTINCT related.${field} AS value
+        FROM ${linkTable} AS report_links
+        INNER JOIN ${table} AS related ON related.id = report_links.${column}
+          AND related.workspace_id = entity.workspace_id AND related.deleted_at IS NULL
+        WHERE report_links.report_id = entity.id
+        ORDER BY related.public_id
+      ))`
+
+    const standardRelation = (table: 'projects' | 'repositories', column: 'project_id' | 'repository_id') => entityRelation(table, column)
+    const reportProjectRelation = reportRelation('projects', 'report_projects', 'project_id')
+    const reportRepositoryRelation = reportRelation('repositories', 'report_repositories', 'repository_id')
+    const filters = (spec: SearchFilterSpec): { where: string; params: unknown[] } => {
+      const where = ['entity.workspace_id = ?', 'entity.deleted_at IS NULL']
+      const params: unknown[] = [this.context.workspace_id]
+      if (text) {
+        where.push(`(${spec.textFields.map((field) => `${field} LIKE ?`).join(' OR ')})`)
+        params.push(...spec.textFields.map(() => like))
+      }
+      if (query.project_id !== undefined) {
+        where.push(query.project_id === null ? spec.projectUnassigned : spec.projectMatch)
+        if (query.project_id !== null) params.push(query.project_id)
+      }
+      if (query.repository_id !== undefined) {
+        where.push(query.repository_id === null ? spec.repositoryUnassigned : spec.repositoryMatch)
+        if (query.repository_id !== null) params.push(query.repository_id)
+      }
+      if (spec.inboxState && query.state !== undefined) {
+        where.push('entity.state = ?')
+        params.push(query.state)
+      }
+      for (const tagName of query.tag_names ?? []) {
+        const path = normalizeTagName(tagName)
+        where.push(`EXISTS (
+          SELECT 1 FROM ${spec.tagTable} AS filter_tags
+          INNER JOIN tags AS filter_tag ON filter_tag.id = filter_tags.tag_id
+          WHERE filter_tags.${spec.tagColumn} = entity.id
+            AND filter_tag.workspace_id = entity.workspace_id
+            AND filter_tag.deleted_at IS NULL
+            AND (filter_tag.path = ? OR filter_tag.path LIKE ?)
+        )`)
+        params.push(path, `${path}/%`)
+      }
+      return { where: where.join(' AND '), params }
+    }
+
+    const projectRelation = standardRelation('projects', 'project_id')
+    const repositoryRelation = standardRelation('repositories', 'repository_id')
+    const workLogFilters = filters({
+      textFields: ['entity.content', 'entity.category'], tagTable: 'work_log_tags', tagColumn: 'work_log_id',
+      projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
+      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+    })
+    const taskFilters = filters({
+      textFields: ['entity.title', 'entity.description'], tagTable: 'task_tags', tagColumn: 'task_id',
+      projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
+      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+    })
+    const inboxFilters = filters({
+      textFields: ['entity.content'], tagTable: 'inbox_tags', tagColumn: 'inbox_item_id', inboxState: true,
+      projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
+      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+    })
+    const gitRepositoryRelation = standardRelation('repositories', 'repository_id')
+    const gitProjectRelation = {
+      match: `EXISTS (
+        SELECT 1 FROM repositories AS filter_git_repositories
+        INNER JOIN projects AS filter_git_projects ON filter_git_projects.id = filter_git_repositories.project_id
+        WHERE filter_git_repositories.id = entity.repository_id
+          AND filter_git_repositories.workspace_id = entity.workspace_id
+          AND filter_git_projects.workspace_id = entity.workspace_id
+          AND filter_git_projects.public_id = ? AND filter_git_projects.deleted_at IS NULL
+          AND filter_git_repositories.deleted_at IS NULL
+      )`,
+      unassigned: `NOT EXISTS (
+        SELECT 1 FROM repositories AS filter_git_repositories
+        INNER JOIN projects AS filter_git_projects ON filter_git_projects.id = filter_git_repositories.project_id
+        WHERE filter_git_repositories.id = entity.repository_id
+          AND filter_git_repositories.workspace_id = entity.workspace_id
+          AND filter_git_projects.workspace_id = entity.workspace_id
+          AND filter_git_projects.deleted_at IS NULL
+          AND filter_git_repositories.deleted_at IS NULL
+      )`
+    }
+    const gitFilters = filters({
+      textFields: ['entity.message', 'entity.commit_hash'], tagTable: 'git_commit_tags', tagColumn: 'git_commit_id',
+      projectMatch: gitProjectRelation.match, projectUnassigned: gitProjectRelation.unassigned,
+      repositoryMatch: gitRepositoryRelation.match, repositoryUnassigned: gitRepositoryRelation.unassigned
+    })
+    const reportFilters = filters({
+      textFields: ['entity.content', 'entity.type'], tagTable: 'report_tags', tagColumn: 'report_id',
+      projectMatch: reportProjectRelation.match, projectUnassigned: reportProjectRelation.unassigned,
+      repositoryMatch: reportRepositoryRelation.match, repositoryUnassigned: reportRepositoryRelation.unassigned
+    })
 
     const sources = [
       {
@@ -108,10 +256,9 @@ export class SearchService {
       FROM work_logs AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
-      WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
-        AND (? = '' OR entity.content LIKE ? OR entity.category LIKE ?)
+      WHERE ${workLogFilters.where}
       `,
-        params: [this.context.workspace_id, text, like, like]
+        params: workLogFilters.params
       },
       {
         sql: `SELECT 'task' AS source, entity.public_id, entity.title, COALESCE(NULLIF(entity.description, ''), entity.title) AS excerpt,
@@ -121,10 +268,9 @@ export class SearchService {
       FROM tasks AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
-      WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
-        AND (? = '' OR entity.title LIKE ? OR entity.description LIKE ?)
+      WHERE ${taskFilters.where}
       `,
-        params: [this.context.workspace_id, text, like, like]
+        params: taskFilters.params
       },
       {
         sql: `SELECT 'inbox' AS source, entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
@@ -134,10 +280,9 @@ export class SearchService {
       FROM inbox_items AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
-      WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
-        AND (? = '' OR entity.content LIKE ?)
+      WHERE ${inboxFilters.where}
       `,
-        params: [this.context.workspace_id, text, like]
+        params: inboxFilters.params
       },
       {
         sql: `SELECT 'git_commit' AS source, entity.public_id, entity.message AS title, entity.message AS excerpt, entity.committed_at AS time,
@@ -149,25 +294,22 @@ export class SearchService {
         AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       LEFT JOIN projects ON projects.id = repositories.project_id
         AND projects.workspace_id = repositories.workspace_id AND projects.deleted_at IS NULL
-      WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
-        AND (? = '' OR entity.message LIKE ? OR entity.commit_hash LIKE ?)
+      WHERE ${gitFilters.where}
       `,
-        params: [this.context.workspace_id, text, like, like]
+        params: gitFilters.params
       },
       {
         sql: `SELECT 'report' AS source, entity.public_id, entity.type || ' report' AS title, entity.content AS excerpt,
         COALESCE(entity.generated_at, entity.updated_at) AS time,
-        projects.public_id AS project_id, projects.name AS project_name,
-        NULL AS repository_id, NULL AS repository_name,
+        ${reportAggregate('projects', 'report_projects', 'project_id', 'public_id')} AS project_id,
+        ${reportAggregate('projects', 'report_projects', 'project_id', 'name')} AS project_name,
+        ${reportAggregate('repositories', 'report_repositories', 'repository_id', 'public_id')} AS repository_id,
+        ${reportAggregate('repositories', 'report_repositories', 'repository_id', 'name')} AS repository_name,
         ${tagSelect('report_tags', 'report_id')}
       FROM reports AS entity
-      LEFT JOIN report_projects ON report_projects.report_id = entity.id
-      LEFT JOIN projects ON projects.id = report_projects.project_id
-        AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
-      WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
-        AND (? = '' OR entity.content LIKE ? OR entity.type LIKE ?)
+      WHERE ${reportFilters.where}
       `,
-        params: [this.context.workspace_id, text, like, like]
+        params: reportFilters.params
       }
     ]
     const unionSql = sources.map((source) => source.sql).join('\nUNION ALL\n')

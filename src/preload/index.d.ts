@@ -239,7 +239,7 @@ export interface API {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>
     get: (publicId: string) => Promise<Repository | null>
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository>
-    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<Repository | null>
+    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository | null>
     scan: (publicId: string) => Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
     scanAll: () => Promise<{
       succeeded: number

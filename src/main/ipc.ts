@@ -44,6 +44,7 @@ import {
   parseReportListInput,
   parseReportRequest,
   parseRepositoryCreateInput,
+  parseRepositoryUpdateInput,
   parseSearchQueryInput,
   parseWorkItemAssociations,
   toIpcContractError
@@ -205,12 +206,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('repository:get', guarded((publicId: unknown) => services().repositories.get(id(publicId, 'repository id'))))
   ipcMain.handle('repository:create', guarded((input: unknown) => services().repositories.create(parseRepositoryCreateInput(input))))
   ipcMain.handle('repository:update', guarded((publicId: unknown, input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new IpcContractError('INVALID_ARGUMENT', 'Repository update is invalid')
-    const value = input as Record<string, unknown>
-    if (Object.keys(value).some((key) => !['project_id', 'enabled'].includes(key))) throw new IpcContractError('INVALID_ARGUMENT', 'Unknown repository field')
-    if (value.project_id !== undefined && value.project_id !== null) id(value.project_id, 'project id')
-    if (value.enabled !== undefined && typeof value.enabled !== 'boolean') throw new IpcContractError('INVALID_ARGUMENT', 'enabled must be a boolean')
-    return services().repositories.update(id(publicId, 'repository id'), value as { project_id?: string | null; enabled?: boolean })
+    const value = parseRepositoryUpdateInput(input)
+    return services().repositories.update(id(publicId, 'repository id'), value)
   }))
   ipcMain.handle('repository:scan', guarded((publicId: unknown) => services().repositories.scanOne(id(publicId, 'repository id'))))
   ipcMain.handle('repository:scanAll', guarded(async () => {
