@@ -83,7 +83,7 @@ npm run typecheck:node
 
 提交信息：`新增自然周和自然月周期计算`
 
-Commit hash：`35f85af`（最终 amend 后 hash 见提交记录）。
+Commit hash：`e667a39`。
 
 ## 未解决问题
 
