@@ -33,6 +33,17 @@ describe('resolveReportPeriod', () => {
     expect(period.fromUtc < period.toUtc).toBe(true)
   })
 
+  it('周期起点包含，结束边界不包含', () => {
+    const period = resolveReportPeriod('weekly', '2026-08-23', 'Asia/Shanghai')
+    const startTimestamp = Date.parse(period.fromUtc)
+    const endTimestamp = Date.parse(period.toUtc)
+    const fromTimestamp = Date.parse(period.fromUtc)
+    const toTimestamp = Date.parse(period.toUtc)
+
+    expect(startTimestamp >= fromTimestamp && startTimestamp < toTimestamp).toBe(true)
+    expect(endTimestamp >= fromTimestamp && endTimestamp < toTimestamp).toBe(false)
+  })
+
   it('支持周一输入以及跨月、跨年周期', () => {
     const monday = resolveReportPeriod('weekly', '2026-08-17', 'Asia/Shanghai')
     const newYear = resolveReportPeriod('weekly', '2027-01-01', 'Asia/Shanghai')
