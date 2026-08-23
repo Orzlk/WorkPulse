@@ -57,7 +57,7 @@ describe('SQLite migrations', () => {
       .all() as Array<{ name: string }>
     const tableNames = tables.map((table) => table.name)
 
-    expect(getDatabaseVersion(database)).toBe(7)
+    expect(getDatabaseVersion(database)).toBe(8)
     expect(tableNames).toEqual(expect.arrayContaining([
       'schema_migrations',
       'workspaces',
@@ -79,6 +79,18 @@ describe('SQLite migrations', () => {
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 1 })
     expect(database.prepare('SELECT COUNT(*) AS count FROM users').get()).toEqual({ count: 1 })
+    const repositoryColumns = database.prepare('PRAGMA table_info(repositories)').all() as Array<{ name: string }>
+    const bindingColumns = database.prepare('PRAGMA table_info(repository_bindings)').all() as Array<{ name: string }>
+    const commitColumns = database.prepare('PRAGMA table_info(git_commits)').all() as Array<{ name: string }>
+    expect(repositoryColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'project_id', 'enabled', 'scan_interval_minutes', 'last_scanned_at', 'last_failed_at', 'last_scan_error'
+    ]))
+    expect(bindingColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'workspace_id', 'created_by', 'updated_by'
+    ]))
+    expect(commitColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'created_by', 'updated_by', 'deleted_at'
+    ]))
     database.close()
   })
 
@@ -131,7 +143,7 @@ describe('SQLite migrations', () => {
     const database = openDatabase(databasePath)
     runMigrations(database, { now: () => new Date('2026-08-23T12:34:56.000Z') })
 
-    expect(getDatabaseVersion(database)).toBe(7)
+    expect(getDatabaseVersion(database)).toBe(8)
     expect(database.prepare('SELECT id, title FROM tasks').all()).toEqual([{ id: 1, title: '保留的旧任务' }])
     expect(database.prepare('SELECT id, content, task_id FROM work_logs').all()).toEqual([
       { id: 1, content: '保留的旧日志', task_id: 1 }
@@ -255,7 +267,7 @@ describe('SQLite migrations', () => {
 
     runMigrations(database)
 
-    expect(getDatabaseVersion(database)).toBe(7)
+    expect(getDatabaseVersion(database)).toBe(8)
     expect(database.prepare('SELECT status, state, include_in_reports, ai_suggestion FROM inbox_items ORDER BY id').all())
       .toEqual([
         { status: 'inbox', state: 'unorganized', include_in_reports: 1, ai_suggestion: null },
@@ -273,6 +285,101 @@ describe('SQLite migrations', () => {
         { status: 'organized', state: 'confirmed', include_in_reports: 1, ai_suggestion: null },
         { status: 'archived', state: 'archived', include_in_reports: 1, ai_suggestion: null }
       ])
+    database.close()
+  })
+
+  it('为 v7 仓库数据补齐扫描字段与审计归属', () => {
+    const database = openDatabase(createTemporaryPath('v7-repositories.db'))
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE workspaces (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE repositories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        remote_url TEXT,
+        created_by INTEGER,
+        updated_by INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE repository_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        repository_id INTEGER NOT NULL,
+        local_path TEXT NOT NULL,
+        branch TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE git_commits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        repository_id INTEGER NOT NULL,
+        commit_hash TEXT NOT NULL,
+        author_name TEXT NOT NULL DEFAULT '',
+        author_email TEXT NOT NULL DEFAULT '',
+        committed_at TEXT NOT NULL,
+        message TEXT NOT NULL,
+        branch TEXT,
+        files_changed INTEGER NOT NULL DEFAULT 0,
+        additions INTEGER NOT NULL DEFAULT 0,
+        deletions INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(repository_id, commit_hash)
+      );
+      INSERT INTO workspaces VALUES (1, 'workspace-1', '工作空间', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO users VALUES (1, 'user-1', 1, '本地用户', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO projects VALUES (1, 'project-1', 1, '项目', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO repositories VALUES (1, 'repository-1', 1, '仓库', NULL, 1, 1, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO repository_bindings VALUES (1, 'binding-1', 1, 'D:/repo', 'main', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO git_commits VALUES (1, 'commit-1', 1, 1, '0123456789012345678901234567890123456789', '作者', 'author@example.com', '2026-08-23T00:00:00.000Z', '提交', 'main', 1, 1, 0, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z');
+      INSERT INTO schema_migrations VALUES (7, '007_project_inbox_contract', '2026-08-23T00:00:00.000Z');
+    `)
+
+    runMigrations(database)
+
+    expect(getDatabaseVersion(database)).toBe(8)
+    expect(database.prepare('SELECT project_id, enabled, last_scanned_at FROM repositories WHERE id = 1').get())
+      .toEqual({ project_id: null, enabled: 1, last_scanned_at: null })
+    expect(database.prepare('SELECT workspace_id, created_by, updated_by FROM repository_bindings WHERE id = 1').get())
+      .toEqual({ workspace_id: 1, created_by: 1, updated_by: 1 })
+    expect(database.prepare('SELECT created_by, updated_by, deleted_at FROM git_commits WHERE id = 1').get())
+      .toEqual({ created_by: 1, updated_by: 1, deleted_at: null })
     database.close()
   })
 
@@ -414,7 +521,7 @@ describe('legacy CRUD identity defaults', () => {
 
     const backups = readdirSync(backupDirectory).filter((name) => name.startsWith('workpulse-'))
     expect(backups).toHaveLength(2)
-    expect(backups.some((name) => name.includes('-v7-') && name.includes('T'))).toBe(true)
+    expect(backups.some((name) => name.includes('-v8-') && name.includes('T'))).toBe(true)
     getDatabase().close()
   })
 })

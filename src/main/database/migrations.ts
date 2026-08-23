@@ -469,6 +469,56 @@ const migrations: SchemaMigration[] = [
         CREATE INDEX IF NOT EXISTS idx_tags_workspace_active_path ON tags(workspace_id, deleted_at, path);
       `)
     }
+  },
+  {
+    version: 8,
+    name: '008_repository_scanning',
+    up: (database) => {
+      if (!tableExists(database, 'repositories') || !tableExists(database, 'repository_bindings') || !tableExists(database, 'git_commits')) {
+        return
+      }
+      addColumnIfMissing(database, 'repositories', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
+      addColumnIfMissing(database, 'repositories', 'enabled', 'INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1))')
+      addColumnIfMissing(database, 'repositories', 'scan_interval_minutes', 'INTEGER')
+      addColumnIfMissing(database, 'repositories', 'last_scanned_at', 'TEXT')
+      addColumnIfMissing(database, 'repositories', 'last_failed_at', 'TEXT')
+      addColumnIfMissing(database, 'repositories', 'last_scan_error', 'TEXT')
+      addColumnIfMissing(database, 'repository_bindings', 'workspace_id', 'INTEGER REFERENCES workspaces(id)')
+      addColumnIfMissing(database, 'repository_bindings', 'created_by', 'INTEGER REFERENCES users(id)')
+      addColumnIfMissing(database, 'repository_bindings', 'updated_by', 'INTEGER REFERENCES users(id)')
+      addColumnIfMissing(database, 'git_commits', 'created_by', 'INTEGER REFERENCES users(id)')
+      addColumnIfMissing(database, 'git_commits', 'updated_by', 'INTEGER REFERENCES users(id)')
+      addColumnIfMissing(database, 'git_commits', 'deleted_at', 'TEXT')
+      database.exec(`
+        UPDATE repository_bindings
+        SET workspace_id = (
+          SELECT workspace_id FROM repositories WHERE repositories.id = repository_bindings.repository_id
+        )
+        WHERE workspace_id IS NULL;
+        UPDATE repository_bindings
+        SET created_by = (
+          SELECT id FROM users WHERE users.workspace_id = repository_bindings.workspace_id ORDER BY id LIMIT 1
+        ), updated_by = (
+          SELECT id FROM users WHERE users.workspace_id = repository_bindings.workspace_id ORDER BY id LIMIT 1
+        )
+        WHERE created_by IS NULL OR updated_by IS NULL;
+        UPDATE git_commits
+        SET created_by = (
+          SELECT id FROM users WHERE users.workspace_id = git_commits.workspace_id ORDER BY id LIMIT 1
+        ), updated_by = (
+          SELECT id FROM users WHERE users.workspace_id = git_commits.workspace_id ORDER BY id LIMIT 1
+        )
+        WHERE created_by IS NULL OR updated_by IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_repositories_workspace_active
+          ON repositories(workspace_id, deleted_at, enabled, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_repository_bindings_repository_active
+          ON repository_bindings(repository_id, deleted_at, id);
+        CREATE INDEX IF NOT EXISTS idx_git_commits_repository_committed
+          ON git_commits(repository_id, committed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_git_commits_workspace_committed
+          ON git_commits(workspace_id, committed_at DESC);
+      `)
+    }
   }
 ]
 

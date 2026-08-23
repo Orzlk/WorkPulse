@@ -2,13 +2,15 @@ import { app, BrowserWindow, shell, Menu, Tray, nativeImage, globalShortcut, ipc
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDatabase, getSetting, setSetting } from './db'
+import { getDatabase, getDefaultWorkspaceContext, initDatabase, getSetting, setSetting } from './db'
 import { registerIpcHandlers } from './ipc'
 import { tMain, type AppLanguage } from './i18n'
 import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './updater'
+import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
 
 let tray: Tray | null = null
 let isQuitting = false
+let repositoryScheduler: RepositoryScheduler | null = null
 
 // --- Helpers ---
 
@@ -42,6 +44,17 @@ function registerShortcut(accelerator: string, channel: string): boolean {
   } catch {
     return false
   }
+}
+
+function startRepositoryScheduler(): void {
+  if (getSetting('git_scan_enabled') === 'false') return
+  const configuredInterval = Number(getSetting('git_scan_interval_minutes') ?? '30')
+  const intervalMinutes = Number.isFinite(configuredInterval) && configuredInterval > 0 ? configuredInterval : 30
+  repositoryScheduler = new RepositoryScheduler(
+    new RepositoryService(getDatabase(), getDefaultWorkspaceContext()),
+    intervalMinutes * 60 * 1000
+  )
+  repositoryScheduler.start()
 }
 
 export function reregisterGlobalShortcuts(
@@ -304,6 +317,7 @@ if (!gotTheLock) {
     })
 
     await initDatabase()
+    startRepositoryScheduler()
     configureAutoUpdater()
     registerIpcHandlers()
     registerShortcutIpc()
@@ -328,6 +342,7 @@ if (!gotTheLock) {
   })
 
   app.on('will-quit', () => {
+    repositoryScheduler?.stop()
     globalShortcut.unregisterAll()
   })
 
