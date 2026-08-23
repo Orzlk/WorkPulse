@@ -14,6 +14,8 @@ Built for individual contributors who want a frictionless way to remember what t
 
 **AI Reports** — Select a date range, get a structured summary of your work. Reports use both work logs and task context, support OpenAI/Anthropic-compatible providers, and can be previewed, edited, saved to history, copied, or exported.
 
+**Projects, Inbox, and Git Activity** — Capture fragments in an inbox, organize them into logs or tasks, assign projects/repositories/multiple `#tags`, and scan selected local Git repositories with read-only commands. Git activity is grouped into project reports without uploading repository paths.
+
 **Statistics** — 14-day activity bar chart, GitHub-style heat map, streak counter, and task completion metrics.
 
 **Quick Capture** — Configurable global shortcuts (`Ctrl+Shift+L` for logs, `Ctrl+Shift+T` for tasks by default) let you record without switching windows. Quick logs also support `#tag` parsing and are accessible from the menu bar tray icon.
@@ -90,7 +92,13 @@ Packaged apps use the same GitHub Release metadata (`latest.yml`, `latest-mac.ym
 
 ## Data & Security
 
-All data is stored locally in SQLite at your system's app data directory. Automatic daily backups are created. API keys are stored through Electron secure storage when available, with migration cleanup for legacy plaintext keys. No cloud, no account, no telemetry.
+Stage 1 is local-first. The database is stored as `workpulse.db` in Electron's system `userData` directory, with migration backups in `userData/backups`. The current schema version is 11; app startup runs transactional migrations and verifies database integrity. Import/export uses a logical, versioned JSON package instead of replacing the SQLite file directly: imports are previewed, merged by `public_id`, and imported repository bindings are disabled until you manually confirm a local path.
+
+Repository scanning invokes only read-only Git commands (`rev-parse` and `log`) against paths you select. It never runs checkout, fetch, reset, or other write commands. The exported package excludes settings, API keys, and local repository paths.
+
+AI reports receive only the selected period's authorized work-log text, task fields, confirmed reportable inbox items, Git commit summaries, project/repository scope, and tag names. Unorganized inbox drafts, API keys, settings, and repository paths are never sent to the report provider. Weekly reports use the natural Monday–Sunday week; monthly reports use the natural calendar month. Both use the selected time zone and UTC half-open storage boundaries.
+
+There is no login, cloud synchronization, online workspace, or team collaboration in Stage 1. Data remains on this device unless you explicitly export it or send an approved report snapshot to your configured AI provider.
 
 ## License
 
