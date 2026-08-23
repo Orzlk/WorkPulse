@@ -14,7 +14,6 @@ import {
   Save
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import { getDateRange, type DatePreset } from '../lib/dateUtils'
 import { useToast } from '../components/Toast'
 import { useI18n } from '../stores/languageStore'
 
@@ -25,14 +24,15 @@ interface Report {
   period_end: string
   content: string
   generated_at: string | null
+  display_start: string
+  display_end_inclusive: string
 }
 
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
 
 function ReportPage(): JSX.Element {
-  const [preset, setPreset] = useState<DatePreset>('this_week')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly')
+  const [anchorDate, setAnchorDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [status, setStatus] = useState<Status>('idle')
   const [reportContent, setReportContent] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -47,7 +47,6 @@ function ReportPage(): JSX.Element {
 
   useEffect(() => {
     checkApiKey()
-    applyPreset('this_week')
     loadHistory()
   }, [])
 
@@ -63,15 +62,8 @@ function ReportPage(): JSX.Element {
     setHistory(reports)
   }
 
-  const applyPreset = (p: DatePreset): void => {
-    setPreset(p)
-    const range = getDateRange(p)
-    setDateFrom(range.from)
-    setDateTo(range.to)
-  }
-
   const handleGenerate = async (): Promise<void> => {
-    if (!dateFrom || !dateTo) return
+    if (!anchorDate) return
 
     setStatus('generating')
     setReportContent('')
@@ -81,8 +73,8 @@ function ReportPage(): JSX.Element {
 
     try {
       const report = await window.api.report.generate({
-        type: dateFrom.endsWith('-01') ? 'monthly' : 'weekly',
-        anchorDate: dateTo,
+        type: reportType,
+        anchorDate,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
       })
       setReportContent(report.content)
@@ -155,14 +147,6 @@ function ReportPage(): JSX.Element {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   }
 
-  const presets: { value: DatePreset; label: string }[] = [
-    { value: 'this_week', label: t('report.thisWeek') },
-    { value: 'last_week', label: t('report.lastWeek') },
-    { value: 'this_month', label: t('report.thisMonth') },
-    { value: 'last_month', label: t('report.lastMonth') },
-    { value: 'this_quarter', label: t('report.thisQuarter') }
-  ]
-
   const isViewingHistory = viewingReport !== null
 
   return (
@@ -178,7 +162,7 @@ function ReportPage(): JSX.Element {
           </button>
           <span className="text-sm text-zinc-400">|</span>
           <span className="text-sm text-zinc-600 dark:text-zinc-400">
-            {viewingReport.period_start.slice(0, 10)} {t('common.to')} {viewingReport.period_end.slice(0, 10)}
+            {viewingReport.display_start} {t('common.to')} {viewingReport.display_end_inclusive}
           </span>
           <span className="text-xs text-zinc-400">
             {t('report.generatedAt', { time: formatReportDate(viewingReport.generated_at) })}
@@ -191,32 +175,25 @@ function ReportPage(): JSX.Element {
         <>
           <div className="mb-6">
             <div className="flex flex-wrap gap-2 mb-3">
-              {presets.map((p) => (
+              {(['weekly', 'monthly'] as const).map((type) => (
                 <button
-                  key={p.value}
-                  onClick={() => applyPreset(p.value)}
+                  key={type}
+                  onClick={() => setReportType(type)}
                   className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                    preset === p.value
+                    reportType === type
                       ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
                       : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
                   }`}
                 >
-                  {p.label}
+                  {type === 'weekly' ? t('report.weekly') : t('report.monthly')}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-2 text-sm text-zinc-500">
               <input
                 type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="px-2 py-1 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 bg-white dark:bg-zinc-800 dark:text-zinc-100"
-              />
-              <span>{t('common.to')}</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
+                value={anchorDate}
+                onChange={(e) => setAnchorDate(e.target.value)}
                 className="px-2 py-1 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 bg-white dark:bg-zinc-800 dark:text-zinc-100"
               />
             </div>
@@ -346,9 +323,10 @@ function ReportPage(): JSX.Element {
             </button>
             <button
               onClick={async () => {
-                const range = viewingReport
-                  ? `${viewingReport.period_start.slice(0, 10)}-${viewingReport.period_end.slice(0, 10)}`
-                  : `${dateFrom}-${dateTo}`
+                const displayReport = viewingReport ?? activeReport
+                const range = displayReport
+                  ? `${displayReport.display_start}-${displayReport.display_end_inclusive}`
+                  : `${reportType}-${anchorDate}`
                 const path = await window.api.export.report(reportContent, range)
                 if (path) toast.success(t('report.exported'))
               }}
@@ -418,7 +396,7 @@ function ReportPage(): JSX.Element {
                     <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
                       <span className="text-sm text-zinc-700 dark:text-zinc-300">
-                        {report.period_start.slice(0, 10)} {t('common.to')} {report.period_end.slice(0, 10)}
+                        {report.display_start} {t('common.to')} {report.display_end_inclusive}
                       </span>
                     </div>
                     <p className="text-xs text-zinc-400 mt-1 ml-6 truncate">

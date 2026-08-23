@@ -89,4 +89,6 @@ export interface SavedPeriodReport {
   retry_count: number
   generated_at: string | null
   updated_at: string
+  display_start: string
+  display_end_inclusive: string
 }

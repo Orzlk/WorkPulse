@@ -2,9 +2,12 @@ import type { InboxState, InboxSuggestion } from './domain/types'
 import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput } from './services/repositoryService'
+import { format, isValid, parseISO } from 'date-fns'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const MAX_TAG_NAMES = 50
+const MAX_TAG_NAME_LENGTH = 200
 
 export type IpcErrorCode =
   | 'INVALID_ARGUMENT'
@@ -72,11 +75,58 @@ export function parsePagination(value: unknown): Required<Pagination> {
   return { limit: limit as number, offset: offset as number }
 }
 
+export function parseReportListInput(value: unknown): Required<Pagination> {
+  if (value === undefined) return parsePagination(undefined)
+  if (typeof value === 'number') return parsePagination({ limit: value, offset: 0 })
+  return parsePagination(value)
+}
+
+export function parseTagNames(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_TAG_NAMES) throw invalid('tag_names is invalid')
+  const names = value.map((tag) => {
+    if (typeof tag !== 'string') throw invalid('tag_names is invalid')
+    const normalized = tag.replace(/^#/, '').replace(/\s+/g, ' ').trim().split('/').map((segment) => segment.trim()).filter(Boolean).join('/').toLowerCase()
+    if (!normalized || normalized.length > MAX_TAG_NAME_LENGTH) throw invalid('tag_names is invalid')
+    return normalized
+  })
+  return Array.from(new Set(names))
+}
+
+export interface ParsedSearchQuery {
+  text?: string
+  tag_names?: string[]
+  project_id?: string | null
+  repository_id?: string | null
+  state?: InboxState
+  limit: number
+  offset: number
+}
+
+export function parseSearchQueryInput(value: unknown): ParsedSearchQuery {
+  const input = object(value, ['text', 'tag_names', 'project_id', 'repository_id', 'state', 'limit', 'offset'])
+  const pagination = parsePagination({ limit: input.limit, offset: input.offset })
+  if (input.text !== undefined && (typeof input.text !== 'string' || input.text.length > 500)) throw invalid('Search text is invalid')
+  if (input.project_id !== undefined && input.project_id !== null) id(input.project_id, 'project id')
+  if (input.repository_id !== undefined && input.repository_id !== null) id(input.repository_id, 'repository id')
+  if (input.state !== undefined) parseInboxState(input.state)
+  return {
+    ...pagination,
+    text: input.text === undefined ? undefined : (input.text as string).trim(),
+    tag_names: input.tag_names === undefined ? undefined : parseTagNames(input.tag_names),
+    project_id: input.project_id as string | null | undefined,
+    repository_id: input.repository_id as string | null | undefined,
+    state: input.state as InboxState | undefined
+  }
+}
+
 export function parseReportRequest(value: unknown): ReportRequest {
   const input = object(value, ['type', 'anchorDate', 'timeZone', 'projectIds', 'repositoryIds'])
   if (input.type !== 'weekly' && input.type !== 'monthly') throw invalid('report type is invalid')
   const anchorDate = string(input.anchorDate, 'anchorDate', { max: 10 })
-  if (!DATE_PATTERN.test(anchorDate) || Number.isNaN(Date.parse(`${anchorDate}T00:00:00.000Z`))) throw invalid('anchorDate is invalid')
+  const parsedAnchorDate = parseISO(anchorDate)
+  if (!DATE_PATTERN.test(anchorDate) || !isValid(parsedAnchorDate) || format(parsedAnchorDate, 'yyyy-MM-dd') !== anchorDate) {
+    throw invalid('anchorDate is invalid')
+  }
   const timeZone = string(input.timeZone, 'timeZone', { max: 100 })
   try {
     new Intl.DateTimeFormat('en-US', { timeZone }).format()

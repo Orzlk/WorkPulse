@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   IpcContractError,
+  parseReportListInput,
   parsePagination,
   parseReportRequest,
-  parseRepositoryCreateInput
+  parseRepositoryCreateInput,
+  parseSearchQueryInput,
+  parseTagNames
 } from '../../src/main/ipcContracts'
 
 describe('IPC contract validation', () => {
@@ -28,5 +31,30 @@ describe('IPC contract validation', () => {
     expect(() => parsePagination({ limit: 201 })).toThrow('INVALID_ARGUMENT')
     expect(() => parseRepositoryCreateInput({ name: 'repo', local_path: 'C:/repo', command: 'reset' }))
       .toThrow('INVALID_ARGUMENT')
+  })
+
+  it('validates legacy numeric report pagination through the same parser', () => {
+    expect(parseReportListInput(20)).toEqual({ limit: 20, offset: 0 })
+    expect(() => parseReportListInput(0)).toThrow('INVALID_ARGUMENT')
+    expect(() => parseReportListInput(201)).toThrow('INVALID_ARGUMENT')
+    expect(() => parseReportListInput({ limit: 20, offset: 4, extra: true })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('normalizes and bounds search tag names before calling the service', () => {
+    expect(parseTagNames(['  技术  /  前端 ', '#技术/前端'])).toEqual(['技术/前端'])
+    expect(() => parseTagNames('技术/前端')).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTagNames([{}])).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTagNames(Array.from({ length: 51 }, () => 'tag'))).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTagNames(['x'.repeat(201)])).toThrow('INVALID_ARGUMENT')
+    expect(() => parseSearchQueryInput({ tag_names: null })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('rejects normalized dates that do not exist in the calendar', () => {
+    for (const anchorDate of ['2026-02-30', '2025-02-29', '2026-04-31', '2026-00-10', '2026-13-01']) {
+      expect(() => parseReportRequest({ type: 'monthly', anchorDate, timeZone: 'Asia/Shanghai' }))
+        .toThrow('INVALID_ARGUMENT')
+    }
+    expect(parseReportRequest({ type: 'monthly', anchorDate: '2024-02-29', timeZone: 'Asia/Shanghai' }).anchorDate)
+      .toBe('2024-02-29')
   })
 })

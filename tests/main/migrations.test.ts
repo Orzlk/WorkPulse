@@ -423,6 +423,32 @@ describe('SQLite migrations', () => {
     database.close()
   })
 
+  it('从明确的 v9 fixture 执行 v10，保留绑定数据且重复执行不变', () => {
+    const database = openMigratedDatabase()
+    const context = database.prepare('SELECT workspace_id, id AS user_id FROM users ORDER BY id LIMIT 1').get() as {
+      workspace_id: number
+      user_id: number
+    }
+    const repositoryId = Number(database.prepare(`
+      INSERT INTO repositories (public_id, workspace_id, name, created_by, updated_by, created_at, updated_at)
+      VALUES ('v9-repository', ?, 'v9 仓库', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+    `).run(context.workspace_id, context.user_id, context.user_id).lastInsertRowid)
+    database.prepare(`
+      INSERT INTO repository_bindings (public_id, repository_id, workspace_id, local_path, created_by, updated_by, created_at, updated_at)
+      VALUES ('v9-binding', ?, ?, 'D:/v9-repo', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+    `).run(repositoryId, context.workspace_id, context.user_id, context.user_id)
+    database.exec('ALTER TABLE repository_bindings DROP COLUMN is_valid')
+    database.prepare('DELETE FROM schema_migrations WHERE version = 10').run()
+
+    runMigrations(database)
+    expect(database.prepare('SELECT is_valid, local_path FROM repository_bindings WHERE public_id = ?').get('v9-binding'))
+      .toEqual({ is_valid: 1, local_path: 'D:/v9-repo' })
+    const migrationCount = database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 10').get()
+    runMigrations(database)
+    expect(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 10').get()).toEqual(migrationCount)
+    database.close()
+  })
+
   it('rolls back a failed migration before recording its version', () => {
     const database = openDatabase(createTemporaryPath('rollback.db'))
     database.exec(`

@@ -36,19 +36,20 @@ import { ReportService } from './reports/reportService'
 import {
   IpcContractError,
   id,
-  integerId,
   parseInboxInput,
   parsePagination,
   parseProjectInput,
+  parseReportListInput,
   parseReportRequest,
   parseRepositoryCreateInput,
-  parseInboxState,
+  parseSearchQueryInput,
   toIpcContractError
 } from './ipcContracts'
 import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
+import { ImportTokenStore } from './database/importTokenStore'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
-const pendingImports = new Map<string, unknown>()
+const pendingImports = new ImportTokenStore<unknown>(10 * 60 * 1000)
 
 function services(): {
   projects: ProjectService
@@ -74,6 +75,16 @@ function guarded<TArgs extends unknown[], TResult>(handler: (...args: TArgs) => 
   return async (_event: Electron.IpcMainInvokeEvent, ...args: TArgs): Promise<TResult> => {
     try {
       return await handler(...args)
+    } catch (error) {
+      throw toIpcContractError(error)
+    }
+  }
+}
+
+function guardedWithEvent<TArgs extends unknown[], TResult>(handler: (event: Electron.IpcMainInvokeEvent, ...args: TArgs) => TResult | Promise<TResult>) {
+  return async (event: Electron.IpcMainInvokeEvent, ...args: TArgs): Promise<TResult> => {
+    try {
+      return await handler(event, ...args)
     } catch (error) {
       throw toIpcContractError(error)
     }
@@ -133,9 +144,7 @@ export function registerIpcHandlers(): void {
   }))
 
   ipcMain.handle('report:list', guarded((pagination?: unknown) => {
-    const value = pagination === undefined || typeof pagination === 'number'
-      ? { limit: pagination ?? 50, offset: 0 }
-      : parsePagination(pagination)
+    const value = parseReportListInput(pagination)
     return services().reports.list(value.limit)
   }))
 
@@ -184,25 +193,7 @@ export function registerIpcHandlers(): void {
     return services().tags.search(query, parsePagination(pagination))
   }))
 
-  ipcMain.handle('search:query', guarded((input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new IpcContractError('INVALID_ARGUMENT', 'Search query is invalid')
-    const query = input as Record<string, unknown>
-    if (Object.keys(query).some((key) => !['text', 'tag_names', 'project_id', 'repository_id', 'state', 'limit', 'offset'].includes(key))) {
-      throw new IpcContractError('INVALID_ARGUMENT', 'Unknown search field')
-    }
-    const pagination = parsePagination({ limit: query.limit, offset: query.offset })
-    if (query.text !== undefined && (typeof query.text !== 'string' || query.text.length > 500)) throw new IpcContractError('INVALID_ARGUMENT', 'Search text is invalid')
-    if (query.project_id !== undefined && query.project_id !== null) id(query.project_id, 'project id')
-    if (query.repository_id !== undefined && query.repository_id !== null) id(query.repository_id, 'repository id')
-    return services().search.searchInbox({
-      ...pagination,
-      text: query.text as string | undefined,
-      tag_names: query.tag_names as string[] | undefined,
-      project_id: query.project_id as string | null | undefined,
-      repository_id: query.repository_id as string | null | undefined,
-      state: query.state === undefined ? undefined : parseInboxState(query.state)
-    })
-  }))
+  ipcMain.handle('search:query', guarded((input: unknown) => services().search.searchInbox(parseSearchQueryInput(input))))
 
   ipcMain.handle('repository:list', guarded((pagination?: unknown) => services().repositories.list(parsePagination(pagination))))
   ipcMain.handle('repository:create', guarded((input: unknown) => services().repositories.create(parseRepositoryCreateInput(input))))
@@ -239,7 +230,7 @@ export function registerIpcHandlers(): void {
     return { filePath: result.filePath, preview: previewDatabaseImport(payload) }
   }))
 
-  ipcMain.handle('database:import', guarded(async (request: unknown) => {
+  ipcMain.handle('database:import', guardedWithEvent(async (event, request: unknown) => {
     const action = request && typeof request === 'object' && !Array.isArray(request) ? request as Record<string, unknown> : null
     if (!action || Object.keys(action).some((key) => !['action', 'token'].includes(key)) || (action.action !== 'preview' && action.action !== 'merge')) {
       throw new IpcContractError('INVALID_ARGUMENT', 'Import request is invalid')
@@ -259,14 +250,12 @@ export function registerIpcHandlers(): void {
       } catch {
         throw new IpcContractError('IMPORT_INVALID', 'Invalid data package')
       }
-      const token = crypto.randomUUID()
       const preview = previewDatabaseImport(payload)
-      pendingImports.set(token, payload)
+      const token = pendingImports.put(payload, String(event.sender.id))
       return { token, preview }
     }
-    if (typeof action.token !== 'string' || !pendingImports.has(action.token)) throw new IpcContractError('IMPORT_NOT_READY', 'Import preview is required')
-    const payload = pendingImports.get(action.token)
-    pendingImports.delete(action.token)
+    if (typeof action.token !== 'string') throw new IpcContractError('IMPORT_NOT_READY', 'Import preview is required')
+    const payload = pendingImports.take(action.token, String(event.sender.id))
     return mergeDatabaseImport(getDatabase(), getDefaultWorkspaceContext(), payload)
   }))
 

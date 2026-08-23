@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { subMilliseconds } from 'date-fns'
+import { formatInTimeZone } from 'date-fns-tz'
 
 import type Database from 'better-sqlite3'
 
@@ -174,12 +176,32 @@ export class ReportService {
   }
 
   private toSavedReport(row: ReportRow): SavedPeriodReport {
+    const displayPeriod = this.getDisplayPeriod(row)
     return {
       ...row,
       period_end: row.period_end_exclusive,
       project_scope: JSON.parse(row.project_scope) as string[],
       repository_scope: JSON.parse(row.repository_scope) as string[],
-      source_snapshot: this.parseSnapshot(row)
+      source_snapshot: this.parseSnapshot(row),
+      ...displayPeriod
+    }
+  }
+
+  private getDisplayPeriod(row: ReportRow): { display_start: string; display_end_inclusive: string } {
+    try {
+      return {
+        display_start: formatInTimeZone(row.period_start, row.timezone || 'UTC', 'yyyy-MM-dd'),
+        display_end_inclusive: formatInTimeZone(
+          subMilliseconds(new Date(row.period_end_exclusive), 1),
+          row.timezone || 'UTC',
+          'yyyy-MM-dd'
+        )
+      }
+    } catch {
+      return {
+        display_start: row.period_start.slice(0, 10),
+        display_end_inclusive: new Date(new Date(row.period_end_exclusive).getTime() - 1).toISOString().slice(0, 10)
+      }
     }
   }
 

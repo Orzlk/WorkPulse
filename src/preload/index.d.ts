@@ -96,6 +96,8 @@ interface PeriodReport {
   retry_count: number
   generated_at: string | null
   updated_at: string
+  display_start: string
+  display_end_inclusive: string
 }
 
 interface Task {
@@ -130,7 +132,7 @@ interface AppUpdateState {
   canInstall?: boolean
 }
 
-interface API {
+export interface API {
   app: {
     setLanguage: (language: AppLanguage) => Promise<void>
     getVersion: () => Promise<string>
@@ -206,12 +208,12 @@ interface API {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository>
     update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<Repository | null>
-    scan: (publicId: string) => Promise<unknown>
+    scan: (publicId: string) => Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
     scanAll: () => Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
   }
   database: {
     export: () => Promise<{ filePath: string; preview: unknown } | null>
-    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<unknown>
+    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
   }
   settings: {
     get: (key: string) => Promise<string | null>

@@ -213,6 +213,20 @@ describe('ReportService and period AI generation', () => {
     database.close()
   })
 
+  it('returns local inclusive display dates while retaining UTC audit boundaries', async () => {
+    const database = createDatabase()
+    const service = new ReportService(database, context(database), {
+      generateContent: async () => '# 周报\n\n完成。'
+    })
+    const report = await service.generate(request({ anchorDate: '2026-08-23', timeZone: 'Asia/Shanghai' }))
+
+    expect(report.period_start).toBe('2026-08-16T16:00:00.000Z')
+    expect(report.period_end).toBe('2026-08-23T16:00:00.000Z')
+    expect(report.display_start).toBe('2026-08-17')
+    expect(report.display_end_inclusive).toBe('2026-08-23')
+    database.close()
+  })
+
   it('validates period AI provider responses and returns a displayable empty report without calling the provider', async () => {
     const period = resolveReportPeriod('monthly', '2026-08-23', 'Asia/Shanghai')
     const provider: PeriodReportProvider = async () => ({ content: '## 月报\n\n下月建议：继续验证。' })

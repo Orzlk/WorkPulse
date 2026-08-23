@@ -39,6 +39,31 @@ describe('database transfer package', () => {
     expect(exported.tables.projects).toHaveLength(1)
     expect(JSON.stringify(exported)).not.toContain('secret-value')
     expect(exported.tables.settings).toBeUndefined()
+    expect(exported.tables.projects?.[0]).not.toHaveProperty('future_secret')
+    expect(JSON.stringify(exported)).not.toContain('local_path')
+    database.close()
+  })
+
+  it('rejects unknown input columns, unsupported future schema and oversized exports', () => {
+    const database = createDatabase()
+    const packageWithSecret = createDatabaseExport(database, context(database)) as DatabaseTransferPackage
+    packageWithSecret.tables.projects = [{
+      id: 1,
+      public_id: 'project-future',
+      name: '项目',
+      description: '',
+      color: '#111111',
+      created_at: '2026-08-23T00:00:00.000Z',
+      updated_at: '2026-08-23T00:00:00.000Z',
+      future_secret: 'do-not-ignore'
+    }]
+    expect(() => previewDatabaseImport(packageWithSecret)).toThrow('IMPORT_INVALID')
+    expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 11 })).toThrow('IMPORT_INVALID')
+
+    database.prepare(`INSERT INTO work_logs (public_id, workspace_id, content, created_at, updated_at)
+      VALUES ('large-log', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(context(database).workspace_id, 'x'.repeat(20 * 1024 * 1024))
+    expect(() => createDatabaseExport(database, context(database))).toThrow('IMPORT_TOO_LARGE')
     database.close()
   })
 

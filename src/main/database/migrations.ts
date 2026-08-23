@@ -7,6 +7,7 @@ import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+export const CURRENT_SCHEMA_VERSION = 10
 
 function tableExists(database: Database.Database, tableName: string): boolean {
   return Boolean(
@@ -588,7 +589,7 @@ const migrations: SchemaMigration[] = [
     }
   },
   {
-    version: 10,
+    version: CURRENT_SCHEMA_VERSION,
     name: '010_repository_binding_validity',
     up: (database) => {
       addColumnIfMissing(database, 'repository_bindings', 'is_valid', 'INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0, 1))')

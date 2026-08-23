@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { API } from './index.d'
 
 type QuickCreateType = 'log' | 'task'
 type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings'
@@ -112,6 +113,8 @@ interface PeriodReport {
   retry_count: number
   generated_at: string | null
   updated_at: string
+  display_start: string
+  display_end_inclusive: string
 }
 
 const api = {
@@ -160,7 +163,7 @@ const api = {
   report: {
     generate: (request: ReportRequest) =>
       ipcRenderer.invoke('report:generate', request) as Promise<PeriodReport>,
-    list: (limit?: number) => ipcRenderer.invoke('report:list', limit),
+    list: (limit?: number) => ipcRenderer.invoke('report:list', limit) as Promise<PeriodReport[]>,
     get: (publicId: string) => ipcRenderer.invoke('report:get', publicId) as Promise<PeriodReport | null>,
     update: (publicId: string, input: { content: string }) =>
       ipcRenderer.invoke('report:update', publicId, input) as Promise<PeriodReport | null>
@@ -192,12 +195,12 @@ const api = {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:create', input) as Promise<Repository>,
     update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
-    scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId),
+    scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId) as Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>,
     scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
   },
   database: {
     export: () => ipcRenderer.invoke('database:export') as Promise<{ filePath: string; preview: unknown } | null>,
-    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request)
+    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request) as Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -252,7 +255,7 @@ const api = {
       }
     }
   }
-}
+} satisfies API
 
 if (process.contextIsolated) {
   try {
