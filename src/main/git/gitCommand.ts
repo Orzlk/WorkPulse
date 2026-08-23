@@ -2,8 +2,9 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-const READ_ONLY_COMMANDS = new Set(['rev-parse', 'log'])
 const DEFAULT_TIMEOUT_MS = 15_000
+const LOG_FORMAT = '--format=\u001e%H\u001f%an\u001f%ae\u001f%cI\u001f%s'
+const ISO_BOUNDARY_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 export class GitReadError extends Error {
   constructor(message: string) {
@@ -25,13 +26,39 @@ export interface GitCommandExecutor {
   execute(cwd: string, args: string[]): Promise<string>
 }
 
+function assertReadOnlyArguments(args: string[]): void {
+  const [command, ...rest] = args
+  if (command === 'rev-parse') {
+    const isRootCheck = rest.length === 1 && rest[0] === '--show-toplevel'
+    const isBranchCheck = rest.length === 2 && rest[0] === '--abbrev-ref' && rest[1] === 'HEAD'
+    if (isRootCheck || isBranchCheck) return
+  }
+
+  if (command === 'log') {
+    if (rest.length < 3 || rest.length > 5) throw new GitReadError('Git 命令不在只读允许范围内')
+    if (rest[0] !== '--no-renames' || rest[1] !== '--numstat' || rest[2] !== LOG_FORMAT) {
+      throw new GitReadError('Git 命令不在只读允许范围内')
+    }
+    const optionalArguments = rest.slice(3)
+    const seen = new Set<string>()
+    for (const argument of optionalArguments) {
+      const name = argument.startsWith('--since=') ? '--since' : argument.startsWith('--before=') ? '--before' : null
+      if (!name || seen.has(name) || !ISO_BOUNDARY_PATTERN.test(argument.slice(name.length + 1))) {
+        throw new GitReadError('Git 命令不在只读允许范围内')
+      }
+      seen.add(name)
+    }
+    return
+  }
+
+  throw new GitReadError('Git 命令不在只读允许范围内')
+}
+
 export class GitCommand implements GitCommandExecutor {
   constructor(private readonly timeoutMs = DEFAULT_TIMEOUT_MS) {}
 
   async execute(cwd: string, args: string[]): Promise<string> {
-    if (!READ_ONLY_COMMANDS.has(args[0])) {
-      throw new GitReadError('Git 命令不在只读允许范围内')
-    }
+    assertReadOnlyArguments(args)
 
     try {
       const { stdout } = await execFileAsync('git', args, {

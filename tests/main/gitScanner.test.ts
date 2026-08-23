@@ -7,8 +7,10 @@ import { join } from 'node:path'
 
 import { openDatabase, runMigrations } from '../../src/main/database/connection'
 import type { WorkspaceContext } from '../../src/main/repositories/contracts'
+import { GitCommand } from '../../src/main/git/gitCommand'
 import { GitScanner } from '../../src/main/git/gitScanner'
-import { RepositoryService } from '../../src/main/services/repositoryService'
+import { ProjectService } from '../../src/main/services/projectService'
+import { RepositoryScheduler, RepositoryService } from '../../src/main/services/repositoryService'
 
 const temporaryDirectories: string[] = []
 
@@ -71,6 +73,25 @@ afterEach(() => {
 })
 
 describe('GitScanner', () => {
+  it('GitCommand 拒绝危险参数但保留实际只读命令', async () => {
+    const directory = createGitRepository()
+    const command = new GitCommand()
+
+    for (const args of [
+      ['log', '--output=unsafe.txt'],
+      ['log', '--exec=echo unsafe'],
+      ['log', '--ext-diff'],
+      ['log', '--textconv'],
+      ['log', '-c', 'core.pager=cat'],
+      ['log', '--config=core.pager=cat']
+    ]) {
+      await expect(command.execute(directory, args)).rejects.toThrow('只读')
+    }
+
+    await expect(command.execute(directory, ['rev-parse', '--show-toplevel']))
+      .resolves.toContain(directory.replaceAll('\\', '/'))
+  })
+
   it('仅发起允许的只读 Git 命令', async () => {
     const calls: string[][] = []
     const scanner = new GitScanner({
@@ -88,6 +109,51 @@ describe('GitScanner', () => {
 
     expect(calls.map((args) => args[0])).toEqual(['rev-parse', 'rev-parse', 'log'])
     expect(result.commits).toMatchObject([{ additions: 1, deletions: 0, file_count: 1 }])
+  })
+
+  it('按 UTC 半开区间过滤恰好落在上下界的提交', async () => {
+    const since = '2026-08-23T00:00:00.000Z'
+    const until = '2026-08-23T02:00:00.000Z'
+    const hash = (value: string) => value.repeat(40).slice(0, 40)
+    const output = [
+      `${hash('a')}\u001f作者\u001fa@example.com\u001f${since}\u001f下界\n1\t0\ta.txt`,
+      `${hash('b')}\u001f作者\u001fb@example.com\u001f2026-08-23T01:00:00.000Z\u001f区间内\n1\t0\tb.txt`,
+      `${hash('c')}\u001f作者\u001fc@example.com\u001f${until}\u001f上界\n1\t0\tc.txt`
+    ].map((record) => `\u001e${record}`).join('\n')
+    const scanner = new GitScanner({
+      execute: async (_cwd, args) => {
+        if (args[0] === 'log') return output
+        return args.includes('--show-toplevel') ? 'D:/repo\n' : 'main\n'
+      }
+    })
+
+    const result = await scanner.scan(
+      { id: 1, public_id: 'repository-1' },
+      { id: 1, repository_id: 1, local_path: 'D:/repo' },
+      { since, until }
+    )
+
+    expect(result.commits.map((commit) => commit.subject)).toEqual(['下界', '区间内'])
+  })
+
+  it('遇到非法时间或异常提交格式时失败而不是静默丢弃', async () => {
+    const invalidTimestampScanner = new GitScanner({
+      execute: async (_cwd, args) => {
+        if (args[0] === 'log') return '\u001e0123456789012345678901234567890123456789\u001f作者\u001fa@example.com\u001fnot-a-time\u001f非法时间\n'
+        return args.includes('--show-toplevel') ? 'D:/repo\n' : 'main\n'
+      }
+    })
+    const malformedScanner = new GitScanner({
+      execute: async (_cwd, args) => {
+        if (args[0] === 'log') return '\u001e0123456789012345678901234567890123456789\u001f异常\u001f字段\u001f2026-08-23T00:00:00.000Z\u001f主题\u001f多余字段\n'
+        return args.includes('--show-toplevel') ? 'D:/repo\n' : 'main\n'
+      }
+    })
+    const repository = { id: 1, public_id: 'repository-1' }
+    const binding = { id: 1, repository_id: 1, local_path: 'D:/repo' }
+
+    await expect(invalidTimestampScanner.scan(repository, binding)).rejects.toThrow('提交时间')
+    await expect(malformedScanner.scan(repository, binding)).rejects.toThrow('提交格式')
   })
 
   it('只读取最近三十天提交，并统计文本和二进制变更', async () => {
@@ -130,6 +196,51 @@ describe('GitScanner', () => {
     expect(second.status).toBe('succeeded')
     expect(second.inserted_count).toBe(0)
     expect(database.prepare('SELECT COUNT(*) AS count FROM git_commits').get()).toEqual({ count: 2 })
+    const commit = database.prepare('SELECT public_id FROM git_commits ORDER BY id LIMIT 1').get() as { public_id: string }
+    const outbox = database.prepare(`
+      SELECT entity_public_id, payload FROM sync_operations
+      WHERE entity_type = 'git_commit'
+      ORDER BY id LIMIT 1
+    `).get() as { entity_public_id: string; payload: string }
+    expect(outbox.entity_public_id).toBe(commit.public_id)
+    expect(JSON.parse(outbox.payload)).toMatchObject({ repository_id: repository.public_id })
+    database.close()
+  })
+
+  it('两个 RepositoryService 实例不会并发扫描同一工作区仓库', async () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const firstRepositoryService = new RepositoryService(database, context, {
+      scan: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        return { root_path: directory, branch: 'main', commits: [] }
+      }
+    } as unknown as GitScanner)
+    const secondRepositoryService = new RepositoryService(database, context, {
+      scan: async () => ({ root_path: directory, branch: 'main', commits: [] })
+    } as unknown as GitScanner)
+    const repository = firstRepositoryService.create({ name: '并发仓库', local_path: directory })
+
+    const [first, second] = await Promise.all([
+      firstRepositoryService.scanOne(repository.public_id),
+      secondRepositoryService.scanOne(repository.public_id)
+    ])
+
+    expect([first.status, second.status].sort()).toEqual(['skipped', 'succeeded'])
+    database.close()
+  })
+
+  it('项目软删除后仓库返回为未归属', () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const projects = new ProjectService(database, context)
+    const repositories = new RepositoryService(database, context)
+    const project = projects.create({ name: '将被归档', description: '', color: '#64748b' })
+    const repository = repositories.create({ name: '归档项目仓库', local_path: directory, project_id: project.public_id })
+
+    projects.softDelete(project.public_id)
+
+    expect(repositories.list().items.find((item) => item.public_id === repository.public_id)?.project_id).toBeNull()
     database.close()
   })
 
@@ -156,5 +267,21 @@ describe('GitScanner', () => {
         last_scan_error: expect.stringContaining('Git')
       })
     database.close()
+  })
+
+  it('停止调度器后不启动新的扫描', async () => {
+    let calls = 0
+    const scheduler = new RepositoryScheduler({
+      scanAllEnabled: async () => {
+        calls += 1
+        return []
+      }
+    } as unknown as RepositoryService, 5)
+
+    scheduler.start()
+    scheduler.stop()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(calls).toBe(0)
   })
 })

@@ -14,6 +14,7 @@ import type { Pagination, WorkspaceContext } from '../repositories/contracts'
 const DEFAULT_LIMIT = 50
 const INITIAL_SCAN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const INCREMENTAL_OVERLAP_MS = 5 * 60 * 1000
+const activeRepositoryScans = new Set<string>()
 
 export interface Repository {
   public_id: string
@@ -79,8 +80,6 @@ function normalizeNow(value?: string): string {
 }
 
 export class RepositoryService {
-  private readonly activeScans = new Set<string>()
-
   constructor(
     private readonly database: Database.Database,
     private readonly context: WorkspaceContext,
@@ -170,9 +169,10 @@ export class RepositoryService {
     const repository = this.findRow(publicId)
     if (!repository) throw new Error('Repository not found')
     if (!repository.enabled) return { repository_id: publicId, status: 'skipped', inserted_count: 0 }
-    if (this.activeScans.has(publicId)) return { repository_id: publicId, status: 'skipped', inserted_count: 0 }
+    const scanLock = `${this.context.workspace_id}:${repository.id}`
+    if (activeRepositoryScans.has(scanLock)) return { repository_id: publicId, status: 'skipped', inserted_count: 0 }
 
-    this.activeScans.add(publicId)
+    activeRepositoryScans.add(scanLock)
     const now = normalizeNow(nowValue)
     try {
       const scan = await this.scanner.scan(
@@ -196,7 +196,7 @@ export class RepositoryService {
       `).run(now, message, this.context.user_id, now, repository.id, this.context.workspace_id)
       return { repository_id: publicId, status: 'failed', inserted_count: 0, error: message }
     } finally {
-      this.activeScans.delete(publicId)
+      activeRepositoryScans.delete(scanLock)
     }
   }
 
@@ -232,6 +232,7 @@ export class RepositoryService {
       FROM repositories
       LEFT JOIN projects ON projects.id = repositories.project_id
         AND projects.workspace_id = repositories.workspace_id
+        AND projects.deleted_at IS NULL
       INNER JOIN repository_bindings ON repository_bindings.id = (
         SELECT id FROM repository_bindings
         WHERE repository_id = repositories.id AND deleted_at IS NULL
@@ -301,8 +302,9 @@ export class RepositoryService {
       `)
       let insertedCount = 0
       for (const commit of commits) {
+        const commitPublicId = randomUUID()
         const result = insert.run(
-          randomUUID(),
+          commitPublicId,
           this.context.workspace_id,
           repository.id,
           commit.commit_hash,
@@ -321,7 +323,13 @@ export class RepositoryService {
         )
         if (result.changes > 0) {
           insertedCount += 1
-          this.enqueueSync('git_commit', commit.commit_hash, 'create', commit, now)
+          this.enqueueSync(
+            'git_commit',
+            commitPublicId,
+            'create',
+            { ...commit, repository_id: repository.public_id },
+            now
+          )
         }
       }
       this.database.prepare(`
@@ -390,8 +398,9 @@ export class RepositoryScheduler {
 
   start(): void {
     if (this.timer) return
-    void this.tick()
-    this.timer = setInterval(() => void this.tick(), this.intervalMs)
+    this.timer = setInterval(() => {
+      if (this.timer) void this.tick()
+    }, this.intervalMs)
   }
 
   stop(): void {

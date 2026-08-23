@@ -183,6 +183,7 @@ describe('SQLite migrations', () => {
     const before = database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()
 
     runMigrations(database)
+    expect(getDatabaseVersion(database)).toBe(8)
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual(before)
     expect(database.prepare('SELECT title FROM tasks').all()).toEqual([{ title: '不应重复的数据' }])
@@ -265,9 +266,10 @@ describe('SQLite migrations', () => {
         (6, '006_sync_outbox', '2026-08-23T00:00:00.000Z');
     `)
 
-    runMigrations(database)
+    expect(() => runMigrations(database)).toThrow('008_repository_scanning')
+    expect(getDatabaseVersion(database)).toBe(7)
 
-    expect(getDatabaseVersion(database)).toBe(8)
+    expect(getDatabaseVersion(database)).toBe(7)
     expect(database.prepare('SELECT status, state, include_in_reports, ai_suggestion FROM inbox_items ORDER BY id').all())
       .toEqual([
         { status: 'inbox', state: 'unorganized', include_in_reports: 1, ai_suggestion: null },
@@ -277,7 +279,7 @@ describe('SQLite migrations', () => {
     expect(database.prepare('SELECT color FROM projects WHERE public_id = ?').get('v6-project'))
       .toEqual({ color: '#64748b' })
     const before = database.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()
-    runMigrations(database)
+    expect(() => runMigrations(database)).toThrow('008_repository_scanning')
     expect(database.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toEqual(before)
     expect(database.prepare('SELECT status, state, include_in_reports, ai_suggestion FROM inbox_items ORDER BY id').all())
       .toEqual([
@@ -285,6 +287,32 @@ describe('SQLite migrations', () => {
         { status: 'organized', state: 'confirmed', include_in_reports: 1, ai_suggestion: null },
         { status: 'archived', state: 'archived', include_in_reports: 1, ai_suggestion: null }
       ])
+    database.close()
+  })
+
+  it('v8 迁移发现部分仓库 schema 时回滚并不记录版本 8', () => {
+    const database = openDatabase(createTemporaryPath('partial-v7-repositories.db'))
+    database.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+      CREATE TABLE workspaces (id INTEGER PRIMARY KEY, public_id TEXT, name TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);
+      CREATE TABLE users (id INTEGER PRIMARY KEY, public_id TEXT, workspace_id INTEGER, name TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);
+      CREATE TABLE projects (id INTEGER PRIMARY KEY, public_id TEXT, workspace_id INTEGER, name TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);
+      CREATE TABLE sync_operations (id INTEGER PRIMARY KEY, public_id TEXT, workspace_id INTEGER, entity_type TEXT, entity_public_id TEXT, operation_type TEXT, payload TEXT, created_at TEXT, updated_at TEXT);
+      CREATE TABLE repositories (id INTEGER PRIMARY KEY, public_id TEXT, workspace_id INTEGER, name TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);
+      CREATE TABLE git_commits (id INTEGER PRIMARY KEY, public_id TEXT, workspace_id INTEGER, repository_id INTEGER, commit_hash TEXT, committed_at TEXT, created_at TEXT, updated_at TEXT);
+      INSERT INTO schema_migrations VALUES
+        (1, '001_core_schema', '2026-08-23T00:00:00.000Z'),
+        (2, '002_workspace_identity', '2026-08-23T00:00:00.000Z'),
+        (3, '003_projects_inbox_repositories', '2026-08-23T00:00:00.000Z'),
+        (4, '004_tags_search', '2026-08-23T00:00:00.000Z'),
+        (5, '005_reports_periods', '2026-08-23T00:00:00.000Z'),
+        (6, '006_sync_outbox', '2026-08-23T00:00:00.000Z'),
+        (7, '007_project_inbox_contract', '2026-08-23T00:00:00.000Z');
+    `)
+
+    expect(() => runMigrations(database)).toThrow('repository_bindings')
+    expect(getDatabaseVersion(database)).toBe(7)
+    expect(database.prepare('SELECT 1 FROM schema_migrations WHERE version = 8').get()).toBeUndefined()
     database.close()
   })
 

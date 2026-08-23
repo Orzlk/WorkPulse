@@ -474,8 +474,18 @@ const migrations: SchemaMigration[] = [
     version: 8,
     name: '008_repository_scanning',
     up: (database) => {
-      if (!tableExists(database, 'repositories') || !tableExists(database, 'repository_bindings') || !tableExists(database, 'git_commits')) {
-        return
+      const requiredTables = [
+        'workspaces',
+        'users',
+        'projects',
+        'sync_operations',
+        'repositories',
+        'repository_bindings',
+        'git_commits'
+      ]
+      const missingTables = requiredTables.filter((tableName) => !tableExists(database, tableName))
+      if (missingTables.length > 0) {
+        throw new Error(`Migration 008_repository_scanning requires tables: ${missingTables.join(', ')}`)
       }
       addColumnIfMissing(database, 'repositories', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
       addColumnIfMissing(database, 'repositories', 'enabled', 'INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1))')
