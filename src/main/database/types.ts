@@ -3,7 +3,11 @@ import type Database from 'better-sqlite3'
 export interface SchemaMigration {
   version: number
   name: string
-  up: (database: Database.Database) => void
+  up: (database: Database.Database, context: MigrationContext) => void
+}
+
+export interface MigrationContext {
+  now: () => Date
 }
 
 export interface SchemaMigrationRecord {

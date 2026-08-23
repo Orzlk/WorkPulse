@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { fromZonedTime } from 'date-fns-tz'
 
-import type { SchemaMigration } from './types'
+import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
@@ -233,7 +233,7 @@ const migrations: SchemaMigration[] = [
   {
     version: 2,
     name: '002_workspace_identity',
-    up: (database) => {
+    up: (database, context: MigrationContext) => {
       rebuildLegacyTasks(database)
       database.exec(`
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -255,7 +255,7 @@ const migrations: SchemaMigration[] = [
         );
       `)
       const { workspaceId, userId } = createDefaultWorkspace(database)
-      const migrationTimestamp = new Date().toISOString()
+      const migrationTimestamp = context.now().toISOString()
       for (const tableName of CORE_TABLES) {
         addIdentityColumns(database, tableName, workspaceId, userId, migrationTimestamp)
       }
@@ -476,8 +476,14 @@ export function getDatabaseVersion(database: Database.Database): number {
   return row.version
 }
 
-export function runMigrations(database: Database.Database): void {
+export function runMigrations(
+  database: Database.Database,
+  options: { now?: () => Date } = {}
+): void {
   createMigrationTable(database)
+  const context: MigrationContext = {
+    now: options.now ?? (() => new Date())
+  }
 
   const firstMigration = migrations[0]
   if (!migrationApplied(database, firstMigration.version) && hasLegacyCoreSchema(database)) {
@@ -493,7 +499,7 @@ export function runMigrations(database: Database.Database): void {
     if (migrationApplied(database, migration.version)) continue
 
     const apply = database.transaction(() => {
-      migration.up(database)
+      migration.up(database, context)
       database
         .prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ${UTC_NOW_SQL})`)
         .run(migration.version, migration.name)

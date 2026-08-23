@@ -129,7 +129,7 @@ describe('SQLite migrations', () => {
     legacyDatabase.close()
 
     const database = openDatabase(databasePath)
-    runMigrations(database)
+    runMigrations(database, { now: () => new Date('2026-08-23T12:34:56.000Z') })
 
     expect(getDatabaseVersion(database)).toBe(6)
     expect(database.prepare('SELECT id, title FROM tasks').all()).toEqual([{ id: 1, title: '保留的旧任务' }])
@@ -145,7 +145,7 @@ describe('SQLite migrations', () => {
       }))
     expect(database.prepare("SELECT value FROM settings WHERE key = 'migration.timezone'").get())
       .toEqual({ value: expect.any(String) })
-    const report = database.prepare('SELECT created_at, updated_at, public_id, workspace_id, created_by, updated_by FROM reports WHERE id = 1').get() as Record<string, unknown>
+    const report = database.prepare('SELECT generated_at, created_at, updated_at, public_id, workspace_id, created_by, updated_by FROM reports WHERE id = 1').get() as Record<string, unknown>
     const setting = database.prepare('SELECT created_at, updated_at, public_id, workspace_id, created_by, updated_by FROM settings WHERE key = ?').get('保留的旧设置') as Record<string, unknown>
     for (const row of [report, setting]) {
       expect(row.public_id).toEqual(expect.any(String))
@@ -159,7 +159,9 @@ describe('SQLite migrations', () => {
     }
     expect(report.created_at).toBe('2026-08-01T17:00:00.000Z')
     expect(report.updated_at).toBe('2026-08-01T17:00:00.000Z')
-    expect(setting.created_at).toBe(setting.updated_at)
+    expect(report.generated_at).toBe('2026-08-01T17:00:00.000Z')
+    expect(setting.created_at).toBe('2026-08-23T12:34:56.000Z')
+    expect(setting.updated_at).toBe('2026-08-23T12:34:56.000Z')
     database.close()
   })
 
