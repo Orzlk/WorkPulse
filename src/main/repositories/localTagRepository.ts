@@ -41,9 +41,8 @@ export class LocalTagRepository implements TagRepository {
   list(context: WorkspaceContext, pagination?: Pagination): Page<Tag> {
     const { limit, offset } = resolvePagination(pagination)
     const items = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id
+      SELECT tags.public_id, tags.name, tags.path, NULL AS parent_public_id
       FROM tags
-      LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.workspace_id = tags.workspace_id AND parent.deleted_at IS NULL
       WHERE tags.workspace_id = ? AND tags.deleted_at IS NULL
       ORDER BY tags.path ASC
       LIMIT ? OFFSET ?
@@ -57,9 +56,8 @@ export class LocalTagRepository implements TagRepository {
 
   get(context: WorkspaceContext, publicId: string, options: ReadOptions = {}): Tag | null {
     const row = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id
+      SELECT tags.public_id, tags.name, tags.path, NULL AS parent_public_id
       FROM tags
-      LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.workspace_id = tags.workspace_id AND parent.deleted_at IS NULL
       WHERE tags.workspace_id = ? AND tags.public_id = ? ${options.includeDeleted ? '' : 'AND tags.deleted_at IS NULL'}
     `).get(context.workspace_id, publicId) as Record<string, unknown> | undefined
     return row ? toTag(row) : null
@@ -82,16 +80,11 @@ export class LocalTagRepository implements TagRepository {
       return this.get(context, existing.public_id as string) as Tag
     }
 
-    const parentPath = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null
-    const parent = parentPath ? this.database.prepare(`
-      SELECT id FROM tags
-      WHERE workspace_id = ? AND path = ? AND deleted_at IS NULL
-    `).get(context.workspace_id, parentPath) as { id: number } | undefined : undefined
     const row = this.database.prepare(`
       INSERT INTO tags (public_id, workspace_id, name, path, parent_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       RETURNING public_id, name, path, NULL AS parent_public_id
-    `).get(randomUUID(), context.workspace_id, path, path, parent?.id ?? null, now, now) as Record<string, unknown>
+    `).get(randomUUID(), context.workspace_id, path, path, null, now, now) as Record<string, unknown>
     return toTag(row)
   }
 

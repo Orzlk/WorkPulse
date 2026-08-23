@@ -177,6 +177,105 @@ describe('SQLite migrations', () => {
     database.close()
   })
 
+  it('从 v6 收件箱结构升级状态与默认字段，并可重复执行', () => {
+    const database = openDatabase(createTemporaryPath('v6-inbox.db'))
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE workspaces (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE inbox_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        project_id INTEGER,
+        repository_id INTEGER,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('inbox', 'organized', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      CREATE TABLE tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        workspace_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        parent_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      INSERT INTO workspaces VALUES (1, 'v6-workspace', 'v6 空间', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO users VALUES (1, 'v6-user', 1, 'v6 用户', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL);
+      INSERT INTO projects (public_id, workspace_id, name, created_at, updated_at)
+      VALUES ('v6-project', 1, 'v6 项目', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z');
+      INSERT INTO inbox_items (public_id, workspace_id, project_id, content, status, created_at, updated_at)
+      VALUES
+        ('v6-inbox', 1, 1, '旧收件箱', 'inbox', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z'),
+        ('v6-organized', 1, 1, '已整理', 'organized', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z'),
+        ('v6-archived', 1, 1, '已归档', 'archived', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z');
+      INSERT INTO schema_migrations VALUES
+        (1, '001_core_schema', '2026-08-23T00:00:00.000Z'),
+        (2, '002_workspace_identity', '2026-08-23T00:00:00.000Z'),
+        (3, '003_projects_inbox_repositories', '2026-08-23T00:00:00.000Z'),
+        (4, '004_tags_search', '2026-08-23T00:00:00.000Z'),
+        (5, '005_reports_periods', '2026-08-23T00:00:00.000Z'),
+        (6, '006_sync_outbox', '2026-08-23T00:00:00.000Z');
+    `)
+
+    runMigrations(database)
+
+    expect(getDatabaseVersion(database)).toBe(7)
+    expect(database.prepare('SELECT status, state, include_in_reports, ai_suggestion FROM inbox_items ORDER BY id').all())
+      .toEqual([
+        { status: 'inbox', state: 'unorganized', include_in_reports: 1, ai_suggestion: null },
+        { status: 'organized', state: 'confirmed', include_in_reports: 1, ai_suggestion: null },
+        { status: 'archived', state: 'archived', include_in_reports: 1, ai_suggestion: null }
+      ])
+    expect(database.prepare('SELECT color FROM projects WHERE public_id = ?').get('v6-project'))
+      .toEqual({ color: '#64748b' })
+    const before = database.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()
+    runMigrations(database)
+    expect(database.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toEqual(before)
+    expect(database.prepare('SELECT status, state, include_in_reports, ai_suggestion FROM inbox_items ORDER BY id').all())
+      .toEqual([
+        { status: 'inbox', state: 'unorganized', include_in_reports: 1, ai_suggestion: null },
+        { status: 'organized', state: 'confirmed', include_in_reports: 1, ai_suggestion: null },
+        { status: 'archived', state: 'archived', include_in_reports: 1, ai_suggestion: null }
+      ])
+    database.close()
+  })
+
   it('rolls back a failed migration before recording its version', () => {
     const database = openDatabase(createTemporaryPath('rollback.db'))
     database.exec(`

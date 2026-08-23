@@ -54,7 +54,12 @@ export class InboxService {
       })
       const inboxId = this.inbox.getInternalId(this.context, item.public_id)
       if (inboxId === null) throw new Error('Inbox item was not created')
-      this.assignTags(input.tag_names ?? [], (tag) => this.tags.assignToInbox(this.context, inboxId, tag))
+      this.assignTags(
+        'inbox_item',
+        item.public_id,
+        input.tag_names ?? [],
+        (tag) => this.tags.assignToInbox(this.context, inboxId, tag)
+      )
       this.updateSearchIndex(inboxId, item.content)
       this.enqueueSync('inbox_item', item.public_id, 'create', item)
       return item
@@ -121,7 +126,12 @@ export class InboxService {
       this.context.user_id,
       this.context.user_id
     ) as { id: number; public_id: string }
-    this.assignTags(suggestion.tag_names, (tag) => this.tags.assignToWorkLog(this.context, row.id, tag))
+    this.assignTags(
+      'work_log',
+      row.public_id,
+      suggestion.tag_names,
+      (tag) => this.tags.assignToWorkLog(this.context, row.id, tag)
+    )
     this.enqueueSync('work_log', row.public_id, 'create', {
       public_id: row.public_id,
       content: item.content,
@@ -164,7 +174,12 @@ export class InboxService {
       this.context.user_id,
       this.context.user_id
     ) as { id: number; public_id: string }
-    this.assignTags(suggestion.tag_names, (tag) => this.tags.assignToTask(this.context, row.id, tag))
+    this.assignTags(
+      'task',
+      row.public_id,
+      suggestion.tag_names,
+      (tag) => this.tags.assignToTask(this.context, row.id, tag)
+    )
     this.enqueueSync('task', row.public_id, 'create', {
       public_id: row.public_id,
       title: suggestion.title || item.content,
@@ -176,6 +191,8 @@ export class InboxService {
   }
 
   private assignTags(
+    recordType: 'inbox_item' | 'work_log' | 'task',
+    recordPublicId: string,
     names: string[],
     assign: (tag: ReturnType<LocalTagRepository['create']>) => void
   ): void {
@@ -190,7 +207,36 @@ export class InboxService {
       if (!tag) throw new Error('Tag not found')
       if (!existing) this.enqueueSync('tag', tag.public_id, 'create', tag)
       assign(tag)
+      this.enqueueTagAssignment(recordType, recordPublicId, tag.public_id)
     }
+  }
+
+  private enqueueTagAssignment(
+    recordType: 'inbox_item' | 'work_log' | 'task',
+    recordPublicId: string,
+    tagPublicId: string
+  ): void {
+    const operationPublicId = `${recordPublicId}:tag:${tagPublicId}`
+    const now = new Date().toISOString()
+    this.database.prepare(`
+      INSERT OR IGNORE INTO sync_operations (
+        public_id, workspace_id, entity_type, entity_public_id, operation_type,
+        payload, created_at, updated_at
+      ) VALUES (?, ?, 'tag_assignment', ?, 'attach', ?, ?, ?)
+    `).run(
+      operationPublicId,
+      this.context.workspace_id,
+      operationPublicId,
+      JSON.stringify({
+        record_type: recordType,
+        entity_type: recordType,
+        record_public_id: recordPublicId,
+        tag_public_id: tagPublicId,
+        action: 'attach'
+      }),
+      now,
+      now
+    )
   }
 
   private updateSearchIndex(inboxId: number, content: string): void {

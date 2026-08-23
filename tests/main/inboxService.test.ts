@@ -6,6 +6,9 @@ import { join } from 'node:path'
 
 import { openDatabase, runMigrations } from '../../src/main/database/connection'
 import type { WorkspaceContext } from '../../src/main/repositories/contracts'
+import { LocalInboxRepository } from '../../src/main/repositories/localInboxRepository'
+import { LocalProjectRepository } from '../../src/main/repositories/localProjectRepository'
+import { LocalTagRepository } from '../../src/main/repositories/localTagRepository'
 import { InboxService } from '../../src/main/services/inboxService'
 import { ProjectService } from '../../src/main/services/projectService'
 import { SearchService } from '../../src/main/services/searchService'
@@ -59,6 +62,7 @@ describe('项目、收件箱和标签服务', () => {
     const project = projects.create({ name: '桌面端', description: '桌面产品', color: '#2563eb' })
     const inbox = inboxService.create({
       content: '修复登录页在离线时重复请求的问题',
+      tag_names: ['#缺陷'],
       ai_suggestion: {
         target: 'work_log',
         title: '离线登录优化',
@@ -89,8 +93,23 @@ describe('项目、收件箱和标签服务', () => {
       .toEqual(expect.arrayContaining([
         { entity_type: 'inbox_item', operation_type: 'create' },
         { entity_type: 'work_log', operation_type: 'create' },
-        { entity_type: 'inbox_item', operation_type: 'update' }
+        { entity_type: 'inbox_item', operation_type: 'update' },
+        { entity_type: 'tag_assignment', operation_type: 'attach' }
       ]))
+    const assignment = database.prepare(`
+      SELECT entity_public_id, payload
+      FROM sync_operations
+      WHERE entity_type = 'tag_assignment' AND entity_public_id LIKE ?
+      ORDER BY id
+      LIMIT 1
+    `).get(`${inbox.public_id}:tag:%`) as { entity_public_id: string; payload: string }
+    const payload = JSON.parse(assignment.payload) as Record<string, string>
+    expect(assignment.entity_public_id).toBe(`${inbox.public_id}:tag:${payload.tag_public_id}`)
+    expect(payload).toMatchObject({
+      record_type: 'inbox_item',
+      record_public_id: inbox.public_id,
+      action: 'attach'
+    })
     database.close()
   })
 
@@ -124,6 +143,34 @@ describe('项目、收件箱和标签服务', () => {
     expect(database.prepare('SELECT state FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
       .toEqual({ state: 'unorganized' })
     expect(database.prepare('SELECT COUNT(*) AS count FROM sync_operations').get()).toEqual(before)
+    expect(database.prepare('SELECT COUNT(*) AS count FROM tags').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM inbox_tags').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM content_search').get()).toEqual({ count: 1 })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = 'tag_assignment'").get())
+      .toEqual({ count: 0 })
+    database.close()
+  })
+
+  it('创建收件箱标签关联失败时不留下标签、关联、索引或关联 outbox', () => {
+    const { database, context } = createDatabase()
+    const inboxService = new InboxService(database, context)
+    database.exec(`
+      CREATE TRIGGER fail_inbox_tag_link
+      BEFORE INSERT ON inbox_tags
+      BEGIN
+        SELECT RAISE(ABORT, 'inbox tag link failed');
+      END;
+    `)
+
+    expect(() => inboxService.create({ content: '创建失败', tag_names: ['#失败/标签'] }))
+      .toThrow('inbox tag link failed')
+
+    expect(database.prepare('SELECT COUNT(*) AS count FROM tags').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM inbox_items').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM inbox_tags').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM content_search').get()).toEqual({ count: 0 })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = 'tag_assignment'").get())
+      .toEqual({ count: 0 })
     database.close()
   })
 
@@ -179,6 +226,83 @@ describe('项目、收件箱和标签服务', () => {
         { path: '产品' },
         { path: '缺陷' }
       ]))
+    database.close()
+  })
+
+  it('以路径前缀作为唯一层级模型，不从偶然存在的父标签返回 parent_id', () => {
+    const { database, context } = createDatabase()
+    const tags = new LocalTagRepository(database)
+    tags.create(context, '#层级')
+    const child = tags.create(context, '#层级/子标签')
+
+    expect(child.parent_id).toBeNull()
+    expect(tags.get(context, child.public_id)?.parent_id).toBeNull()
+    database.close()
+  })
+
+  it('三个本地 Repository 支持分页、total、软删除和工作区隔离', () => {
+    const { database, context } = createDatabase()
+    const projects = new ProjectService(database, context)
+    const projectRepository = new LocalProjectRepository(database)
+    const inboxService = new InboxService(database, context)
+    const inboxRepository = new LocalInboxRepository(database)
+    const tagRepository = new LocalTagRepository(database)
+
+    const projectIds = [
+      projects.create({ name: '项目一', description: '', color: '#111111' }).public_id,
+      projects.create({ name: '项目二', description: '', color: '#222222' }).public_id,
+      projects.create({ name: '项目三', description: '', color: '#333333' }).public_id
+    ]
+    const inboxIds = [
+      inboxService.create({ content: '收件箱一' }).public_id,
+      inboxService.create({ content: '收件箱二' }).public_id,
+      inboxService.create({ content: '收件箱三' }).public_id
+    ]
+    const tagIds = [
+      tagRepository.create(context, '#标签一').public_id,
+      tagRepository.create(context, '#标签二').public_id,
+      tagRepository.create(context, '#标签三').public_id
+    ]
+
+    expect(projectRepository.list(context, { limit: 2, offset: 1 })).toMatchObject({ total: 3, items: expect.any(Array) })
+    expect(projectRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
+    expect(inboxRepository.list(context, { limit: 2, offset: 1 })).toMatchObject({ total: 3 })
+    expect(inboxRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
+    expect(tagRepository.list(context, { limit: 2, offset: 1 })).toMatchObject({ total: 3 })
+    expect(tagRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
+
+    projectRepository.softDelete(context, projectIds[0])
+    inboxRepository.softDelete(context, inboxIds[0])
+    tagRepository.softDelete(context, tagIds[0])
+    expect(projectRepository.list(context).total).toBe(2)
+    expect(inboxRepository.list(context).total).toBe(2)
+    expect(tagRepository.list(context).total).toBe(2)
+
+    const otherWorkspace = database.prepare(`
+      INSERT INTO workspaces (public_id, name, created_at, updated_at)
+      VALUES ('paging-other-workspace', '分页其他空间', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+    `).run()
+    const otherWorkspaceId = Number(otherWorkspace.lastInsertRowid)
+    const otherUser = database.prepare(`
+      INSERT INTO users (public_id, workspace_id, name, created_at, updated_at)
+      VALUES ('paging-other-user', ?, '分页其他用户', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+    `).run(otherWorkspaceId)
+    const otherContext = {
+      workspace_id: otherWorkspaceId,
+      user_id: Number(otherUser.lastInsertRowid)
+    }
+    const otherProjectRepository = new LocalProjectRepository(database)
+    const otherInboxService = new InboxService(database, otherContext)
+    const otherInboxRepository = new LocalInboxRepository(database)
+    const otherTagRepository = new LocalTagRepository(database)
+    otherProjectRepository.create(otherContext, { name: '其他项目', description: '', color: '#444444' })
+    otherInboxService.create({ content: '其他收件箱' })
+    otherTagRepository.create(otherContext, '#其他标签')
+
+    expect(projectRepository.list(context).total).toBe(2)
+    expect(inboxRepository.list(context).total).toBe(2)
+    expect(tagRepository.list(context).total).toBe(2)
+    expect(otherInboxRepository.list(otherContext).total).toBe(1)
     database.close()
   })
 })
