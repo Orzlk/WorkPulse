@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { useToast } from '../components/Toast'
+import { getReportAnchorDate } from '../lib/reportPeriod'
 import { useI18n } from '../stores/languageStore'
 
 interface Report {
@@ -31,8 +32,9 @@ interface Report {
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
 
 function ReportPage(): JSX.Element {
+  const reportTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly')
-  const [anchorDate, setAnchorDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [anchorDate, setAnchorDate] = useState(() => getReportAnchorDate(reportTimeZone))
   const [status, setStatus] = useState<Status>('idle')
   const [reportContent, setReportContent] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -75,7 +77,7 @@ function ReportPage(): JSX.Element {
       const report = await window.api.report.generate({
         type: reportType,
         anchorDate,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+        timeZone: reportTimeZone
       })
       setReportContent(report.content)
       setActiveReport(report)

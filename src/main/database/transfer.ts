@@ -81,10 +81,78 @@ const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
   report_tags: EXPORT_COLUMNS.report_tags
 }
 const IMPORT_ORDER: readonly ExportTable[] = [
-  'projects', 'tags', 'repositories', 'repository_bindings', 'tasks', 'work_logs', 'inbox_items',
+  'workspaces', 'users', 'projects', 'tags', 'repositories', 'repository_bindings', 'tasks', 'work_logs', 'inbox_items',
   'git_commits', 'reports', 'sync_operations', 'work_log_tags', 'task_tags', 'inbox_tags',
   'git_commit_tags', 'report_projects', 'report_repositories', 'report_tags'
 ]
+interface ExportScope {
+  from: string
+  where: string
+  parameterCount: number
+  tableAlias?: string
+}
+
+const EXPORT_SCOPES: Record<ExportTable, ExportScope> = {
+  workspaces: { from: 'workspaces', where: 'WHERE id = ?', parameterCount: 1 },
+  users: { from: 'users', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  projects: { from: 'projects', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  repositories: { from: 'repositories', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  repository_bindings: {
+    from: 'repository_bindings JOIN repositories ON repositories.id = repository_bindings.repository_id',
+    where: 'WHERE repository_bindings.workspace_id = ? AND repositories.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'repository_bindings'
+  },
+  work_logs: { from: 'work_logs', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  tasks: { from: 'tasks', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  inbox_items: { from: 'inbox_items', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  tags: { from: 'tags', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  work_log_tags: {
+    from: 'work_log_tags JOIN work_logs ON work_logs.id = work_log_tags.work_log_id JOIN tags ON tags.id = work_log_tags.tag_id',
+    where: 'WHERE work_logs.workspace_id = ? AND tags.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'work_log_tags'
+  },
+  task_tags: {
+    from: 'task_tags JOIN tasks ON tasks.id = task_tags.task_id JOIN tags ON tags.id = task_tags.tag_id',
+    where: 'WHERE tasks.workspace_id = ? AND tags.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'task_tags'
+  },
+  inbox_tags: {
+    from: 'inbox_tags JOIN inbox_items ON inbox_items.id = inbox_tags.inbox_item_id JOIN tags ON tags.id = inbox_tags.tag_id',
+    where: 'WHERE inbox_items.workspace_id = ? AND tags.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'inbox_tags'
+  },
+  git_commits: { from: 'git_commits', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  git_commit_tags: {
+    from: 'git_commit_tags JOIN git_commits ON git_commits.id = git_commit_tags.git_commit_id JOIN tags ON tags.id = git_commit_tags.tag_id',
+    where: 'WHERE git_commits.workspace_id = ? AND tags.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'git_commit_tags'
+  },
+  reports: { from: 'reports', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  report_projects: {
+    from: 'report_projects JOIN reports ON reports.id = report_projects.report_id JOIN projects ON projects.id = report_projects.project_id',
+    where: 'WHERE reports.workspace_id = ? AND projects.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'report_projects'
+  },
+  report_repositories: {
+    from: 'report_repositories JOIN reports ON reports.id = report_repositories.report_id JOIN repositories ON repositories.id = report_repositories.repository_id',
+    where: 'WHERE reports.workspace_id = ? AND repositories.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'report_repositories'
+  },
+  report_tags: {
+    from: 'report_tags JOIN reports ON reports.id = report_tags.report_id JOIN tags ON tags.id = report_tags.tag_id',
+    where: 'WHERE reports.workspace_id = ? AND tags.workspace_id = ?',
+    parameterCount: 2,
+    tableAlias: 'report_tags'
+  },
+  sync_operations: { from: 'sync_operations', where: 'WHERE workspace_id = ?', parameterCount: 1 }
+}
 const LINK_TABLES = new Set<ExportTable>([
   'work_log_tags', 'task_tags', 'inbox_tags', 'git_commit_tags', 'report_projects', 'report_repositories', 'report_tags'
 ])
@@ -141,6 +209,7 @@ function parsePackage(value: unknown): DatabaseTransferPackage {
     if (rows.length > 100_000) throw importError('IMPORT_TOO_LARGE', 'Too many records')
     tables[name as ExportTable] = rows as Array<Record<string, unknown>>
   }
+  if ((tables.workspaces?.length ?? 0) > 1) throw importError('IMPORT_INVALID', 'Multiple workspaces are not supported')
   return {
     format: 'workpulse-data',
     format_version: 1,
@@ -158,8 +227,13 @@ export function createDatabaseExport(database: Database.Database, context: Works
     const tableColumns = columns(database, table)
     const selectedColumns = EXPORT_COLUMNS[table].filter((column) => tableColumns.has(column))
     if (selectedColumns.length === 0) continue
-    const scope = tableColumns.has('workspace_id') ? ' WHERE workspace_id = ?' : ''
-    tables[table] = database.prepare(`SELECT ${selectedColumns.join(', ')} FROM ${table}${scope}`).all(...(scope ? [context.workspace_id] : [])) as Array<Record<string, unknown>>
+    const scope = EXPORT_SCOPES[table]
+    const selectList = selectedColumns
+      .map((column) => scope.tableAlias ? `${scope.tableAlias}.${column} AS ${column}` : column)
+      .join(', ')
+    tables[table] = database
+      .prepare(`SELECT ${selectList} FROM ${scope.from} ${scope.where}`)
+      .all(...Array.from({ length: scope.parameterCount }, () => context.workspace_id)) as Array<Record<string, unknown>>
   }
   const payload: DatabaseTransferPackage = {
     format: 'workpulse-data',
@@ -201,7 +275,8 @@ export function mergeDatabaseImport(
   const transaction = database.transaction(() => {
     for (const table of IMPORT_ORDER) {
       for (const sourceRow of data.tables[table] ?? []) {
-        if (LINK_TABLES.has(table)) mergeLink(database, table, sourceRow, idMaps, result)
+        if (table === 'workspaces' || table === 'users') mergeMetadata(context, table, sourceRow, idMaps, result)
+        else if (LINK_TABLES.has(table)) mergeLink(database, table, sourceRow, idMaps, result)
         else mergeEntity(database, context, table, sourceRow, idMaps, result)
       }
     }
@@ -229,6 +304,27 @@ function mapForeignKeys(
   }
 }
 
+function mergeMetadata(
+  context: WorkspaceContext,
+  table: 'workspaces' | 'users',
+  sourceRow: Record<string, unknown>,
+  idMaps: Map<ExportTable, Map<number, number>>,
+  result: DatabaseImportResult
+): void {
+  const incomingId = sourceId(sourceRow.id, table)
+  if (typeof sourceRow.public_id !== 'string' || !sourceRow.public_id) {
+    throw importError('IMPORT_INVALID', `Invalid ${table} public_id`)
+  }
+  if (table === 'users' && sourceRow.workspace_id !== undefined) {
+    const sourceWorkspaceId = sourceId(sourceRow.workspace_id, 'workspaces')
+    if (idMaps.get('workspaces')?.get(sourceWorkspaceId) !== context.workspace_id) {
+      throw importError('IMPORT_INVALID', 'User workspace is invalid')
+    }
+  }
+  setIdMap(idMaps, table, incomingId, table === 'workspaces' ? context.workspace_id : context.user_id)
+  result.skipped += 1
+}
+
 function mergeEntity(
   database: Database.Database,
   context: WorkspaceContext,
@@ -243,14 +339,27 @@ function mergeEntity(
   if (typeof publicId !== 'string' || !publicId) {
     throw importError('IMPORT_INVALID', `Invalid ${table} public_id`)
   }
-  const existing = database.prepare(`SELECT id FROM ${table} WHERE public_id = ?`).get(publicId) as { id: number } | undefined
+  const existing = database.prepare(`
+    SELECT id${tableColumns.has('workspace_id') ? ', workspace_id' : ''}
+    FROM ${table}
+    WHERE public_id = ?
+  `).get(publicId) as { id: number; workspace_id?: number } | undefined
   if (existing) {
+    if (tableColumns.has('workspace_id') && existing.workspace_id !== context.workspace_id) {
+      throw importError('IMPORT_INVALID', `${table} belongs to another workspace`)
+    }
     setIdMap(idMaps, table, incomingId, existing.id)
     result.conflicts += 1
     if (result.conflict_public_ids.length < 100) result.conflict_public_ids.push(publicId)
     return
   }
   const row: Record<string, unknown> = {}
+  if (sourceRow.workspace_id !== undefined && sourceRow.workspace_id !== null) {
+    const sourceWorkspaceId = sourceId(sourceRow.workspace_id, 'workspaces')
+    if (idMaps.get('workspaces')?.get(sourceWorkspaceId) !== context.workspace_id) {
+      throw importError('IMPORT_INVALID', `${table} workspace is invalid`)
+    }
+  }
   for (const [key, value] of Object.entries(sourceRow)) {
     if (key === 'id' || key === 'workspace_id' || key === 'created_by' || key === 'updated_by' || !tableColumns.has(key)) continue
     row[key] = value
