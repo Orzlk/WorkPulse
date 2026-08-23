@@ -1,4 +1,4 @@
-import { addMonths, addWeeks, format, parseISO, startOfMonth, startOfWeek, subDays } from 'date-fns'
+import { addMonths, addWeeks, format, isValid, parseISO, startOfMonth, startOfWeek, subDays } from 'date-fns'
 import { fromZonedTime } from 'date-fns-tz'
 
 export type ReportType = 'weekly' | 'monthly'
@@ -18,6 +18,17 @@ export function resolveReportPeriod(
   timeZone: string
 ): ReportPeriod {
   const anchor = parseISO(anchorDate)
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate) || !isValid(anchor)) {
+    throw new RangeError(`Invalid anchorDate: ${anchorDate}`)
+  }
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format()
+  } catch {
+    throw new RangeError(`Invalid timeZone: ${timeZone}`)
+  }
+
   const start = type === 'weekly' ? startOfWeek(anchor, { weekStartsOn: 1 }) : startOfMonth(anchor)
   const end = type === 'weekly' ? addWeeks(start, 1) : addMonths(start, 1)
   const startDate = format(start, 'yyyy-MM-dd')
@@ -32,6 +43,6 @@ export function resolveReportPeriod(
     label:
       type === 'weekly'
         ? `${startDate} 至 ${format(subDays(end, 1), 'yyyy-MM-dd')}`
-        : `${startDate} 至 ${format(addMonths(start, 1), 'yyyy-MM-dd')}`
+        : `${startDate} 至 ${format(subDays(end, 1), 'yyyy-MM-dd')}`
   }
 }
