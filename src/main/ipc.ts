@@ -43,6 +43,7 @@ import {
   parseProjectInput,
   parseReportListInput,
   parseReportRequest,
+  parseStatsDays,
   parseRepositoryCreateInput,
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
@@ -139,9 +140,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('stats:get', (_event, days?: number) => {
-    return getStats(days)
-  })
+  ipcMain.handle('stats:get', guarded((days?: unknown) => getStats(parseStatsDays(days))))
 
   // --- Reports ---
 

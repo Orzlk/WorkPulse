@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { backupDatabase, getDatabaseVersion, initializeDatabase, runMigrations } from './database/connection'
 import type { WorkspaceContext } from './repositories/contracts'
 import { normalizeTagName } from './repositories/localTagRepository'
+import { assertStatsDays, DEFAULT_STATS_DAYS } from './lib/stats'
 
 let db: Database.Database
 
@@ -526,28 +527,30 @@ export interface DailyStats {
   task_completed: number
 }
 
-export function getStats(days = 30): {
+export function getStats(days = DEFAULT_STATS_DAYS, context: WorkspaceContext = getDefaultWorkspaceContext()): {
   daily: DailyStats[]
   totalLogs: number
   totalTasksDone: number
   totalTasksActive: number
   streak: number
 } {
+  const validatedDays = assertStatsDays(days)
+  const fromUtc = new Date(Date.now() - validatedDays * 24 * 60 * 60 * 1000).toISOString()
   const daily = db.prepare(`
     SELECT date(created_at) as date, COUNT(*) as log_count, 0 as task_completed
     FROM work_logs
-    WHERE created_at >= datetime('now', '-${days} days', 'localtime')
+    WHERE workspace_id = ? AND deleted_at IS NULL AND created_at >= ?
     GROUP BY date(created_at)
     ORDER BY date ASC
-  `).all() as DailyStats[]
+  `).all(context.workspace_id, fromUtc) as DailyStats[]
 
   // Merge completed tasks per day
   const taskDone = db.prepare(`
     SELECT date(completed_at) as date, COUNT(*) as cnt
     FROM tasks
-    WHERE completed_at IS NOT NULL AND completed_at >= datetime('now', '-${days} days', 'localtime')
+    WHERE workspace_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at >= ?
     GROUP BY date(completed_at)
-  `).all() as { date: string; cnt: number }[]
+  `).all(context.workspace_id, fromUtc) as { date: string; cnt: number }[]
 
   const doneMap = new Map(taskDone.map((r) => [r.date, r.cnt]))
   for (const d of daily) {
@@ -561,16 +564,16 @@ export function getStats(days = 30): {
   })
   daily.sort((a, b) => a.date.localeCompare(b.date))
 
-  const totalLogs = (db.prepare('SELECT COUNT(*) as c FROM work_logs').get() as { c: number }).c
-  const totalTasksDone = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status = 'done'").get() as { c: number }).c
-  const totalTasksActive = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status IN ('todo', 'in_progress')").get() as { c: number }).c
+  const totalLogs = (db.prepare('SELECT COUNT(*) as c FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL').get(context.workspace_id) as { c: number }).c
+  const totalTasksDone = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'done'").get(context.workspace_id) as { c: number }).c
+  const totalTasksActive = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND status IN ('todo', 'in_progress')").get(context.workspace_id) as { c: number }).c
 
   // Calculate streak (consecutive days with logs ending today or yesterday)
   let streak = 0
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const logDates = new Set(daily.map((d) => d.date))
-  for (let i = 0; i <= days; i++) {
+  for (let i = 0; i <= validatedDays; i++) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
     const dateStr = formatLocalDate(d)

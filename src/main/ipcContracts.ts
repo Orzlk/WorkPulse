@@ -3,6 +3,7 @@ import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
 import { format, isValid, parseISO } from 'date-fns'
+import { DEFAULT_STATS_DAYS, isValidStatsDays } from './lib/stats'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -64,6 +65,12 @@ export function id(value: unknown, field = 'id'): string {
 export function integerId(value: unknown, field = 'id'): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) throw invalid(`${field} must be a positive integer`)
   return value as number
+}
+
+export function parseStatsDays(value: unknown): number {
+  const days = value === undefined ? DEFAULT_STATS_DAYS : value
+  if (!isValidStatsDays(days)) throw invalid('days must be an integer between 1 and 366')
+  return days
 }
 
 export function parsePagination(value: unknown): Required<Pagination> {
