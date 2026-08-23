@@ -33,6 +33,7 @@ export function resolveReportPeriod(
   const end = type === 'weekly' ? addWeeks(start, 1) : addMonths(start, 1)
   const startDate = format(start, 'yyyy-MM-dd')
   const endDateExclusive = format(end, 'yyyy-MM-dd')
+  const labelEnd = format(subDays(end, 1), 'yyyy-MM-dd')
 
   return {
     type,
@@ -40,9 +41,6 @@ export function resolveReportPeriod(
     endDateExclusive,
     fromUtc: fromZonedTime(`${startDate}T00:00:00`, timeZone).toISOString(),
     toUtc: fromZonedTime(`${endDateExclusive}T00:00:00`, timeZone).toISOString(),
-    label:
-      type === 'weekly'
-        ? `${startDate} 至 ${format(subDays(end, 1), 'yyyy-MM-dd')}`
-        : `${startDate} 至 ${format(subDays(end, 1), 'yyyy-MM-dd')}`
+    label: `${startDate} 至 ${labelEnd}`
   }
 }

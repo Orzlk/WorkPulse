@@ -35,13 +35,16 @@ describe('resolveReportPeriod', () => {
 
   it('周期起点包含，结束边界不包含', () => {
     const period = resolveReportPeriod('weekly', '2026-08-23', 'Asia/Shanghai')
-    const startTimestamp = Date.parse(period.fromUtc)
-    const endTimestamp = Date.parse(period.toUtc)
-    const fromTimestamp = Date.parse(period.fromUtc)
-    const toTimestamp = Date.parse(period.toUtc)
+    const records = [
+      { timestamp: '2026-08-16T16:00:00.000Z' },
+      { timestamp: '2026-08-23T15:59:59.999Z' },
+      { timestamp: '2026-08-23T16:00:00.000Z' }
+    ]
+    const includedRecords = records.filter(
+      (record) => record.timestamp >= period.fromUtc && record.timestamp < period.toUtc
+    )
 
-    expect(startTimestamp >= fromTimestamp && startTimestamp < toTimestamp).toBe(true)
-    expect(endTimestamp >= fromTimestamp && endTimestamp < toTimestamp).toBe(false)
+    expect(includedRecords).toEqual(records.slice(0, 2))
   })
 
   it('支持周一输入以及跨月、跨年周期', () => {
