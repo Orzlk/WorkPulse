@@ -73,8 +73,10 @@ function toUtcIso(value: string): { iso: string; timestamp: number } {
 }
 
 function parseCount(value: string): number {
-  const count = Number.parseInt(value, 10)
-  return Number.isFinite(count) ? count : 0
+  if (!/^\d+$/.test(value)) throw new GitReadError('提交统计格式无效')
+  const count = Number(value)
+  if (!Number.isSafeInteger(count)) throw new GitReadError('提交统计格式无效')
+  return count
 }
 
 function summarizeNumstat(lines: string[]): Pick<GitCommitSummary, 'file_count' | 'additions' | 'deletions'> {

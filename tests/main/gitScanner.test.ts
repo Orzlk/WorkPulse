@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { openDatabase, runMigrations } from '../../src/main/database/connection'
 import type { WorkspaceContext } from '../../src/main/repositories/contracts'
-import { GitCommand } from '../../src/main/git/gitCommand'
+import { GitCommand, GitReadError } from '../../src/main/git/gitCommand'
 import { GitScanner } from '../../src/main/git/gitScanner'
 import { ProjectService } from '../../src/main/services/projectService'
 import { RepositoryScheduler, RepositoryService } from '../../src/main/services/repositoryService'
@@ -156,6 +156,24 @@ describe('GitScanner', () => {
     await expect(malformedScanner.scan(repository, binding)).rejects.toThrow('提交格式')
   })
 
+  it('严格校验 numstat 数字字段，拒绝部分数字和空格', async () => {
+    for (const additions of ['12oops', ' 12', '12 ']) {
+      const scanner = new GitScanner({
+        execute: async (_cwd, args) => {
+          if (args[0] === 'log') {
+            return `\u001e0123456789012345678901234567890123456789\u001f作者\u001fa@example.com\u001f2026-08-23T00:00:00.000Z\u001f异常统计\n${additions}\t0\tfile.txt\n`
+          }
+          return args.includes('--show-toplevel') ? 'D:/repo\n' : 'main\n'
+        }
+      })
+
+      await expect(scanner.scan(
+        { id: 1, public_id: 'repository-1' },
+        { id: 1, repository_id: 1, local_path: 'D:/repo' }
+      )).rejects.toThrow('提交统计格式')
+    }
+  })
+
   it('只读取最近三十天提交，并统计文本和二进制变更', async () => {
     const directory = createGitRepository()
     const scanner = new GitScanner()
@@ -266,6 +284,31 @@ describe('GitScanner', () => {
         last_failed_at: expect.stringMatching(/Z$/),
         last_scan_error: expect.stringContaining('Git')
       })
+    database.close()
+  })
+
+  it('numstat 异常时服务失败且不推进游标或写入提交 outbox', async () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const malformedScanner = {
+      scan: async () => {
+        throw new GitReadError('提交统计格式无效')
+      }
+    }
+    const service = new RepositoryService(database, context, malformedScanner as unknown as GitScanner)
+    const repository = service.create({ name: '异常统计仓库', local_path: directory })
+    const originalScannedAt = '2026-08-20T00:00:00.000Z'
+    database.prepare('UPDATE repositories SET last_scanned_at = ? WHERE public_id = ?')
+      .run(originalScannedAt, repository.public_id)
+
+    const result = await service.scanOne(repository.public_id, '2026-08-23T00:00:00.000Z')
+
+    expect(result).toMatchObject({ status: 'failed', error: '提交统计格式无效' })
+    expect(database.prepare('SELECT last_scanned_at FROM repositories WHERE public_id = ?').get(repository.public_id))
+      .toEqual({ last_scanned_at: originalScannedAt })
+    expect(database.prepare('SELECT COUNT(*) AS count FROM git_commits').get()).toEqual({ count: 0 })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = 'git_commit'").get())
+      .toEqual({ count: 0 })
     database.close()
   })
 
