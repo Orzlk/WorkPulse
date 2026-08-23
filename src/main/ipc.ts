@@ -149,6 +149,10 @@ export function registerIpcHandlers(): void {
     return services().reports.generate(parseReportRequest(request))
   }))
 
+  ipcMain.handle('report:preview', guarded((request: unknown) => {
+    return services().reports.preview(parseReportRequest(request))
+  }))
+
   ipcMain.handle('report:list', guarded((pagination?: unknown) => {
     const value = parseReportListInput(pagination)
     return services().reports.list(value.limit)
@@ -387,9 +391,12 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('export:report', async (_event, reportContent: string, dateRange: string) => {
+    const defaultPath = dateRange.startsWith('workpulse-')
+      ? `${dateRange}.md`
+      : `workpulse-report-${dateRange}.md`
     const result = await dialog.showSaveDialog({
       title: tMain('exportReportTitle'),
-      defaultPath: `workpulse-report-${dateRange}.md`,
+      defaultPath,
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     })
 

@@ -8,6 +8,19 @@ export interface ReportRequest {
   repositoryIds?: string[]
 }
 
+export interface ReportPreview {
+  type: ReportType
+  display_start: string
+  display_end_inclusive: string
+  project_count: number
+  repository_count: number
+  work_log_count: number
+  task_count: number
+  inbox_count: number
+  git_commit_count: number
+  unorganized_inbox_count: number
+}
+
 export interface ReportLogSnapshot {
   public_id: string
   content: string

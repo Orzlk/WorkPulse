@@ -103,6 +103,20 @@ interface PeriodReport {
   updated_at: string
   display_start: string
   display_end_inclusive: string
+  source_snapshot?: { schema_version: number | string; unavailable?: boolean }
+}
+
+interface ReportPreview {
+  type: 'weekly' | 'monthly'
+  display_start: string
+  display_end_inclusive: string
+  project_count: number
+  repository_count: number
+  work_log_count: number
+  task_count: number
+  inbox_count: number
+  git_commit_count: number
+  unorganized_inbox_count: number
 }
 
 interface Task {
@@ -207,6 +221,7 @@ export interface API {
   }
   report: {
     generate: (request: ReportRequest) => Promise<PeriodReport>
+    preview: (request: ReportRequest) => Promise<ReportPreview>
     list: (limit?: number) => Promise<PeriodReport[]>
     get: (publicId: string) => Promise<PeriodReport | null>
     update: (publicId: string, input: { content: string }) => Promise<PeriodReport | null>

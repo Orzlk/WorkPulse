@@ -139,6 +139,28 @@ describe('ReportQueryService', () => {
     expect(serialized).not.toContain('local_path')
     database.close()
   })
+
+  it('previews organized and unorganized inbox counts without sending unorganized records to AI', () => {
+    const database = createDatabase()
+    const ids = seed(database)
+    const { workspace_id, user_id } = context(database)
+    const insertInbox = database.prepare(`
+      INSERT INTO inbox_items (public_id, workspace_id, project_id, content, status, state, include_in_reports, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'inbox', ?, 1, ?, ?, '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z')
+    `)
+    insertInbox.run(randomUUID(), workspace_id, ids.alpha, '待整理记录', 'unorganized', user_id, user_id)
+    insertInbox.run(randomUUID(), workspace_id, ids.alpha, '已整理记录', 'confirmed', user_id, user_id)
+
+    const preview = new ReportQueryService(database, context(database)).preview(request({ projectIds: [ids.alphaPublicId] }))
+
+    expect(preview.display_start).toBe('2026-08-17')
+    expect(preview.display_end_inclusive).toBe('2026-08-23')
+    expect(preview.project_count).toBe(1)
+    expect(preview.repository_count).toBe(1)
+    expect(preview.inbox_count).toBe(1)
+    expect(preview.unorganized_inbox_count).toBe(1)
+    database.close()
+  })
 })
 
 describe('ReportService and period AI generation', () => {

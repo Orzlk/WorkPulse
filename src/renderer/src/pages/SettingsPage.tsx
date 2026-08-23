@@ -168,6 +168,8 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [style, setStyle] = useState(t('settings.styleConcise'))
   const [systemPrompt, setSystemPrompt] = useState(getDefaultSystemPrompt(resolvedLanguage))
   const [reportTemplate, setReportTemplate] = useState(getDefaultReportTemplate(resolvedLanguage))
+  const [reportRemindersEnabled, setReportRemindersEnabled] = useState(true)
+  const [reportReminderPeriod, setReportReminderPeriod] = useState<'weekly' | 'monthly'>('weekly')
   const [shortcutLog, setShortcutLog] = useState('CmdOrCtrl+Shift+L')
   const [shortcutTask, setShortcutTask] = useState('CmdOrCtrl+Shift+T')
   const [appVersion, setAppVersion] = useState('')
@@ -247,6 +249,10 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     if (sp) setSystemPrompt(sp)
     const rt = await window.api.settings.get('report_template')
     if (rt) setReportTemplate(rt)
+    const reminders = await window.api.settings.get('report_reminders_enabled')
+    setReportRemindersEnabled(reminders !== 'false')
+    const reminderPeriod = await window.api.settings.get('report_reminder_period')
+    if (reminderPeriod === 'weekly' || reminderPeriod === 'monthly') setReportReminderPeriod(reminderPeriod)
     const sl = await window.api.settings.get('shortcut_quick_log')
     if (sl) setShortcutLog(sl)
     const st = await window.api.settings.get('shortcut_quick_task')
@@ -338,6 +344,16 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     } else {
       await window.api.settings.set('report_template', reportTemplate)
     }
+  }
+
+  const handleReminderToggle = async (enabled: boolean): Promise<void> => {
+    setReportRemindersEnabled(enabled)
+    await window.api.settings.set('report_reminders_enabled', String(enabled))
+  }
+
+  const handleReminderPeriodChange = async (period: 'weekly' | 'monthly'): Promise<void> => {
+    setReportReminderPeriod(period)
+    await window.api.settings.set('report_reminder_period', period)
   }
 
   const resetSystemPrompt = async (): Promise<void> => {
@@ -524,6 +540,33 @@ function SettingsPage({ onBack }: Props): JSX.Element {
           <section>
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">{t('settings.reportPrefs')}</h2>
             <div className="h-px bg-zinc-200 dark:bg-zinc-700 mb-4" />
+
+            <div className="mb-5 rounded-lg border border-zinc-200 dark:border-zinc-700 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{t('settings.reportReminder')}</h3>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('settings.reportReminderHelp')}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={reportRemindersEnabled}
+                  onClick={() => { void handleReminderToggle(!reportRemindersEnabled) }}
+                  className={`relative h-7 w-12 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400 ${reportRemindersEnabled ? 'bg-zinc-900 dark:bg-zinc-100' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform dark:bg-zinc-900 ${reportRemindersEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                  <span className="sr-only">{t('settings.reportReminder')}</span>
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label htmlFor="report-reminder-period" className="text-sm text-zinc-600 dark:text-zinc-300">{t('settings.reportReminderPeriod')}</label>
+                <select id="report-reminder-period" value={reportReminderPeriod} disabled={!reportRemindersEnabled} onChange={(event) => { void handleReminderPeriodChange(event.target.value as 'weekly' | 'monthly') }} className="min-h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-zinc-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100">
+                  <option value="weekly">{t('report.weekly')}</option>
+                  <option value="monthly">{t('report.monthly')}</option>
+                </select>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">{reportRemindersEnabled ? t('settings.reportReminderEnabled') : t('settings.reportReminderDisabled')}</span>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>

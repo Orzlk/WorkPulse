@@ -6,6 +6,7 @@ import type {
   ReportGitCommitSnapshot,
   ReportInboxSnapshot,
   ReportLogSnapshot,
+  ReportPreview,
   ReportProjectSnapshot,
   ReportRequest,
   ReportSourceSnapshot,
@@ -183,6 +184,50 @@ export class ReportQueryService {
     }
   }
 
+  preview(request: ReportRequest): ReportPreview {
+    const snapshot = this.buildSnapshot(request)
+    const projectIds = assertIds(request.projectIds, 'project')
+    const repositoryIds = assertIds(request.repositoryIds, 'repository')
+    const projects = this.loadProjects(projectIds)
+    const repositories = this.loadRepositories(repositoryIds)
+    const allowedProjectIds = projects.map((project) => project.id)
+    const allowedRepositoryIds = repositories.map((repository) => repository.id)
+    const conditions = [
+      'entity.workspace_id = ?',
+      "entity.state = 'unorganized'",
+      'entity.deleted_at IS NULL',
+      'entity.created_at >= ?',
+      'entity.created_at < ?'
+    ]
+    const values: Array<number | string> = [this.context.workspace_id, snapshot.period.fromUtc, snapshot.period.toUtc]
+    if (projectIds.length > 0) {
+      conditions.push(`entity.project_id IN (${allowedProjectIds.map(() => '?').join(', ')})`)
+      values.push(...allowedProjectIds)
+    }
+    if (repositoryIds.length > 0) {
+      conditions.push(`entity.repository_id IN (${allowedRepositoryIds.map(() => '?').join(', ')})`)
+      values.push(...allowedRepositoryIds)
+    }
+    const unorganized = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM inbox_items AS entity
+      WHERE ${conditions.join(' AND ')}
+    `).get(...values) as { count: number }
+    const groups = snapshot.projects
+
+    return {
+      type: request.type,
+      display_start: snapshot.period.startDate,
+      display_end_inclusive: previousCalendarDate(snapshot.period.endDateExclusive),
+      project_count: projects.length,
+      repository_count: repositories.length,
+      work_log_count: groups.reduce((count, project) => count + project.work_logs.length, 0),
+      task_count: groups.reduce((count, project) => count + project.tasks.length, 0),
+      inbox_count: groups.reduce((count, project) => count + project.inbox_items.length, 0),
+      git_commit_count: groups.reduce((count, project) => count + project.git_commits.length, 0),
+      unorganized_inbox_count: unorganized.count
+    }
+  }
+
   private loadProjects(publicIds: string[]): ProjectRow[] {
     const params: Array<number | string> = [this.context.workspace_id]
     const filter = publicIds.length > 0 ? `AND public_id IN (${publicIds.map(() => '?').join(', ')})` : ''
@@ -219,4 +264,9 @@ export class ReportQueryService {
     `).get(this.context.workspace_id, this.context.user_id)
     if (!row) throw new Error('Workspace not found')
   }
+}
+
+function previousCalendarDate(value: string): string {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10)
 }

@@ -9,6 +9,7 @@ import { ReportQueryService } from './reportQueryService'
 import type {
   LegacyReportSourceSnapshot,
   ReportRequest,
+  ReportPreview,
   ReportSnapshot,
   ReportSourceSnapshot,
   SavedPeriodReport
@@ -68,6 +69,10 @@ export class ReportService {
       this.database.transaction(() => this.failReport(created.public_id, message, now))()
       throw new Error(message)
     }
+  }
+
+  preview(request: ReportRequest): ReportPreview {
+    return this.query.preview(request)
   }
 
   list(limit = 50): SavedPeriodReport[] {

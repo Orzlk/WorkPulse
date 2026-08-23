@@ -107,7 +107,7 @@ function App(): JSX.Element {
   const renderPage = (): JSX.Element => {
     if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} />
     if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} />
-    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} />
+    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} onOpenInbox={() => setCurrentPage('inbox')} />
     if (currentPage === 'stats') return <StatsPage />
     if (currentPage === 'settings') return <SettingsPage onBack={() => setCurrentPage('worklog')} />
     if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} />
