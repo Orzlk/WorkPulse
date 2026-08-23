@@ -542,6 +542,37 @@ const migrations: SchemaMigration[] = [
       addColumnIfMissing(database, 'reports', 'status', "TEXT NOT NULL DEFAULT 'ready' CHECK(status IN ('generating', 'ready', 'error'))")
       addColumnIfMissing(database, 'reports', 'error_message', 'TEXT')
       addColumnIfMissing(database, 'reports', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
+      const legacyReports = database.prepare(`
+        SELECT rowid AS migration_rowid, public_id, type, period_type, period_start,
+          period_end_exclusive, timezone, time_zone, date_from, date_to
+        FROM reports
+        WHERE source_snapshot IS NULL OR TRIM(source_snapshot) IN ('', '{}')
+      `).all() as Array<{
+        migration_rowid: number
+        public_id: string
+        type: string
+        period_type: string | null
+        period_start: string | null
+        period_end_exclusive: string | null
+        timezone: string | null
+        time_zone: string | null
+        date_from: string | null
+        date_to: string | null
+      }>
+      const updateLegacyReport = database.prepare('UPDATE reports SET source_snapshot = ? WHERE rowid = ?')
+      for (const report of legacyReports) {
+        updateLegacyReport.run(JSON.stringify({
+          schema_version: 'legacy',
+          unavailable: true,
+          projects: [],
+          report_public_id: report.public_id,
+          report_type: report.period_type ?? report.type,
+          period_start: report.period_start ?? report.date_from ?? null,
+          period_end: report.period_end_exclusive ?? report.date_to ?? null,
+          timezone: report.timezone ?? report.time_zone ?? null,
+          reason: 'source_snapshot_unavailable'
+        }), report.migration_rowid)
+      }
       database.exec(`
         UPDATE reports
         SET timezone = COALESCE(timezone, time_zone, 'UTC'),

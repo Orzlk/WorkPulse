@@ -172,6 +172,16 @@ describe('SQLite migrations', () => {
     expect(report.created_at).toBe('2026-08-01T17:00:00.000Z')
     expect(report.updated_at).toBe('2026-08-01T17:00:00.000Z')
     expect(report.generated_at).toBe('2026-08-01T17:00:00.000Z')
+    const legacySnapshotValue = database.prepare('SELECT source_snapshot FROM reports WHERE id = 1').get() as { source_snapshot: string }
+    const legacySnapshot = JSON.parse(legacySnapshotValue.source_snapshot)
+    expect(legacySnapshot).toMatchObject({
+      schema_version: 'legacy',
+      unavailable: true,
+      projects: [],
+      report_type: 'monthly',
+      period_start: '2026-08-01',
+      period_end: '2026-09-01'
+    })
     expect(setting.created_at).toBe('2026-08-23T12:34:56.000Z')
     expect(setting.updated_at).toBe('2026-08-23T12:34:56.000Z')
     database.close()

@@ -4,7 +4,13 @@ import type Database from 'better-sqlite3'
 
 import type { WorkspaceContext } from '../repositories/contracts'
 import { ReportQueryService } from './reportQueryService'
-import type { ReportRequest, ReportSourceSnapshot, SavedPeriodReport } from './reportTypes'
+import type {
+  LegacyReportSourceSnapshot,
+  ReportRequest,
+  ReportSnapshot,
+  ReportSourceSnapshot,
+  SavedPeriodReport
+} from './reportTypes'
 
 interface ReportGenerator {
   generateContent(snapshot: ReportSourceSnapshot, request: ReportRequest): Promise<string>
@@ -12,7 +18,7 @@ interface ReportGenerator {
 
 interface ReportRow {
   public_id: string
-  type: 'weekly' | 'monthly'
+  type: string
   period_start: string
   period_end_exclusive: string
   timezone: string
@@ -173,8 +179,47 @@ export class ReportService {
       period_end: row.period_end_exclusive,
       project_scope: JSON.parse(row.project_scope) as string[],
       repository_scope: JSON.parse(row.repository_scope) as string[],
-      source_snapshot: JSON.parse(row.source_snapshot) as ReportSourceSnapshot
+      source_snapshot: this.parseSnapshot(row)
     }
+  }
+
+  private parseSnapshot(row: ReportRow): ReportSnapshot {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.source_snapshot)
+    } catch {
+      parsed = null
+    }
+    if (this.isReportSourceSnapshot(parsed)) return parsed
+    if (this.isLegacyReportSourceSnapshot(parsed)) return parsed
+    return {
+      schema_version: 'legacy',
+      unavailable: true,
+      projects: [],
+      report_public_id: row.public_id,
+      report_type: row.type,
+      period_start: row.period_start || null,
+      period_end: row.period_end_exclusive || null,
+      timezone: row.timezone || null,
+      reason: 'source_snapshot_unavailable'
+    }
+  }
+
+  private isReportSourceSnapshot(value: unknown): value is ReportSourceSnapshot {
+    return Boolean(
+      value && typeof value === 'object' &&
+      (value as { schema_version?: unknown }).schema_version === 1 &&
+      Array.isArray((value as { projects?: unknown }).projects)
+    )
+  }
+
+  private isLegacyReportSourceSnapshot(value: unknown): value is LegacyReportSourceSnapshot {
+    return Boolean(
+      value && typeof value === 'object' &&
+      (value as { schema_version?: unknown }).schema_version === 'legacy' &&
+      (value as { unavailable?: unknown }).unavailable === true &&
+      Array.isArray((value as { projects?: unknown }).projects)
+    )
   }
 
   private enqueueSync(entityPublicId: string, operationType: 'create' | 'update', payload: unknown, now: string): void {

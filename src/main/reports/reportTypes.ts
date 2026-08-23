@@ -59,15 +59,29 @@ export interface ReportSourceSnapshot {
   projects: ReportProjectSnapshot[]
 }
 
+export interface LegacyReportSourceSnapshot {
+  schema_version: 'legacy'
+  unavailable: true
+  projects: []
+  report_public_id: string
+  report_type: string
+  period_start: string | null
+  period_end: string | null
+  timezone: string | null
+  reason: 'source_snapshot_unavailable'
+}
+
+export type ReportSnapshot = ReportSourceSnapshot | LegacyReportSourceSnapshot
+
 export interface SavedPeriodReport {
   public_id: string
-  type: ReportType
+  type: string
   period_start: string
   period_end: string
   timezone: string
   project_scope: string[]
   repository_scope: string[]
-  source_snapshot: ReportSourceSnapshot
+  source_snapshot: ReportSnapshot
   content: string
   version: number
   status: 'generating' | 'ready' | 'error'

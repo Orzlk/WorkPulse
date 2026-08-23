@@ -189,6 +189,30 @@ describe('ReportService and period AI generation', () => {
     database.close()
   })
 
+  it('reads an old report as an explicitly unavailable legacy snapshot', () => {
+    const database = createDatabase()
+    const { workspace_id, user_id } = context(database)
+    const now = '2026-08-23T00:00:00.000Z'
+    const publicId = randomUUID()
+    database.prepare(`
+      INSERT INTO reports (
+        public_id, workspace_id, type, period_type, date_from, date_to, period_start, period_end_exclusive,
+        time_zone, timezone, project_scope, repository_scope, source_snapshot, content, version, status,
+        created_by, updated_by, created_at, updated_at
+      ) VALUES (?, ?, 'monthly', 'monthly', '2026-08-01', '2026-08-31', ?, ?, 'Asia/Shanghai', 'Asia/Shanghai', '[]', '[]', '{}', '旧报告', 1, 'ready', ?, ?, ?, ?)
+    `).run(publicId, workspace_id, '2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z', user_id, user_id, now, now)
+
+    const report = new ReportService(database, context(database)).get(publicId)
+    expect(report?.source_snapshot).toMatchObject({
+      schema_version: 'legacy',
+      unavailable: true,
+      projects: [],
+      report_public_id: publicId,
+      report_type: 'monthly'
+    })
+    database.close()
+  })
+
   it('validates period AI provider responses and returns a displayable empty report without calling the provider', async () => {
     const period = resolveReportPeriod('monthly', '2026-08-23', 'Asia/Shanghai')
     const provider: PeriodReportProvider = async () => ({ content: '## 月报\n\n下月建议：继续验证。' })

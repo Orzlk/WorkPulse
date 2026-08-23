@@ -8,6 +8,7 @@ import {
   type PeriodReportOptions,
   type PeriodReportProvider
 } from './reports/periodReportAi'
+import { callAnthropic, callDeepSeek, callOpenAI } from './reports/aiProvider'
 
 export type { PeriodReportOptions, PeriodReportProvider } from './reports/periodReportAi'
 
@@ -110,12 +111,12 @@ export async function generateReport(
   ]
 
   if (provider === 'anthropic') {
-    return callAnthropic(apiKey, baseUrl, model, messages)
+    return callAnthropic({ apiKey, baseUrl, model, messages })
   }
   if (provider === 'deepseek') {
-    return callDeepSeek(apiKey, baseUrl, model, messages)
+    return callDeepSeek({ apiKey, baseUrl, model, messages })
   }
-  return callOpenAI(apiKey, baseUrl, model, messages)
+  return callOpenAI({ apiKey, baseUrl, model, messages })
 }
 
 export async function generatePeriodReportContent(
@@ -137,9 +138,9 @@ async function callConfiguredPeriodProvider(systemPrompt: string, userPrompt: st
   const baseUrl = getSetting('ai_base_url') || ''
   const model = getSetting('ai_model') || ''
   const messages: Message[] = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
-  if (provider === 'anthropic') return callAnthropic(apiKey, baseUrl, model, messages, signal)
-  if (provider === 'deepseek') return callDeepSeek(apiKey, baseUrl, model, messages, signal)
-  return callOpenAI(apiKey, baseUrl, model, messages, signal)
+  if (provider === 'anthropic') return callAnthropic({ apiKey, baseUrl, model, messages, signal })
+  if (provider === 'deepseek') return callDeepSeek({ apiKey, baseUrl, model, messages, signal })
+  return callOpenAI({ apiKey, baseUrl, model, messages, signal })
 }
 
 function replaceVars(template: string, vars: Record<string, string>): string {
@@ -169,115 +170,6 @@ function formatTaskContext(tasks: ReportTaskContext[]): string {
       return `- [${meta}] ${task.title}${description}`
     })
     .join('\n')
-}
-
-async function callOpenAI(
-  apiKey: string,
-  baseUrl: string,
-  model: string,
-  messages: Message[],
-  signal?: AbortSignal
-): Promise<string> {
-  const url = baseUrl
-    ? `${baseUrl.replace(/\/+$/, '')}/chat/completions`
-    : 'https://api.openai.com/v1/chat/completions'
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: model || 'gpt-4o-mini',
-      messages,
-      temperature: 0.7,
-      max_tokens: 2000
-    }),
-    signal
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`${tMain('openAiError')}: ${response.status} - ${error}`)
-  }
-
-  const data = await response.json()
-  return data.choices[0]?.message?.content || tMain('noGeneratedContent')
-}
-
-async function callAnthropic(
-  apiKey: string,
-  baseUrl: string,
-  model: string,
-  messages: Message[],
-  signal?: AbortSignal
-): Promise<string> {
-  const systemMsg = messages.find((m) => m.role === 'system')
-  const userMsg = messages.find((m) => m.role === 'user')
-
-  const url = baseUrl
-    ? `${baseUrl.replace(/\/+$/, '')}/v1/messages`
-    : 'https://api.anthropic.com/v1/messages'
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: model || 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      system: systemMsg?.content || '',
-      messages: [{ role: 'user', content: userMsg?.content || '' }]
-    }),
-    signal
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`${tMain('anthropicError')}: ${response.status} - ${error}`)
-  }
-
-  const data = await response.json()
-  return data.content[0]?.text || tMain('noGeneratedContent')
-}
-
-async function callDeepSeek(
-  apiKey: string,
-  baseUrl: string,
-  model: string,
-  messages: Message[],
-  signal?: AbortSignal
-): Promise<string> {
-  const url = baseUrl
-    ? `${baseUrl.replace(/\/+$/, '')}/chat/completions`
-    : 'https://api.deepseek.com/chat/completions'
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: model || 'deepseek-chat',
-      messages,
-      temperature: 0.7,
-      max_tokens: 2000
-    }),
-    signal
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`DeepSeek API error: ${response.status} - ${error}`)
-  }
-
-  const data = await response.json()
-  return data.choices[0]?.message?.content || 'Generation failed: empty response'
 }
 
 export { DEFAULT_SYSTEM_PROMPT, DEFAULT_REPORT_TEMPLATE, DEFAULT_SYSTEM_PROMPT_EN, DEFAULT_REPORT_TEMPLATE_EN }

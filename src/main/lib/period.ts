@@ -17,6 +17,9 @@ export function resolveReportPeriod(
   anchorDate: string,
   timeZone: string
 ): ReportPeriod {
+  if (type !== 'weekly' && type !== 'monthly') {
+    throw new RangeError(`Invalid report type: ${String(type)}`)
+  }
   const anchor = parseISO(anchorDate)
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate) || !isValid(anchor)) {

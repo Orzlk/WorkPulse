@@ -78,5 +78,8 @@ describe('resolveReportPeriod', () => {
     expect(() => resolveReportPeriod('weekly', '2026-08-23', 'Not/AZone')).toThrow(
       new RangeError('Invalid timeZone: Not/AZone')
     )
+    expect(() => resolveReportPeriod('quarterly' as never, '2026-08-23', 'Asia/Shanghai')).toThrow(
+      new RangeError('Invalid report type: quarterly')
+    )
   })
 })
