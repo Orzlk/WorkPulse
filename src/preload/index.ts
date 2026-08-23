@@ -21,6 +21,18 @@ interface AppUpdateState {
   canInstall?: boolean
 }
 
+interface WorkLog {
+  id: number
+  public_id: string
+  content: string
+  category: string
+  created_at: string
+  task_id: number | null
+  project_id: string | null
+  repository_id: string | null
+  tag_names: string[]
+}
+
 interface Task {
   id: number
   public_id: string
@@ -153,6 +165,7 @@ const api = {
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('worklog:add', content, category, associations),
+    get: (publicId: string) => ipcRenderer.invoke('worklog:get', publicId) as Promise<WorkLog | null>,
     list: (limit?: number, offset?: number) =>
       ipcRenderer.invoke('worklog:list', limit, offset),
     byDateRange: (from: string, to: string) =>
@@ -171,6 +184,7 @@ const api = {
     add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('task:add', title, description, status, createdAt, associations),
     list: () => ipcRenderer.invoke('task:list'),
+    get: (publicId: string) => ipcRenderer.invoke('task:get', publicId) as Promise<Task | null>,
     update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) =>
       ipcRenderer.invoke('task:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('task:delete', id),
@@ -200,6 +214,7 @@ const api = {
   },
   inbox: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('inbox:list', pagination) as Promise<Page<InboxItem>>,
+    get: (publicId: string) => ipcRenderer.invoke('inbox:get', publicId) as Promise<InboxItem | null>,
     create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => ipcRenderer.invoke('inbox:create', input) as Promise<InboxItem>,
     update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => ipcRenderer.invoke('inbox:update', publicId, input) as Promise<InboxItem | null>,
     organize: (publicId: string) => ipcRenderer.invoke('inbox:organize', publicId) as Promise<{ target: string; target_public_id: string | null }>,
@@ -217,10 +232,17 @@ const api = {
   },
   repository: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,
+    get: (publicId: string) => ipcRenderer.invoke('repository:get', publicId) as Promise<Repository | null>,
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:create', input) as Promise<Repository>,
     update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
     scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId) as Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>,
-    scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
+    scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{
+      succeeded: number
+      failed: number
+      commits: number
+      errors: Array<{ repository_id: string; error: string }>
+      results: Array<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
+    }>
   },
   database: {
     export: () => ipcRenderer.invoke('database:export') as Promise<{ filePath: string; preview: unknown } | null>,

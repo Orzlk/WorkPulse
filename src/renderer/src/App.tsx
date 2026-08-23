@@ -38,6 +38,9 @@ function App(): JSX.Element {
   const [quickCreate, setQuickCreate] = useState<QuickCreateMode>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [inboxFocusId, setInboxFocusId] = useState<string | null>(null)
+  const [workLogFocusId, setWorkLogFocusId] = useState<string | null>(null)
+  const [taskFocusId, setTaskFocusId] = useState<string | null>(null)
+  const [repositoryFocusId, setRepositoryFocusId] = useState<string | null>(null)
   const [reportProjectId, setReportProjectId] = useState<string | null>(null)
   const initTheme = useThemeStore((state) => state.init)
   const initLanguage = useLanguageStore((state) => state.init)
@@ -87,10 +90,13 @@ function App(): JSX.Element {
       setInboxFocusId(result.public_id)
       setCurrentPage('inbox')
     } else if (result.source === 'work_log') {
+      setWorkLogFocusId(result.public_id)
       setCurrentPage('worklog')
     } else if (result.source === 'task') {
+      setTaskFocusId(result.public_id)
       setCurrentPage('kanban')
     } else if (result.source === 'git_commit') {
+      setRepositoryFocusId(result.repository_id)
       setCurrentPage('repositories')
     } else {
       setReportProjectId(result.project_id)
@@ -99,14 +105,14 @@ function App(): JSX.Element {
     setSearchOpen(false)
   }, [])
   const renderPage = (): JSX.Element => {
-    if (currentPage === 'worklog') return <WorkLogPage />
-    if (currentPage === 'kanban') return <KanbanPage />
+    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} />
+    if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} />
     if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} />
     if (currentPage === 'stats') return <StatsPage />
     if (currentPage === 'settings') return <SettingsPage onBack={() => setCurrentPage('worklog')} />
     if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} />
     if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); setCurrentPage('report') }} />
-    return <RepositoriesPage />
+    return <RepositoriesPage focusPublicId={repositoryFocusId} />
   }
 
   return <div className="hallmark-app workspace-shell h-screen flex flex-col">

@@ -48,4 +48,58 @@ describe('work item associations', () => {
     expect(getTasks()[0]).toMatchObject({ project_id: null, repository_id: null, tag_names: ['更新任务'] })
     expect((database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type IN ('work_log', 'task', 'work_log_tags', 'task_tags')").get() as { count: number }).count).toBeGreaterThanOrEqual(4)
   })
+
+  it('preserves omitted associations and emits patch-shaped outbox payloads', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-associations-preserve-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const now = new Date().toISOString()
+    database.prepare(`INSERT INTO projects (public_id, workspace_id, name, description, color, created_by, updated_by, created_at, updated_at) VALUES ('project-keep', 1, 'Project', '', '#64748b', 1, 1, ?, ?)`).run(now, now)
+    database.prepare(`INSERT INTO repositories (public_id, workspace_id, project_id, name, enabled, created_by, updated_by, created_at, updated_at) VALUES ('repo-keep', 1, 1, 'Repository', 1, 1, 1, ?, ?)`).run(now, now)
+
+    const log = addWorkLog('Original log', 'work', null, undefined, { projectId: 'project-keep', repositoryId: 'repo-keep', tagNames: ['keep-log'] })
+    const task = addTask('Original task', '', 'todo', undefined, { projectId: 'project-keep', repositoryId: 'repo-keep', tagNames: ['keep-task'] })
+
+    updateWorkLog(log.id, 'Updated log', 'work')
+    updateTask(task.id, { title: 'Updated task' })
+    expect(getWorkLogs()[0]).toMatchObject({ project_id: 'project-keep', repository_id: 'repo-keep', tag_names: ['keep-log'] })
+    expect(getTasks()[0]).toMatchObject({ project_id: 'project-keep', repository_id: 'repo-keep', tag_names: ['keep-task'] })
+
+    const payloads = database.prepare(`SELECT payload FROM sync_operations WHERE entity_type IN ('work_log', 'task') ORDER BY id DESC LIMIT 2`).all() as Array<{ payload: string }>
+    expect(payloads.every((row) => !Object.prototype.hasOwnProperty.call(JSON.parse(row.payload), 'project_id'))).toBe(true)
+    expect(payloads.every((row) => !Object.prototype.hasOwnProperty.call(JSON.parse(row.payload), 'tag_names'))).toBe(true)
+  })
+
+  it('rolls back body, tags, links, and outbox when association persistence fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-associations-rollback-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    database.exec(`CREATE TRIGGER fail_task_outbox BEFORE INSERT ON sync_operations WHEN NEW.entity_type = 'task' BEGIN SELECT RAISE(ABORT, 'forced task outbox failure'); END`)
+
+    expect(() => addTask('Rollback task', '', 'todo', undefined, { tagNames: ['rollback-tag'] })).toThrow('forced task outbox failure')
+    expect(database.prepare("SELECT COUNT(*) AS count FROM tasks WHERE title = 'Rollback task'").get()).toEqual({ count: 0 })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM tags WHERE path = 'rollback-tag'").get()).toEqual({ count: 0 })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = 'task'").get()).toEqual({ count: 0 })
+  })
+
+  it('keeps legacy CRUD reads and task operations inside the active workspace', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-associations-workspace-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const now = new Date().toISOString()
+    database.prepare(`INSERT INTO workspaces (public_id, name, created_at, updated_at) VALUES ('workspace-2', 'Workspace 2', ?, ?)`).run(now, now)
+    database.prepare(`INSERT INTO users (public_id, workspace_id, name, created_at, updated_at) VALUES ('user-2', 2, 'User 2', ?, ?)`).run(now, now)
+    database.prepare(`INSERT INTO tasks (public_id, workspace_id, title, description, status, board_column, position, created_by, updated_by, created_at, updated_at) VALUES ('task-other', 2, 'Other workspace task', '', 'todo', 'todo', 0, 2, 2, ?, ?)`).run(now, now)
+
+    expect(getTasks().some((task) => task.public_id === 'task-other')).toBe(false)
+    expect(() => updateTask(2, { title: 'Must not update' })).not.toThrow()
+    expect(database.prepare("SELECT title FROM tasks WHERE public_id = 'task-other'").get()).toEqual({ title: 'Other workspace task' })
+    expect(database.prepare("SELECT COUNT(*) AS count FROM tasks WHERE public_id = 'task-other'").get()).toEqual({ count: 1 })
+  })
 })

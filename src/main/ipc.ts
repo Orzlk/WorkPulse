@@ -5,6 +5,7 @@ import {
   addWorkLog,
   getWorkLogs,
   getWorkLogsByDateRange,
+  getWorkLogByPublicId,
   searchWorkLogs,
   getAllWorkLogs,
   getStats,
@@ -18,6 +19,7 @@ import {
   deleteSetting,
   addTask,
   getTasks,
+  getTaskByPublicId,
   updateTask,
   deleteTask,
   reorderTasks,
@@ -103,6 +105,8 @@ export function registerIpcHandlers(): void {
     return getWorkLogs(limit, offset)
   })
 
+  ipcMain.handle('worklog:get', guarded((publicId: unknown) => getWorkLogByPublicId(id(publicId, 'worklog id'))))
+
   ipcMain.handle('worklog:byDateRange', (_event, from: string, to: string) => {
     return getWorkLogsByDateRange(from, to)
   })
@@ -170,6 +174,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('project:archive', guarded((publicId: unknown) => services().projects.softDelete(id(publicId, 'project id'))))
 
   ipcMain.handle('inbox:list', guarded((pagination?: unknown) => services().inbox.list(parsePagination(pagination))))
+  ipcMain.handle('inbox:get', guarded((publicId: unknown) => services().inbox.get(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:create', guarded((input: unknown) => {
     const item = parseInboxInput(input)
     if (!item.content) throw new IpcContractError('INVALID_ARGUMENT', 'Inbox content is required')
@@ -197,6 +202,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('search:query', guarded((input: unknown) => services().search.search(parseSearchQueryInput(input))))
 
   ipcMain.handle('repository:list', guarded((pagination?: unknown) => services().repositories.list(parsePagination(pagination))))
+  ipcMain.handle('repository:get', guarded((publicId: unknown) => services().repositories.get(id(publicId, 'repository id'))))
   ipcMain.handle('repository:create', guarded((input: unknown) => services().repositories.create(parseRepositoryCreateInput(input))))
   ipcMain.handle('repository:update', guarded((publicId: unknown, input: unknown) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new IpcContractError('INVALID_ARGUMENT', 'Repository update is invalid')
@@ -211,8 +217,10 @@ export function registerIpcHandlers(): void {
     const results = await services().repositories.scanAllEnabled()
     return {
       succeeded: results.filter((result) => result.status === 'succeeded').length,
+      failed: results.filter((result) => result.status === 'failed').length,
       commits: results.reduce((total, result) => total + result.inserted_count, 0),
-      errors: results.filter((result) => result.status === 'failed').map((result) => ({ repository_id: result.repository_id, error: result.error ?? '' }))
+      errors: results.filter((result) => result.status === 'failed').map((result) => ({ repository_id: result.repository_id, error: result.error ?? '' })),
+      results
     }
   }))
 
@@ -269,6 +277,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('task:list', () => {
     return getTasks()
   })
+
+  ipcMain.handle('task:get', guarded((publicId: unknown) => getTaskByPublicId(id(publicId, 'task id'))))
 
   ipcMain.handle(
     'task:update',

@@ -19,8 +19,8 @@ import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
 import { extractHashTags } from '../lib/workspaceInteractions'
 
-function WorkLogPage(): JSX.Element {
-  const { logs, fetchLogs, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, updateLog } =
+function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.Element {
+  const { logs, fetchLogs, loadByPublicId, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, updateLog } =
     useWorkLogStore()
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
@@ -54,6 +54,18 @@ function WorkLogPage(): JSX.Element {
     window.api.worklog.categories().then(setCategorySuggestions).catch(() => setCategorySuggestions([]))
     inputRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    if (!focusPublicId) return
+    void loadByPublicId(focusPublicId).then((log) => {
+      if (!log) return
+      requestAnimationFrame(() => {
+        const element = document.getElementById(`work-log-${focusPublicId}`)
+        element?.scrollIntoView({ block: 'center' })
+        element?.focus()
+      })
+    })
+  }, [focusPublicId, loadByPublicId])
 
   const parseCategory = (text: string): { content: string; category: string } => {
     const match = text.match(/#(\S+)\s*/)
@@ -269,6 +281,8 @@ function WorkLogPage(): JSX.Element {
                 {dateLogs.map((log) => (
                   <div
                     key={log.id}
+                    id={`work-log-${log.public_id}`}
+                    tabIndex={-1}
                     className="log-row group"
                   >
                     <span className="log-dot" aria-hidden="true" />

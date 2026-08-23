@@ -177,6 +177,7 @@ export interface API {
   task: {
     add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
     list: () => Promise<Task[]>
+    get: (publicId: string) => Promise<Task | null>
     update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<Task | null>
     delete: (id: number) => Promise<boolean>
     reorder: (taskIds: number[], status: string) => Promise<void>
@@ -185,6 +186,7 @@ export interface API {
   }
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
+    get: (publicId: string) => Promise<WorkLog | null>
     list: (limit?: number, offset?: number) => Promise<WorkLog[]>
     byDateRange: (from: string, to: string) => Promise<WorkLog[]>
     search: (keyword: string) => Promise<WorkLog[]>
@@ -217,6 +219,7 @@ export interface API {
   }
   inbox: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<InboxItem>>
+    get: (publicId: string) => Promise<InboxItem | null>
     create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => Promise<InboxItem>
     update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => Promise<InboxItem | null>
     organize: (publicId: string) => Promise<{ target: string; target_public_id: string | null }>
@@ -234,10 +237,17 @@ export interface API {
   }
   repository: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>
+    get: (publicId: string) => Promise<Repository | null>
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository>
     update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<Repository | null>
     scan: (publicId: string) => Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
-    scanAll: () => Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
+    scanAll: () => Promise<{
+      succeeded: number
+      failed: number
+      commits: number
+      errors: Array<{ repository_id: string; error: string }>
+      results: Array<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
+    }>
   }
   database: {
     export: () => Promise<{ filePath: string; preview: unknown } | null>

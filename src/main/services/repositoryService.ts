@@ -106,6 +106,12 @@ export class RepositoryService {
     return { items: items.map(toRepository), total: total.count }
   }
 
+  get(publicId: string): Repository | null {
+    this.assertWorkspace()
+    const row = this.findRow(publicId)
+    return row ? toRepository(row) : null
+  }
+
   create(input: CreateRepositoryInput): Repository {
     this.assertWorkspace()
     const name = input.name.trim()

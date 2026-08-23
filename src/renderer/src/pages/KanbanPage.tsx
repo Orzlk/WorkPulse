@@ -31,6 +31,7 @@ import type { WorkItemAssociations } from '../lib/workspaceTypes'
 
 interface Task {
   id: number
+  public_id: string
   title: string
   description: string
   status: 'todo' | 'in_progress' | 'done' | 'draft'
@@ -235,6 +236,8 @@ function SortableTaskCard({
   return (
     <div
       ref={setNodeRef}
+      id={`task-card-${task.public_id}`}
+      tabIndex={-1}
       style={style}
       className="group flex items-start gap-2 p-3 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 card-hover animate-pop-in"
     >
@@ -275,6 +278,7 @@ function SortableTaskCard({
               <button
                 onClick={saveEdit}
                 className="p-1 text-green-500 hover:text-green-600 transition-colors"
+                aria-label={t('kanban.saveEdit')}
                 title={t('kanban.saveShortcut', { shortcut: SAVE_SHORTCUT_LABEL })}
               >
                 <Check className="w-3.5 h-3.5" />
@@ -282,6 +286,7 @@ function SortableTaskCard({
               <button
                 onClick={cancelEdit}
                 className="p-1 text-zinc-400 hover:text-zinc-600 transition-colors"
+                aria-label={t('kanban.cancelEdit')}
                 title={t('kanban.cancelShortcut')}
               >
                 <X className="w-3.5 h-3.5" />
@@ -456,8 +461,8 @@ function CompleteDialog({
 }
 
 // --- Main Kanban Page ---
-function KanbanPage(): JSX.Element {
-  const { tasks, fetchTasks, addTask, updateTask, deleteTask, completeTask, completeTaskOnly, reorderTasks } =
+function KanbanPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.Element {
+  const { tasks, fetchTasks, loadByPublicId, addTask, updateTask, deleteTask, completeTask, completeTaskOnly, reorderTasks } =
     useTaskStore()
   const toast = useToast()
   const { t } = useI18n()
@@ -486,6 +491,18 @@ function KanbanPage(): JSX.Element {
     void fetchProjects()
     void fetchRepositories()
   }, [])
+
+  useEffect(() => {
+    if (!focusPublicId) return
+    void loadByPublicId(focusPublicId).then((task) => {
+      if (!task) return
+      requestAnimationFrame(() => {
+        const element = document.getElementById(`task-card-${focusPublicId}`)
+        element?.scrollIntoView({ block: 'center' })
+        element?.focus()
+      })
+    })
+  }, [focusPublicId, loadByPublicId])
 
   useEffect(() => {
     setLocalTasks(tasks)
@@ -809,6 +826,7 @@ function KanbanPage(): JSX.Element {
                   <button
                     onClick={handleAddDraft}
                     className="px-2 py-1.5 bg-zinc-100 text-zinc-600 text-xs rounded hover:bg-zinc-200 transition-colors"
+                    aria-label={t('kanban.addDraft')}
                   >
                     <Plus className="w-3 h-3" />
                   </button>

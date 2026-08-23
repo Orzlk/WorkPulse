@@ -72,6 +72,11 @@ export class InboxService {
     return this.inbox.list(this.context, pagination)
   }
 
+  get(publicId: string): InboxItem | null {
+    this.assertWorkspace()
+    return this.inbox.get(this.context, publicId)
+  }
+
   update(publicId: string, input: Omit<Partial<CreateInboxInput>, 'content' | 'tag_names'>): InboxItem | null {
     this.assertWorkspace()
     this.assertProject(input.project_id ?? null)

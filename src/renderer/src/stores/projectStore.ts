@@ -28,7 +28,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         const page = await window.api.project.list({ limit: PAGE_SIZE, offset: 0 })
         set({ items: page.items, total: page.total, status: 'success' })
       } catch (error) {
-        set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load projects' })
+        set({ status: 'error', error: 'workspace.errorProjectsLoad' })
       }
     })()
     try { await fetchPromise } finally { fetchPromise = null }
@@ -42,7 +42,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const merged = mergePage(state.items, page.items, page.total)
       set({ ...merged, total: page.total, status: 'success' })
     } catch (error) {
-      set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load projects' })
+      set({ status: 'error', error: 'workspace.errorProjectsLoad' })
     }
   },
   select: (publicId) => set({ selectedProjectId: publicId }),

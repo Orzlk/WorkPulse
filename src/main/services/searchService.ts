@@ -93,14 +93,15 @@ export class SearchService {
     this.assertWorkspace()
     const text = query.text?.trim() ?? ''
     const like = `%${text}%`
-    const rows: SearchResult[] = []
     const tagSelect = (table: string, column: string): string => `
       (SELECT GROUP_CONCAT(tags.path, ',') FROM ${table}
-       INNER JOIN tags ON tags.id = ${table}.tag_id AND tags.workspace_id = ? AND tags.deleted_at IS NULL
+       INNER JOIN tags ON tags.id = ${table}.tag_id
+         AND tags.workspace_id = entity.workspace_id AND tags.deleted_at IS NULL
        WHERE ${table}.${column} = entity.id) AS tag_paths`
 
-    const logRows = this.database.prepare(`
-      SELECT entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
+    const sources = [
+      {
+        sql: `SELECT 'work_log' AS source, entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
         projects.public_id AS project_id, projects.name AS project_name,
         repositories.public_id AS repository_id, repositories.name AS repository_name,
         ${tagSelect('work_log_tags', 'work_log_id')}
@@ -109,12 +110,11 @@ export class SearchService {
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND (? = '' OR entity.content LIKE ? OR entity.category LIKE ?)
-      GROUP BY entity.id ORDER BY entity.created_at DESC, entity.id DESC
-    `).all(this.context.workspace_id, this.context.workspace_id, text, like, like) as Array<Record<string, unknown>>
-    rows.push(...logRows.map((row) => this.toSearchResult('work_log', row)))
-
-    const taskRows = this.database.prepare(`
-      SELECT entity.public_id, entity.title, COALESCE(NULLIF(entity.description, ''), entity.title) AS excerpt,
+      `,
+        params: [this.context.workspace_id, text, like, like]
+      },
+      {
+        sql: `SELECT 'task' AS source, entity.public_id, entity.title, COALESCE(NULLIF(entity.description, ''), entity.title) AS excerpt,
         entity.created_at AS time, projects.public_id AS project_id, projects.name AS project_name,
         repositories.public_id AS repository_id, repositories.name AS repository_name,
         ${tagSelect('task_tags', 'task_id')}
@@ -123,12 +123,11 @@ export class SearchService {
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND (? = '' OR entity.title LIKE ? OR entity.description LIKE ?)
-      GROUP BY entity.id ORDER BY entity.created_at DESC, entity.id DESC
-    `).all(this.context.workspace_id, this.context.workspace_id, text, like, like) as Array<Record<string, unknown>>
-    rows.push(...taskRows.map((row) => this.toSearchResult('task', row)))
-
-    const inboxRows = this.database.prepare(`
-      SELECT entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
+      `,
+        params: [this.context.workspace_id, text, like, like]
+      },
+      {
+        sql: `SELECT 'inbox' AS source, entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
         projects.public_id AS project_id, projects.name AS project_name,
         repositories.public_id AS repository_id, repositories.name AS repository_name,
         ${tagSelect('inbox_tags', 'inbox_item_id')}
@@ -137,15 +136,14 @@ export class SearchService {
       LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND (? = '' OR entity.content LIKE ?)
-      GROUP BY entity.id ORDER BY entity.created_at DESC, entity.id DESC
-    `).all(this.context.workspace_id, this.context.workspace_id, text, like) as Array<Record<string, unknown>>
-    rows.push(...inboxRows.map((row) => this.toSearchResult('inbox', row)))
-
-    const commitRows = this.database.prepare(`
-      SELECT entity.public_id, entity.message AS title, entity.message AS excerpt, entity.committed_at AS time,
+      `,
+        params: [this.context.workspace_id, text, like]
+      },
+      {
+        sql: `SELECT 'git_commit' AS source, entity.public_id, entity.message AS title, entity.message AS excerpt, entity.committed_at AS time,
         projects.public_id AS project_id, projects.name AS project_name,
         repositories.public_id AS repository_id, repositories.name AS repository_name,
-        NULL AS tag_paths
+        ${tagSelect('git_commit_tags', 'git_commit_id')}
       FROM git_commits AS entity
       INNER JOIN repositories ON repositories.id = entity.repository_id
         AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
@@ -153,29 +151,43 @@ export class SearchService {
         AND projects.workspace_id = repositories.workspace_id AND projects.deleted_at IS NULL
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND (? = '' OR entity.message LIKE ? OR entity.commit_hash LIKE ?)
-      ORDER BY entity.committed_at DESC, entity.id DESC
-    `).all(this.context.workspace_id, text, like, like) as Array<Record<string, unknown>>
-    rows.push(...commitRows.map((row) => this.toSearchResult('git_commit', row)))
-
-    const reportRows = this.database.prepare(`
-      SELECT entity.public_id, entity.type || ' report' AS title, entity.content AS excerpt,
+      `,
+        params: [this.context.workspace_id, text, like, like]
+      },
+      {
+        sql: `SELECT 'report' AS source, entity.public_id, entity.type || ' report' AS title, entity.content AS excerpt,
         COALESCE(entity.generated_at, entity.updated_at) AS time,
         projects.public_id AS project_id, projects.name AS project_name,
-        NULL AS repository_id, NULL AS repository_name, NULL AS tag_paths
+        NULL AS repository_id, NULL AS repository_name,
+        ${tagSelect('report_tags', 'report_id')}
       FROM reports AS entity
       LEFT JOIN report_projects ON report_projects.report_id = entity.id
       LEFT JOIN projects ON projects.id = report_projects.project_id
         AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND (? = '' OR entity.content LIKE ? OR entity.type LIKE ?)
-      GROUP BY entity.id ORDER BY COALESCE(entity.generated_at, entity.updated_at) DESC, entity.id DESC
-    `).all(this.context.workspace_id, text, like, like) as Array<Record<string, unknown>>
-    rows.push(...reportRows.map((row) => this.toSearchResult('report', row)))
-
-    rows.sort((left, right) => right.time.localeCompare(left.time))
+      `,
+        params: [this.context.workspace_id, text, like, like]
+      }
+    ]
+    const unionSql = sources.map((source) => source.sql).join('\nUNION ALL\n')
+    const values = sources.flatMap((source) => source.params)
     const offset = Math.max(query.offset ?? 0, 0)
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 200)
-    return { items: rows.slice(offset, offset + limit), total: rows.length }
+    const rows = this.database.prepare(`
+      SELECT source, public_id, title, excerpt, project_id, project_name,
+        repository_id, repository_name, tag_paths, time
+      FROM (${unionSql}) AS search_results
+      ORDER BY time DESC, public_id DESC
+      LIMIT ? OFFSET ?
+    `).all(...values, limit, offset) as Array<Record<string, unknown>>
+    const total = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM (${unionSql}) AS search_results
+    `).get(...values) as { count: number }
+    return {
+      items: rows.map((row) => this.toSearchResult(row.source as SearchResult['source'], row)),
+      total: total.count
+    }
   }
 
   private toSearchResult(source: SearchResult['source'], row: Record<string, unknown>): SearchResult {

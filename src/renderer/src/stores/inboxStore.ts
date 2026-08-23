@@ -17,6 +17,7 @@ interface InboxStore {
   selectedId: string | null
   fetch: () => Promise<void>
   loadMore: () => Promise<void>
+  loadByPublicId: (publicId: string) => Promise<InboxItem | null>
   select: (publicId: string | null) => void
   create: (input: InboxInput) => Promise<InboxItem>
   organize: (publicId: string) => Promise<void>
@@ -33,7 +34,7 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
         const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0 })
         set({ items: page.items, total: page.total, status: 'success' })
       } catch (error) {
-        set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load inbox' })
+        set({ status: 'error', error: 'workspace.errorInboxLoad' })
       }
     })()
     try { await fetchPromise } finally { fetchPromise = null }
@@ -47,8 +48,14 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
       const merged = mergePage(state.items, page.items, page.total)
       set({ ...merged, total: page.total, status: 'success' })
     } catch (error) {
-      set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load inbox' })
+      set({ status: 'error', error: 'workspace.errorInboxLoad' })
     }
+  },
+  loadByPublicId: async (publicId) => {
+    const item = await window.api.inbox.get(publicId)
+    if (!item) return null
+    set((state) => ({ items: [item, ...state.items.filter((current) => current.public_id !== item.public_id)], total: Math.max(state.total, 1), status: 'success' }))
+    return item
   },
   select: (publicId) => set({ selectedId: publicId }),
   create: async (input) => {

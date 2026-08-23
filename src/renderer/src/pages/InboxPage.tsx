@@ -13,7 +13,7 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
   const [projectId, setProjectId] = useState('')
   const [repositoryId, setRepositoryId] = useState('')
   const [saving, setSaving] = useState(false)
-  const { items, total, status, error, selectedId, fetch, loadMore, select, create, organize, ignore } = useInboxStore()
+  const { items, total, status, error, selectedId, fetch, loadByPublicId, loadMore, select, create, organize, ignore } = useInboxStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
   const repositories = useRepositoryStore((state) => state.items)
@@ -22,7 +22,14 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
   const { t } = useI18n()
 
   useEffect(() => { void fetch(); void fetchProjects(); void fetchRepositories(); inputRef.current?.focus() }, [])
-  useEffect(() => { if (focusId) select(focusId) }, [focusId, select])
+  useEffect(() => {
+    if (!focusId) return
+    void loadByPublicId(focusId).then((item) => {
+      if (!item) return
+      select(focusId)
+      requestAnimationFrame(() => document.getElementById(`inbox-${focusId}`)?.focus())
+    })
+  }, [focusId, loadByPublicId, select])
 
   const selected = useMemo(() => items.find((item) => item.public_id === selectedId) ?? null, [items, selectedId])
   const tags = extractHashTags(draft).tags
@@ -75,10 +82,10 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
       <div className="inbox-layout">
         <section className="inbox-list" aria-label={t('workspace.inboxList')}>
           <div className="section-heading"><h3>{t('workspace.toOrganize')}</h3><span>{total}</span></div>
-          {status === 'error' && <div className="inline-error" role="alert">{error}<button onClick={() => void fetch()}>{t('common.retry')}</button></div>}
+          {status === 'error' && <div className="inline-error" role="alert">{error ? t(error as Parameters<typeof t>[0]) : ''}<button onClick={() => void fetch()}>{t('common.retry')}</button></div>}
           {items.length === 0 && status !== 'running' ? <div className="empty-state"><Inbox aria-hidden="true" /><p>{t('workspace.emptyInbox')}</p><span>{t('workspace.emptyInboxHelp')}</span></div> : (
             <div className="inbox-items">
-              {items.map((item) => <button key={item.public_id} onClick={() => select(item.public_id)} className={`inbox-item ${selectedId === item.public_id ? 'is-selected' : ''}`}>
+              {items.map((item) => <button id={`inbox-${item.public_id}`} key={item.public_id} onClick={() => select(item.public_id)} className={`inbox-item ${selectedId === item.public_id ? 'is-selected' : ''}`}>
                 <span>{item.content}</span><small>{new Date(item.created_at).toLocaleString()}</small><ChevronRight aria-hidden="true" />
               </button>)}
             </div>

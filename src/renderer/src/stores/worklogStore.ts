@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { WorkItemAssociations } from '../lib/workspaceTypes'
+import { createLatestRequestGate } from '../lib/workspaceInteractions'
 
 interface WorkLog {
   id: number
@@ -20,6 +21,7 @@ interface WorkLogStore {
   searchKeyword: string
   lastDeleted: WorkLog | null
   fetchLogs: () => Promise<void>
+  loadByPublicId: (publicId: string) => Promise<WorkLog | null>
   loadMore: () => Promise<void>
   searchLogs: (keyword: string) => Promise<void>
   clearSearch: () => Promise<void>
@@ -31,6 +33,7 @@ interface WorkLogStore {
 }
 
 const PAGE_SIZE = 50
+const searchGate = createLatestRequestGate()
 
 export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   logs: [],
@@ -49,6 +52,15 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     }
   },
 
+  loadByPublicId: async (publicId) => {
+    const log = await window.api.worklog.get(publicId)
+    if (!log) return null
+    set((state) => ({
+      logs: [log, ...state.logs.filter((item) => item.public_id !== log.public_id)].sort((a, b) => b.created_at.localeCompare(a.created_at))
+    }))
+    return log
+  },
+
   loadMore: async () => {
     if (get().loading || !get().hasMore || get().searchKeyword) return
     set({ loading: true })
@@ -64,16 +76,18 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   },
 
   searchLogs: async (keyword: string) => {
+    const requestId = searchGate.next()
     set({ loading: true, searchKeyword: keyword })
     try {
       const logs = await window.api.worklog.search(keyword)
-      set({ logs })
+      if (searchGate.isCurrent(requestId)) set({ logs })
     } finally {
-      set({ loading: false })
+      if (searchGate.isCurrent(requestId)) set({ loading: false })
     }
   },
 
   clearSearch: async () => {
+    searchGate.next()
     set({ searchKeyword: '' })
     await get().fetchLogs()
   },

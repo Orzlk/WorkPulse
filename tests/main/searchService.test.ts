@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runMigrations } from '../../src/main/database/connection'
 import { SearchService } from '../../src/main/services/searchService'
 
@@ -24,7 +24,10 @@ function createSearchDatabase(): Database.Database {
       VALUES ('report-1', 1, 'weekly', '2026-08-18', '2026-08-24', 'needle 报告', '${now}', 1, 1, '${now}', '${now}', '2026-08-18T00:00:00.000Z', '2026-08-25T00:00:00.000Z', 'UTC', '["project-1"]', '[]', '{}', 1, 'ready', 0);
     INSERT INTO tags (public_id, workspace_id, name, path, created_at, updated_at)
       VALUES ('tag-1', 1, '客户端/导出', '客户端/导出', '${now}', '${now}');
+    INSERT INTO tags (public_id, workspace_id, name, path, created_at, updated_at)
+      VALUES ('tag-2', 1, 'report-tag', 'report-tag', '${now}', '${now}');
     INSERT INTO work_log_tags (work_log_id, tag_id) VALUES (1, 1);
+    INSERT INTO report_tags (report_id, tag_id) VALUES (1, 2);
   `)
   return database
 }
@@ -39,6 +42,7 @@ describe('SearchService unified search', () => {
     expect(page.items.find((item) => item.source === 'work_log')).toMatchObject({
       public_id: 'log-1', project_id: 'project-1', project_name: 'Alpha', tags: ['客户端/导出']
     })
+    expect(page.items.find((item) => item.source === 'report')).toMatchObject({ tags: ['report-tag'] })
     expect(page.items.every((item) => item.time && item.title && item.excerpt)).toBe(true)
     database.close()
   })
@@ -48,6 +52,18 @@ describe('SearchService unified search', () => {
     database.prepare('UPDATE tasks SET deleted_at = ? WHERE public_id = ?').run('2026-08-23T11:00:00.000Z', 'task-1')
     const page = new SearchService(database, { workspace_id: 1, user_id: 1 }).search({ text: 'needle', limit: 10, offset: 0 })
     expect(page.items.some((item) => item.public_id === 'task-1')).toBe(false)
+    database.close()
+  })
+
+  it('uses bounded database pagination and preserves the total count', () => {
+    const database = createSearchDatabase()
+    const prepare = vi.spyOn(database, 'prepare')
+    const page = new SearchService(database, { workspace_id: 1, user_id: 1 }).search({ text: 'needle', limit: 1, offset: 1 })
+
+    expect(page.items).toHaveLength(1)
+    expect(page.total).toBe(5)
+    expect(prepare.mock.calls.some(([sql]) => String(sql).includes('UNION ALL') && String(sql).includes('LIMIT ? OFFSET ?'))).toBe(true)
+    expect(prepare.mock.calls.some(([sql]) => String(sql).includes('COUNT(*)'))).toBe(true)
     database.close()
   })
 })

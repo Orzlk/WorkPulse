@@ -11,11 +11,18 @@ interface RepositoryStore {
   status: AsyncStatus
   error: string | null
   fetch: () => Promise<void>
+  loadByPublicId: (publicId: string) => Promise<Repository | null>
   loadMore: () => Promise<void>
   create: (input: Parameters<Window['api']['repository']['create']>[0]) => Promise<Repository>
   update: (publicId: string, input: { project_id?: string | null; enabled?: boolean }) => Promise<void>
   scan: (publicId: string) => Promise<{ status: string; inserted_count: number; error?: string }>
-  scanAll: () => Promise<{ succeeded: number; commits: number; errors: Array<{ repository_id: string; error: string }> }>
+  scanAll: () => Promise<{
+    succeeded: number
+    failed: number
+    commits: number
+    errors: Array<{ repository_id: string; error: string }>
+    results: Array<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
+  }>
 }
 
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
@@ -28,10 +35,16 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
         const page = await window.api.repository.list({ limit: PAGE_SIZE, offset: 0 })
         set({ items: page.items, total: page.total, status: 'success' })
       } catch (error) {
-        set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load repositories' })
+        set({ status: 'error', error: 'workspace.errorRepositoriesLoad' })
       }
     })()
     try { await fetchPromise } finally { fetchPromise = null }
+  },
+  loadByPublicId: async (publicId) => {
+    const item = await window.api.repository.get(publicId)
+    if (!item) return null
+    set((state) => ({ items: [item, ...state.items.filter((current) => current.public_id !== item.public_id)], total: Math.max(state.total, 1), status: 'success' }))
+    return item
   },
   loadMore: async () => {
     const state = get()
@@ -42,7 +55,7 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
       const merged = mergePage(state.items, page.items, page.total)
       set({ ...merged, total: page.total, status: 'success' })
     } catch (error) {
-      set({ status: 'error', error: error instanceof Error ? error.message : 'Unable to load repositories' })
+      set({ status: 'error', error: 'workspace.errorRepositoriesLoad' })
     }
   },
   create: async (input) => {

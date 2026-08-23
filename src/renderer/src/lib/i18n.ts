@@ -327,7 +327,17 @@ export const translations = {
     'date.lastWeek': '上周',
     'date.thisMonth': '本月',
     'date.lastMonth': '上月',
-    'date.thisQuarter': '本季度'
+    'date.thisQuarter': '本季度',
+    'kanban.saveEdit': '保存编辑',
+    'kanban.cancelEdit': '取消编辑',
+    'kanban.addDraft': '添加草稿',
+    'workspace.localPathPlaceholder': '例如：D:\\Workspace\\project',
+    'workspace.scanAllPartial': '扫描完成：成功 {{succeeded}} 个，失败 {{failed}} 个',
+    'workspace.scanOneFailed': '仓库 {{name}} 扫描失败',
+    'workspace.retryRepository': '重试此仓库',
+    'workspace.errorProjectsLoad': '加载项目失败，请重试',
+    'workspace.errorRepositoriesLoad': '加载仓库失败，请重试',
+    'workspace.errorInboxLoad': '加载收件箱失败，请重试'
   },
   en: {
     'common.add': 'Add',
@@ -654,7 +664,17 @@ export const translations = {
     'date.lastWeek': 'Last week',
     'date.thisMonth': 'This month',
     'date.lastMonth': 'Last month',
-    'date.thisQuarter': 'This quarter'
+    'date.thisQuarter': 'This quarter',
+    'kanban.saveEdit': 'Save edit',
+    'kanban.cancelEdit': 'Cancel edit',
+    'kanban.addDraft': 'Add draft',
+    'workspace.localPathPlaceholder': 'For example: D:\\Workspace\\project',
+    'workspace.scanAllPartial': 'Scan complete: {{succeeded}} succeeded, {{failed}} failed',
+    'workspace.scanOneFailed': 'Repository {{name}} scan failed',
+    'workspace.retryRepository': 'Retry repository',
+    'workspace.errorProjectsLoad': 'Could not load projects. Try again.',
+    'workspace.errorRepositoriesLoad': 'Could not load repositories. Try again.',
+    'workspace.errorInboxLoad': 'Could not load inbox. Try again.'
   }
 } as const
 

@@ -22,6 +22,7 @@ interface TaskStore {
   tasks: Task[]
   loading: boolean
   fetchTasks: () => Promise<void>
+  loadByPublicId: (publicId: string) => Promise<Task | null>
   addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
   updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<void>
   deleteTask: (id: number) => Promise<void>
@@ -43,6 +44,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     } finally {
       set({ loading: false })
     }
+  },
+
+  loadByPublicId: async (publicId) => {
+    const task = await window.api.task.get(publicId)
+    if (!task) return null
+    set((state) => ({ tasks: [...state.tasks.filter((item) => item.public_id !== task.public_id), task] }))
+    return task
   },
 
   addTask: async (title, description, status, createdAt?, associations?) => {

@@ -35,3 +35,29 @@ export function mergePage<T extends PublicItem>(existing: T[], incoming: T[], to
   }
   return { items, hasMore: items.length < total }
 }
+
+export interface RepositoryScanSummary {
+  succeeded: number
+  failed: number
+  commits: number
+  failures: Array<{ repository_id: string; name: string; error: string }>
+}
+
+export function summarizeRepositoryScan(
+  results: Array<{ repository_id: string; status: string; inserted_count: number; error?: string }>,
+  names: Map<string, string>
+): RepositoryScanSummary {
+  const failures = results
+    .filter((result) => result.status === 'failed')
+    .map((result) => ({
+      repository_id: result.repository_id,
+      name: names.get(result.repository_id) ?? result.repository_id,
+      error: result.error ?? ''
+    }))
+  return {
+    succeeded: results.filter((result) => result.status === 'succeeded').length,
+    failed: failures.length,
+    commits: results.reduce((total, result) => total + result.inserted_count, 0),
+    failures
+  }
+}
