@@ -216,39 +216,41 @@ body {
 /* ===== Hallmark design system ===== */
 
 :root {
-  --paper: #f7f2e8;
-  --paper-raised: #fdfaf3;
-  --paper-soft: #eee6d8;
-  --ink: #262823;
-  --ink-muted: #6f7169;
-  --forest: #173f35;
-  --forest-hover: #0f332b;
-  --oxblood: #7a2635;
-  --gold: #c59a4a;
-  --tag-accent: #5c78cf;
-  --rule: #ded4c2;
-  --rule-strong: #c9bda8;
-  --danger: #a63f44;
-  --warm-shadow: 0 16px 40px rgba(72, 58, 39, 0.08);
-  --control-shadow: 0 4px 14px rgba(72, 58, 39, 0.06);
+  --paper: #f7f8fa;
+  --paper-raised: #ffffff;
+  --paper-soft: #f1f2f4;
+  --ink: #303236;
+  --ink-muted: #8b8f96;
+  --forest: #2ecf78;
+  --forest-hover: #25b96a;
+  --oxblood: #5c87e8;
+  --gold: #aab0b8;
+  --tag-accent: #5c87e8;
+  --project-accent: #2f9e68;
+  --rule: #e7e8eb;
+  --rule-strong: #d6d8dc;
+  --danger: #e05252;
+  --warm-shadow: 0 8px 24px rgba(38, 43, 51, 0.06);
+  --control-shadow: 0 4px 12px rgba(38, 43, 51, 0.06);
 }
 
 :root.dark {
-  --paper: #171d1a;
-  --paper-raised: #202723;
-  --paper-soft: #29302b;
-  --ink: #f4eee2;
-  --ink-muted: #b1aa9e;
-  --forest: #d7b86f;
-  --forest-hover: #e2c985;
-  --oxblood: #cf7582;
-  --gold: #d7b86f;
+  --paper: #17191d;
+  --paper-raised: #202328;
+  --paper-soft: #2a2e34;
+  --ink: #f4f5f6;
+  --ink-muted: #a8adb5;
+  --forest: #48dc8a;
+  --forest-hover: #37c878;
+  --oxblood: #9ab8ff;
+  --gold: #858c96;
   --tag-accent: #9eb6ff;
-  --rule: #3c453f;
-  --rule-strong: #515c55;
-  --danger: #e18488;
-  --warm-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
-  --control-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  --project-accent: #63d99b;
+  --rule: #363b42;
+  --rule-strong: #4a515a;
+  --danger: #f08b8b;
+  --warm-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  --control-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
 }
 
 body {
@@ -506,10 +508,11 @@ body {
 .quick-entry {
   position: relative;
   min-height: 250px;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--forest);
+  border-radius: 16px;
   outline: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
   outline-offset: -7px;
   background: var(--paper-raised);
@@ -553,8 +556,9 @@ body {
 
 .tag-composer {
   position: relative;
+  flex: 1 1 auto;
   min-height: 190px;
-  margin: 8px;
+  margin: 8px 8px 0;
 }
 
 .tag-composer-highlight,
@@ -585,6 +589,11 @@ body {
   font-weight: 650;
 }
 
+.tag-composer-highlight-project {
+  color: var(--project-accent);
+  font-weight: 650;
+}
+
 .tag-composer-input {
   resize: none;
   outline: 0;
@@ -607,6 +616,7 @@ body {
 .quick-entry-footer {
   position: relative;
   z-index: 1;
+  order: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -615,6 +625,40 @@ body {
   padding: 8px 16px 8px 24px;
   border-top: 1px solid var(--rule);
   background: color-mix(in srgb, var(--paper-raised) 94%, transparent);
+}
+
+.quick-entry .quick-entry-error {
+  order: 1;
+  margin: 8px 24px 0;
+}
+
+.quick-entry .quick-entry-associations {
+  order: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 10px 24px 12px;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--paper-soft) 42%, var(--paper-raised));
+}
+
+.quick-entry .quick-entry-associations label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.quick-entry .quick-entry-associations select,
+.quick-entry .quick-entry-associations input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .quick-entry-actions,
@@ -1556,6 +1600,11 @@ body {
     margin: 7px;
   }
 
+  .quick-entry .quick-entry-associations {
+    grid-template-columns: 1fr;
+    padding: 9px 15px 10px;
+  }
+
   .tag-composer-highlight,
   .tag-composer-input {
     padding: 17px 17px 12px;
@@ -1736,4 +1785,405 @@ body {
     bottom: 64px;
     left: 14px;
   }
+}
+
+/* Flomo-inspired visual language: quiet canvas, white cards and restrained accents. */
+.hallmark-app {
+  background: var(--paper);
+}
+
+.hallmark-app .app-header {
+  min-height: 64px;
+  padding: 0 22px;
+  border-bottom-color: var(--rule);
+  background: var(--paper-raised);
+  box-shadow: 0 1px 0 rgba(38, 43, 51, .02);
+}
+
+.hallmark-app .app-header-main {
+  gap: clamp(18px, 3vw, 36px);
+}
+
+.hallmark-app .app-brand {
+  gap: 8px;
+}
+
+.hallmark-app .app-brand-mark {
+  width: 34px;
+  height: 34px;
+  filter: none;
+}
+
+.hallmark-app .app-brand h1 {
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.hallmark-app .app-nav {
+  height: 64px;
+  gap: 4px;
+}
+
+.hallmark-app .app-nav-button {
+  min-width: 70px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.hallmark-app .app-nav-button:hover {
+  transform: none;
+  border-radius: 8px;
+  background: var(--paper-soft);
+  color: var(--ink);
+}
+
+.hallmark-app .app-nav-button.is-active {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.hallmark-app .app-nav-button::before {
+  display: none;
+}
+
+.hallmark-app .app-nav-button::after {
+  right: 18px;
+  left: 18px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--forest);
+}
+
+.hallmark-app .app-settings-button {
+  border-left-color: var(--rule);
+}
+
+.hallmark-app .workspace-content {
+  width: min(100%, 1120px);
+  padding-top: 24px;
+}
+
+.hallmark-app .workspace-page-heading {
+  max-width: none;
+  margin-bottom: 22px;
+  border-left: 0;
+  padding: 0;
+}
+
+.hallmark-app .workspace-page-heading h2 {
+  font-size: clamp(24px, 3vw, 32px);
+  letter-spacing: -.035em;
+}
+
+.hallmark-app .workspace-page-heading > p:last-child {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.hallmark-app .workspace-kicker {
+  letter-spacing: .08em;
+}
+
+.hallmark-app .global-search,
+.hallmark-app .quick-create-panel,
+.hallmark-app .repository-edit-dialog {
+  border-color: var(--rule);
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(38, 43, 51, .12);
+}
+
+.hallmark-app .global-search {
+  padding: 8px;
+}
+
+.hallmark-app .quick-entry {
+  border-color: var(--rule);
+  outline: 0;
+  box-shadow: var(--warm-shadow);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.hallmark-app .quick-entry::before,
+.hallmark-app .quick-entry::after {
+  display: none;
+}
+
+.hallmark-app .quick-entry:focus-within {
+  border-color: color-mix(in srgb, var(--forest) 62%, var(--rule));
+  box-shadow: 0 8px 28px rgba(38, 43, 51, .08), 0 0 0 3px color-mix(in srgb, var(--forest) 12%, transparent);
+  transform: none;
+}
+
+.hallmark-app .quick-entry-footer {
+  background: var(--paper-raised);
+}
+
+.hallmark-app .quick-entry .quick-entry-associations {
+  background: var(--paper-soft);
+}
+
+.hallmark-app .quick-entry-actions button:hover:not(:disabled),
+.hallmark-app .log-menu-trigger:hover,
+.hallmark-app .repository-menu-trigger:hover,
+.hallmark-app .header-icon-button:hover {
+  background: var(--paper-soft);
+}
+
+.hallmark-app .quick-entry-submit button,
+.hallmark-app .header-create-button,
+.hallmark-app .primary-action,
+.hallmark-app .inbox-capture > button {
+  border-color: var(--forest);
+  border-radius: 10px;
+  background: var(--forest);
+}
+
+.hallmark-app .quick-entry-submit button:hover:not(:disabled),
+.hallmark-app .header-create-button:hover,
+.hallmark-app .primary-action:hover:not(:disabled),
+.hallmark-app .inbox-capture > button:hover:not(:disabled) {
+  background: var(--forest-hover);
+}
+
+.hallmark-app .worklog-search-input {
+  border-color: var(--rule);
+  border-radius: 999px;
+  background: var(--paper-soft);
+  box-shadow: none;
+}
+
+.hallmark-app .worklog-search-input:focus {
+  border-color: var(--rule-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--forest) 10%, transparent);
+}
+
+.hallmark-app .export-button,
+.hallmark-app .load-more {
+  border-color: var(--rule);
+  border-radius: 10px;
+  background: var(--paper-raised);
+}
+
+.hallmark-app .export-button:hover,
+.hallmark-app .load-more:hover {
+  border-color: var(--rule-strong);
+  background: var(--paper-soft);
+}
+
+.hallmark-app .log-day-title {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hallmark-app .log-day-title::before,
+.hallmark-app .log-day-title::after {
+  display: none;
+}
+
+.hallmark-app .log-row {
+  min-height: 0;
+  background: var(--paper-raised);
+  box-shadow: 0 2px 12px rgba(38, 43, 51, .035);
+}
+
+.hallmark-app .log-row:hover {
+  background: var(--paper-raised);
+  border-color: var(--rule-strong);
+  box-shadow: 0 6px 18px rgba(38, 43, 51, .07);
+}
+
+.hallmark-app .log-card-time {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.hallmark-app .log-tag-badge,
+.hallmark-app .log-project-badge {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tag-accent) 11%, var(--paper-raised));
+  color: var(--tag-accent);
+}
+
+.hallmark-app .inbox-capture,
+.hallmark-app .inbox-list,
+.hallmark-app .inbox-drawer,
+.hallmark-app .project-card,
+.hallmark-app .repository-row,
+.hallmark-app .project-create,
+.hallmark-app .repository-create,
+.hallmark-app .repository-card {
+  border-color: var(--rule);
+  border-radius: 16px;
+  box-shadow: var(--control-shadow);
+}
+
+.hallmark-app .inbox-capture {
+  border-color: var(--rule);
+  box-shadow: var(--control-shadow);
+}
+
+.hallmark-app .inbox-capture > input {
+  font-size: 15px;
+}
+
+.hallmark-app .inbox-list,
+.hallmark-app .inbox-drawer {
+  overflow: hidden;
+}
+
+.hallmark-app .project-create,
+.hallmark-app .repository-create {
+  background: var(--paper-raised);
+}
+
+.hallmark-app .project-card:hover,
+.hallmark-app .repository-card:hover {
+  border-color: var(--rule-strong);
+  background: var(--paper-raised);
+  box-shadow: 0 8px 24px rgba(38, 43, 51, .08);
+}
+
+.hallmark-app .quick-create-backdrop,
+.hallmark-app .repository-edit-overlay {
+  background: rgba(48, 50, 54, .28);
+}
+
+.hallmark-app .quick-create-panel {
+  box-shadow: 0 18px 48px rgba(38, 43, 51, .14);
+  overflow: hidden;
+}
+
+.hallmark-app .quick-create-tabs button[aria-selected='true'] {
+  background: var(--forest);
+}
+
+.hallmark-app .empty-state {
+  border-radius: 16px;
+  background: var(--paper-raised);
+}
+
+@media (max-width: 720px) {
+  .hallmark-app .app-header {
+    padding: 0 14px;
+  }
+
+  .hallmark-app .app-header-main {
+    gap: 10px;
+  }
+
+  .hallmark-app .app-brand h1 {
+    font-size: 16px;
+  }
+
+  .hallmark-app .app-brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .hallmark-app .workspace-content {
+    padding-top: 18px;
+  }
+
+  .hallmark-app .workspace-page-heading {
+    margin-bottom: 18px;
+  }
+}
+
+.worklog-editor-content-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: min(52vh, 520px);
+  flex: 1;
+}
+
+.worklog-editor-composer {
+  position: relative;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.worklog-editor-composer .tag-composer-highlight,
+.worklog-editor-composer .tag-composer-input {
+  padding: 18px 20px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.worklog-editor-composer .tag-composer-highlight {
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+
+.worklog-editor-composer .tag-composer-input {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--ink);
+  -webkit-text-fill-color: transparent;
+}
+
+.worklog-editor-composer:focus-within .tag-composer-highlight,
+.worklog-editor-composer:focus-within .tag-composer-input {
+  border-color: var(--forest);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--forest) 12%, transparent);
+}
+
+.worklog-editor-mention-menu {
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  max-height: 220px;
+}
+
+@media (max-width: 720px) {
+  .worklog-editor-content-shell {
+    min-height: 380px;
+  }
+
+  .worklog-editor-mention-menu {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+  }
+}
+
+.worklog-mention-menu {
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: min(280px, calc(100% - 24px));
+  max-height: 220px;
+}
+
+.inline-project-reference {
+  background: color-mix(in srgb, var(--project-accent) 14%, transparent);
+  color: var(--project-accent);
+}
+
+.inline-project-reference:hover,
+.inline-project-reference.is-selected {
+  background: color-mix(in srgb, var(--project-accent) 20%, transparent);
+  color: var(--project-accent);
+}
+
+.hallmark-app .log-project-badge {
+  background: color-mix(in srgb, var(--project-accent) 12%, var(--paper-raised));
+  color: var(--project-accent);
+}
+
+.hallmark-app .log-project-badge:hover,
+.hallmark-app .log-project-badge.is-selected {
+  background: color-mix(in srgb, var(--project-accent) 20%, var(--paper-raised));
 }

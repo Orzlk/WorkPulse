@@ -5,6 +5,7 @@ import {
   findTagMention,
   findInlineReferences,
   findProjectMention,
+  highlightComposerReferences,
   highlightHashTags,
   mergePage,
   removeProjectMention,
@@ -25,6 +26,16 @@ describe('workspace interactions', () => {
       { text: '记录 ', isTag: false },
       { text: '#工作/项目', isTag: true },
       { text: ' 完成', isTag: false }
+    ])
+  })
+
+  it('splits composer tags and project references into separate highlight kinds', () => {
+    expect(highlightComposerReferences('处理 #工作/三峡 和 @三峡平台 mail@example.com')).toEqual([
+      { text: '处理 ', type: 'plain' },
+      { text: '#工作/三峡', type: 'tag' },
+      { text: ' 和 ', type: 'plain' },
+      { text: '@三峡平台', type: 'project' },
+      { text: ' mail@example.com', type: 'plain' }
     ])
   })
 

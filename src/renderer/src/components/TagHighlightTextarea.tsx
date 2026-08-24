@@ -1,13 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import type { TextareaHTMLAttributes, UIEvent } from 'react'
-import { highlightHashTags } from '../lib/workspaceInteractions'
+import { highlightComposerReferences } from '../lib/workspaceInteractions'
 
 export const TagHighlightTextarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function TagHighlightTextarea({ value, onScroll, className = '', ...props }, forwardedRef): JSX.Element {
     const highlightRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement | null>(null)
     const text = String(value ?? '')
-    const segments = highlightHashTags(text)
+    const segments = highlightComposerReferences(text)
 
     useEffect(() => {
       if (text.length === 0) {
@@ -34,7 +34,7 @@ export const TagHighlightTextarea = forwardRef<HTMLTextAreaElement, TextareaHTML
       <div className={`tag-composer ${className}`.trim()}>
         <div ref={highlightRef} className="tag-composer-highlight" aria-hidden="true">
           {segments.map((segment, index) => (
-            <span className={segment.isTag ? 'tag-composer-highlight-tag' : undefined} key={`${index}-${segment.text}`}>
+            <span className={segment.type === 'tag' ? 'tag-composer-highlight-tag' : segment.type === 'project' ? 'tag-composer-highlight-project' : undefined} key={`${index}-${segment.text}`}>
               {segment.text}
             </span>
           ))}

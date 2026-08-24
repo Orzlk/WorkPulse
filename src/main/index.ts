@@ -239,6 +239,7 @@ function createWindow(): void {
     minHeight: 500,
     show: false,
     title: 'WorkPulse',
+    autoHideMenuBar: true,
     icon: getAppIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

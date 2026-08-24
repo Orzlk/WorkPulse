@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   AtSign,
   ClipboardEdit,
@@ -28,6 +28,7 @@ import { TagHighlightTextarea } from '../components/TagHighlightTextarea'
 import { InteractiveMarkdown } from '../components/InteractiveMarkdown'
 import { TagTreeSidebar } from '../components/TagTreeSidebar'
 import { buildTagTree, type TagTreeNode } from '../lib/tagTree'
+import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
 import type { Tag } from '../lib/workspaceTypes'
 
 function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.Element {
@@ -48,7 +49,11 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
   const [mentionIndex, setMentionIndex] = useState(0)
   const [tagTree, setTagTree] = useState<TagTreeNode[]>([])
   const [tagOptions, setTagOptions] = useState<Tag[]>([])
+  const [mentionPosition, setMentionPosition] = useState<MentionMenuPosition | null>(null)
+  const [mentionPositionTick, setMentionPositionTick] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const mentionMenuRef = useRef<HTMLDivElement>(null)
   const projectSelectRef = useRef<HTMLSelectElement>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const toast = useToast()
@@ -297,6 +302,24 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
   const activeSuggestions = projectMention ? projectSuggestions : tagSuggestions
   const mentionMenuId = projectMention ? 'worklog-project-mention-list' : 'worklog-tag-mention-list'
 
+  useLayoutEffect(() => {
+    if (!activeMention) {
+      setMentionPosition(null)
+      return
+    }
+    const textarea = inputRef.current
+    const container = composerRef.current
+    const menu = mentionMenuRef.current
+    if (!textarea || !container || !menu) return
+    const caret = getTextareaCaretPosition(textarea, activeMention.end)
+    const containerRect = container.getBoundingClientRect()
+    setMentionPosition(getMentionMenuPosition(
+      caret,
+      containerRect,
+      { width: menu.offsetWidth || 280, height: menu.offsetHeight || 220 }
+    ))
+  }, [activeMention, mentionIndex, mentionPositionTick])
+
   return (
     <div className="worklog-page">
       <div className="worklog-layout">
@@ -310,20 +333,22 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
         <main className="worklog-main">
       {/* Input */}
       <div className="quick-entry-section">
-        <div className={`quick-entry ${shaking ? 'animate-shake is-error' : ''}`}>
+        <div ref={composerRef} className={`quick-entry ${shaking ? 'animate-shake is-error' : ''}`}>
           <TagHighlightTextarea
             ref={inputRef}
             rows={5}
             value={input}
             onChange={handleComposerChange}
             onKeyDown={handleComposerKeyDown}
+            onSelect={() => setMentionPositionTick((current) => current + 1)}
+            onScroll={() => setMentionPositionTick((current) => current + 1)}
             placeholder={t('worklog.inputPlaceholder')}
             aria-label={t('worklog.inputAria')}
             aria-controls={activeMention ? mentionMenuId : undefined}
             aria-expanded={Boolean(activeMention)}
           />
           {activeMention && (
-            <div id={mentionMenuId} className={`project-mention-menu ${tagMention ? 'tag-mention-menu' : ''}`} role="listbox" aria-label={t(projectMention ? 'worklog.projectMentionSuggestions' : 'worklog.tagMentionSuggestions')}>
+            <div ref={mentionMenuRef} id={mentionMenuId} style={mentionPosition ? { left: mentionPosition.left, top: mentionPosition.top } : undefined} className={`project-mention-menu worklog-mention-menu ${tagMention ? 'tag-mention-menu' : ''}`} role="listbox" aria-label={t(projectMention ? 'worklog.projectMentionSuggestions' : 'worklog.tagMentionSuggestions')}>
               {activeSuggestions.length > 0 ? projectMention ? projectSuggestions.map((project, index) => (
                 <button
                   key={project.public_id}
@@ -355,6 +380,11 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
               )}
             </div>
           )}
+          <div className="quick-create-associations quick-entry-associations worklog-associations">
+            <label>{t('workspace.project')}<select ref={projectSelectRef} value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label>
+            <label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select></label>
+            <label>{t('workspace.tags')}<input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder="#tag1 #tag2" /></label>
+          </div>
           <div className="quick-entry-footer">
             <div className="quick-entry-actions" aria-label={t('worklog.inputTools')}>
               <button type="button" onClick={() => insertComposerText('#')} aria-label={t('worklog.insertTag')} title={t('worklog.insertTag')}>
@@ -385,9 +415,8 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
               </button>
             </div>
           </div>
-        </div>
         {error && <p className="quick-entry-error">{error}</p>}
-        <div className="quick-create-associations worklog-associations"><label>{t('workspace.project')}<select ref={projectSelectRef} value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select></label><label>{t('workspace.tags')}<input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder="#tag1 #tag2" /></label></div>
+        </div>
       </div>
 
       {/* Search + Export */}

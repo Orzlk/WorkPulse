@@ -15,6 +15,11 @@ export interface HighlightSegment {
   isTag: boolean
 }
 
+export interface ComposerHighlightSegment {
+  text: string
+  type: 'plain' | 'tag' | 'project'
+}
+
 export function highlightHashTags(content: string): HighlightSegment[] {
   const segments: HighlightSegment[] = []
   let cursor = 0
@@ -29,6 +34,25 @@ export function highlightHashTags(content: string): HighlightSegment[] {
   }
   if (cursor < content.length) segments.push({ text: content.slice(cursor), isTag: false })
   if (segments.length === 0) segments.push({ text: '', isTag: false })
+  return segments
+}
+
+export function highlightComposerReferences(content: string): ComposerHighlightSegment[] {
+  const segments: ComposerHighlightSegment[] = []
+  let cursor = 0
+  const referencePattern = /(^|\s)(#[^\s#]+|@[^\s@]+)/g
+  let match = referencePattern.exec(content)
+  while (match) {
+    const prefix = match[1] ?? ''
+    const token = match[2] ?? ''
+    const index = (match.index ?? cursor) + prefix.length
+    if (index > cursor) segments.push({ text: content.slice(cursor, index), type: 'plain' })
+    if (token) segments.push({ text: token, type: token.startsWith('#') ? 'tag' : 'project' })
+    cursor = index + token.length
+    match = referencePattern.exec(content)
+  }
+  if (cursor < content.length) segments.push({ text: content.slice(cursor), type: 'plain' })
+  if (segments.length === 0) segments.push({ text: '', type: 'plain' })
   return segments
 }
 

@@ -67,6 +67,10 @@ export function toggleReportScope(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]
 }
 
+export function isReportScopeAll(ids: readonly string[]): boolean {
+  return ids.length === 0
+}
+
 export function getHistoryReportState(report: Pick<HistoricalReport, 'status' | 'error_message' | 'retry_count'>): {
   status: HistoricalReport['status']
   errorMessage: string | null
