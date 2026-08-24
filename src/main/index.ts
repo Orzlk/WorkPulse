@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, Menu, Tray, nativeImage, globalShortcut, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, shell, Menu, Tray, nativeImage, globalShortcut, ipcMain } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -7,14 +7,21 @@ import { registerIpcHandlers } from './ipc'
 import { tMain, type AppLanguage } from './i18n'
 import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './updater'
 import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
+import { buildWorkLogEditorQuery, shouldPromptWorkLogEditorClose } from './workLogEditorWindow'
+import { readMainWindowSize, saveMainWindowSize } from './windowState'
 
 let tray: Tray | null = null
 let isQuitting = false
 let repositoryScheduler: RepositoryScheduler | null = null
+let mainWindowRef: BrowserWindow | null = null
+let workLogEditorWindow: BrowserWindow | null = null
+let workLogEditorPublicId: string | null = null
+let workLogEditorDirty = false
 
 // --- Helpers ---
 
 function getMainWindow(): BrowserWindow | null {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) return mainWindowRef
   return BrowserWindow.getAllWindows()[0] || null
 }
 
@@ -224,9 +231,10 @@ function getAppIconPath(): string {
 }
 
 function createWindow(): void {
+  const size = readMainWindowSize(getSetting)
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: size.width,
+    height: size.height,
     minWidth: 400,
     minHeight: 500,
     show: false,
@@ -237,19 +245,29 @@ function createWindow(): void {
       sandbox: false
     }
   })
+  mainWindowRef = mainWindow
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
 
-  if (process.platform !== 'darwin') {
-    mainWindow.on('close', (event) => {
+  mainWindow.on('close', (event) => {
+    try {
+      const bounds = mainWindow.isMaximized() || mainWindow.isFullScreen()
+        ? mainWindow.getNormalBounds()
+        : mainWindow.getBounds()
+      saveMainWindowSize(setSetting, bounds)
+    } catch {
+      // Window persistence must not prevent the application from closing.
+    }
+
+    if (process.platform !== 'darwin') {
       if (!isQuitting) {
         event.preventDefault()
         mainWindow.hide()
       }
-    })
-  }
+    }
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -261,6 +279,101 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+function createWorkLogEditorWindow(publicId: string, parent: BrowserWindow | null): void {
+  if (workLogEditorWindow && !workLogEditorWindow.isDestroyed()) {
+    workLogEditorWindow.focus()
+    return
+  }
+
+  const editorWindow = new BrowserWindow({
+    width: 980,
+    height: 760,
+    minWidth: 680,
+    minHeight: 520,
+    show: false,
+    title: '编辑日志 - WorkPulse',
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    autoHideMenuBar: true,
+    icon: getAppIconPath(),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  workLogEditorWindow = editorWindow
+  workLogEditorPublicId = publicId
+  workLogEditorDirty = false
+
+  editorWindow.once('ready-to-show', () => {
+    if (!editorWindow.isDestroyed()) {
+      editorWindow.show()
+      editorWindow.focus()
+    }
+  })
+
+  editorWindow.on('close', (event) => {
+    if (!shouldPromptWorkLogEditorClose(workLogEditorDirty, isQuitting)) return
+    const result = dialog.showMessageBoxSync(editorWindow, {
+      type: 'warning',
+      buttons: ['继续编辑', '放弃修改'],
+      defaultId: 0,
+      cancelId: 0,
+      title: '未保存的日志',
+      message: '当前日志还有未保存的修改。',
+      detail: '关闭窗口将丢失这些修改。'
+    })
+    if (result === 0) {
+      event.preventDefault()
+    } else {
+      workLogEditorDirty = false
+    }
+  })
+
+  editorWindow.on('closed', () => {
+    if (workLogEditorWindow === editorWindow) {
+      workLogEditorWindow = null
+      workLogEditorPublicId = null
+      workLogEditorDirty = false
+    }
+  })
+
+  const query = buildWorkLogEditorQuery(publicId)
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    editorWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}${query}`)
+  } else {
+    editorWindow.loadFile(join(__dirname, '../renderer/index.html'), { search: query })
+  }
+}
+
+function registerWorkLogEditorIpc(): void {
+  ipcMain.handle('worklog-editor:open', (event, publicId: string) => {
+    if (typeof publicId !== 'string') return false
+    const normalizedPublicId = publicId.trim()
+    if (!normalizedPublicId) return false
+    createWorkLogEditorWindow(normalizedPublicId, BrowserWindow.fromWebContents(event.sender))
+    return true
+  })
+
+  ipcMain.on('worklog-editor:set-dirty', (event, isDirty: boolean) => {
+    const editorWindow = BrowserWindow.fromWebContents(event.sender)
+    if (editorWindow === workLogEditorWindow) workLogEditorDirty = isDirty
+  })
+
+  ipcMain.on('worklog-editor:changed', (event, publicId: string) => {
+    if (BrowserWindow.fromWebContents(event.sender) !== workLogEditorWindow) return
+    if (typeof publicId !== 'string' || publicId !== workLogEditorPublicId) return
+    getMainWindow()?.webContents.send('worklog-editor:changed', publicId)
+  })
+
+  ipcMain.on('worklog-editor:close', (event) => {
+    const editorWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!editorWindow || editorWindow !== workLogEditorWindow) return
+    workLogEditorDirty = false
+    editorWindow.close()
+  })
 }
 
 // --- IPC: shortcut update ---
@@ -323,6 +436,7 @@ if (!gotTheLock) {
     startRepositoryScheduler()
     configureAutoUpdater()
     registerIpcHandlers()
+    registerWorkLogEditorIpc()
     registerShortcutIpc()
     registerUpdateIpc()
     buildMenu()

@@ -26,6 +26,11 @@ interface Page<T> {
   total: number
 }
 
+interface ClearWorkspaceDataResult {
+  backupPath: string
+  deleted: Record<string, number>
+}
+
 interface Project {
   public_id: string
   name: string
@@ -62,6 +67,7 @@ interface Tag {
   name: string
   path: string
   parent_id: string | null
+  usage_count?: number
 }
 
 interface Repository {
@@ -117,6 +123,14 @@ interface ReportPreview {
   inbox_count: number
   git_commit_count: number
   unorganized_inbox_count: number
+}
+
+interface AiConnectionTestResult {
+  ok: boolean
+  provider: 'openai' | 'anthropic' | 'deepseek'
+  model: string
+  latency_ms: number
+  error?: string
 }
 
 interface Task {
@@ -183,10 +197,17 @@ export interface API {
     installUpdate: () => Promise<boolean>
     openBackupDir: () => Promise<string>
   }
+  worklogEditor: {
+    open: (publicId: string) => Promise<boolean>
+    setDirty: (isDirty: boolean) => void
+    notifyChanged: (publicId: string) => void
+    close: () => void
+  }
   on: {
     quickCreate: (cb: (type: QuickCreateType) => void) => () => void
     navigate: (cb: (page: NavigatePage) => void) => () => void
     updateStatus: (cb: (state: AppUpdateState) => void) => () => void
+    worklogEditorChanged: (cb: (publicId: string) => void) => () => void
   }
   task: {
     add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
@@ -201,14 +222,14 @@ export interface API {
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
     get: (publicId: string) => Promise<WorkLog | null>
-    list: (limit?: number, offset?: number) => Promise<WorkLog[]>
+    list: (limit?: number, offset?: number, tagPath?: string, projectPublicId?: string) => Promise<WorkLog[]>
     byDateRange: (from: string, to: string) => Promise<WorkLog[]>
-    search: (keyword: string) => Promise<WorkLog[]>
+    search: (keyword: string, tagPath?: string, projectPublicId?: string) => Promise<WorkLog[]>
     categories: () => Promise<string[]>
     setCategory: (id: number, category: string) => Promise<void>
     update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<WorkLog | null>
     delete: (id: number) => Promise<boolean>
-    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id'>) => Promise<WorkLog>
+    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'repository_id' | 'tag_names'>) => Promise<WorkLog>
   }
   stats: {
     get: (days?: number) => Promise<{
@@ -225,6 +246,9 @@ export interface API {
     list: (limit?: number) => Promise<PeriodReport[]>
     get: (publicId: string) => Promise<PeriodReport | null>
     update: (publicId: string, input: { content: string }) => Promise<PeriodReport | null>
+  }
+  ai: {
+    testConnection: (input: { provider: 'openai' | 'anthropic' | 'deepseek'; api_key: string; base_url?: string; model?: string }) => Promise<AiConnectionTestResult>
   }
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Project>>
@@ -254,7 +278,8 @@ export interface API {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Repository>>
     get: (publicId: string) => Promise<Repository | null>
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository>
-    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository | null>
+    update: (publicId: string, input: { name?: string; local_path?: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<Repository | null>
+    delete: (publicId: string) => Promise<Repository | null>
     scan: (publicId: string) => Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>
     scanAll: () => Promise<{
       succeeded: number
@@ -267,6 +292,7 @@ export interface API {
   database: {
     export: () => Promise<{ filePath: string; preview: unknown } | null>
     import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
+    clear: () => Promise<ClearWorkspaceDataResult>
   }
   settings: {
     get: (key: string) => Promise<string | null>

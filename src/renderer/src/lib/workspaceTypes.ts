@@ -19,6 +19,14 @@ export interface Project {
   }
 }
 
+export interface Tag {
+  public_id: string
+  name: string
+  path: string
+  parent_id: string | null
+  usage_count?: number
+}
+
 export interface WorkItemAssociations {
   project_id?: string | null
   repository_id?: string | null

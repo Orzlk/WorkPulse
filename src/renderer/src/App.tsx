@@ -9,6 +9,7 @@ import { useProjectStore } from './stores/projectStore'
 import { useRepositoryStore } from './stores/repositoryStore'
 import { useI18n } from './stores/languageStore'
 import type { SearchResult } from './lib/workspaceTypes'
+import { parseWorkLogEditorRoute } from './lib/workLogEditorRoute'
 import brandSeal from './assets/brand-seal.png'
 
 const WorkLogPage = lazy(() => import('./pages/WorkLogPage'))
@@ -19,6 +20,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const InboxPage = lazy(() => import('./pages/InboxPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
+const WorkLogEditorPage = lazy(() => import('./pages/WorkLogEditorPage'))
 
 type Page = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type QuickCreateMode = 'log' | 'task' | 'inbox' | null
@@ -33,7 +35,7 @@ const navigation: Array<{ page: Exclude<Page, 'settings'>; Icon: typeof Clipboar
   { page: 'stats', Icon: BarChart3 }
 ]
 
-function App(): JSX.Element {
+function MainApp(): JSX.Element {
   const [currentPage, setCurrentPage] = useState<Page>('worklog')
   const [quickCreate, setQuickCreate] = useState<QuickCreateMode>(null)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -124,6 +126,20 @@ function App(): JSX.Element {
     <main className="app-main flex-1 overflow-auto"><div className={`page-container workspace-content ${currentPage === 'kanban' ? 'page-container-wide' : ''}`}><Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>{renderPage()}</Suspense></div></main>
     {quickCreate && <QuickCreate initialMode={quickCreate} returnFocusRef={quickCreateTriggerRef} onClose={() => setQuickCreate(null)} />}
   </div>
+}
+
+function App(): JSX.Element {
+  const route = parseWorkLogEditorRoute(window.location.search)
+  if (route.isEditor && route.publicId) {
+    return (
+      <div className="hallmark-app workspace-shell h-screen">
+        <Suspense fallback={<div className="page-loading" role="status">加载中...</div>}>
+          <WorkLogEditorPage publicId={route.publicId} />
+        </Suspense>
+      </div>
+    )
+  }
+  return <MainApp />
 }
 
 export default App

@@ -61,6 +61,11 @@ interface Page<T> {
   total: number
 }
 
+interface ClearWorkspaceDataResult {
+  backupPath: string
+  deleted: Record<string, number>
+}
+
 interface Project {
   public_id: string
   name: string
@@ -110,6 +115,7 @@ interface Tag {
   name: string
   path: string
   parent_id: string | null
+  usage_count?: number
 }
 
 interface Repository {
@@ -167,6 +173,14 @@ interface ReportPreview {
   unorganized_inbox_count: number
 }
 
+interface AiConnectionTestResult {
+  ok: boolean
+  provider: 'openai' | 'anthropic' | 'deepseek'
+  model: string
+  latency_ms: number
+  error?: string
+}
+
 const api = {
   app: {
     setLanguage: (language: AppLanguage) => ipcRenderer.invoke('app:language:update', language),
@@ -176,22 +190,34 @@ const api = {
     installUpdate: () => ipcRenderer.invoke('app:updates:install') as Promise<boolean>,
     openBackupDir: () => ipcRenderer.invoke('app:open-backup-dir') as Promise<string>
   },
+  worklogEditor: {
+    open: (publicId: string) => ipcRenderer.invoke('worklog-editor:open', publicId) as Promise<boolean>,
+    setDirty: (isDirty: boolean) => {
+      ipcRenderer.send('worklog-editor:set-dirty', isDirty)
+    },
+    notifyChanged: (publicId: string) => {
+      ipcRenderer.send('worklog-editor:changed', publicId)
+    },
+    close: () => {
+      ipcRenderer.send('worklog-editor:close')
+    }
+  },
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('worklog:add', content, category, associations),
     get: (publicId: string) => ipcRenderer.invoke('worklog:get', publicId) as Promise<WorkLog | null>,
-    list: (limit?: number, offset?: number) =>
-      ipcRenderer.invoke('worklog:list', limit, offset),
+    list: (limit?: number, offset?: number, tagPath?: string, projectPublicId?: string) =>
+      ipcRenderer.invoke('worklog:list', limit, offset, tagPath, projectPublicId),
     byDateRange: (from: string, to: string) =>
       ipcRenderer.invoke('worklog:byDateRange', from, to),
-    search: (keyword: string) => ipcRenderer.invoke('worklog:search', keyword),
+    search: (keyword: string, tagPath?: string, projectPublicId?: string) => ipcRenderer.invoke('worklog:search', keyword, tagPath, projectPublicId),
     categories: () => ipcRenderer.invoke('worklog:categories') as Promise<string[]>,
     setCategory: (id: number, category: string) =>
       ipcRenderer.invoke('worklog:setCategory', id, category),
     update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('worklog:update', id, content, category, created_at, associations),
     delete: (id: number) => ipcRenderer.invoke('worklog:delete', id),
-    restore: (log: { content: string; category: string; created_at: string; task_id: number | null }) =>
+    restore: (log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; repository_id: string | null; tag_names: string[] }) =>
       ipcRenderer.invoke('worklog:restore', log)
   },
   task: {
@@ -222,6 +248,10 @@ const api = {
     update: (publicId: string, input: { content: string }) =>
       ipcRenderer.invoke('report:update', publicId, input) as Promise<PeriodReport | null>
   },
+  ai: {
+    testConnection: (input: { provider: 'openai' | 'anthropic' | 'deepseek'; api_key: string; base_url?: string; model?: string }) =>
+      ipcRenderer.invoke('ai:testConnection', input) as Promise<AiConnectionTestResult>
+  },
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('project:list', pagination) as Promise<Page<Project>>,
     create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => ipcRenderer.invoke('project:create', input) as Promise<Project>,
@@ -250,7 +280,8 @@ const api = {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('repository:list', pagination) as Promise<Page<Repository>>,
     get: (publicId: string) => ipcRenderer.invoke('repository:get', publicId) as Promise<Repository | null>,
     create: (input: { name: string; local_path: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:create', input) as Promise<Repository>,
-    update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
+    update: (publicId: string, input: { name?: string; local_path?: string; remote_url?: string | null; project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => ipcRenderer.invoke('repository:update', publicId, input) as Promise<Repository | null>,
+    delete: (publicId: string) => ipcRenderer.invoke('repository:delete', publicId) as Promise<Repository | null>,
     scan: (publicId: string) => ipcRenderer.invoke('repository:scan', publicId) as Promise<{ repository_id: string; status: 'succeeded' | 'failed' | 'skipped'; inserted_count: number; error?: string }>,
     scanAll: () => ipcRenderer.invoke('repository:scanAll') as Promise<{
       succeeded: number
@@ -262,7 +293,8 @@ const api = {
   },
   database: {
     export: () => ipcRenderer.invoke('database:export') as Promise<{ filePath: string; preview: unknown } | null>,
-    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request) as Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
+    import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request) as Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>,
+    clear: () => ipcRenderer.invoke('database:clear') as Promise<ClearWorkspaceDataResult>
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -316,6 +348,15 @@ const api = {
       ipcRenderer.on('app:update-status', handler)
       return () => {
         ipcRenderer.removeListener('app:update-status', handler)
+      }
+    },
+    worklogEditorChanged: (cb: (publicId: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, publicId: unknown): void => {
+        if (typeof publicId === 'string') cb(publicId)
+      }
+      ipcRenderer.on('worklog-editor:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('worklog-editor:changed', handler)
       }
     }
   }

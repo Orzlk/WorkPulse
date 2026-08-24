@@ -7,6 +7,24 @@ import type { Pagination, ReadOptions, TagRepository, WorkspaceContext } from '.
 
 const DEFAULT_LIMIT = 50
 
+const TAG_USAGE_COUNT_SQL = `
+  (SELECT COUNT(*) FROM work_log_tags
+    INNER JOIN work_logs ON work_logs.id = work_log_tags.work_log_id
+    WHERE work_log_tags.tag_id = tags.id AND work_logs.workspace_id = tags.workspace_id AND work_logs.deleted_at IS NULL)
+  + (SELECT COUNT(*) FROM task_tags
+    INNER JOIN tasks ON tasks.id = task_tags.task_id
+    WHERE task_tags.tag_id = tags.id AND tasks.workspace_id = tags.workspace_id AND tasks.deleted_at IS NULL)
+  + (SELECT COUNT(*) FROM inbox_tags
+    INNER JOIN inbox_items ON inbox_items.id = inbox_tags.inbox_item_id
+    WHERE inbox_tags.tag_id = tags.id AND inbox_items.workspace_id = tags.workspace_id AND inbox_items.deleted_at IS NULL)
+  + (SELECT COUNT(*) FROM git_commit_tags
+    INNER JOIN git_commits ON git_commits.id = git_commit_tags.git_commit_id
+    WHERE git_commit_tags.tag_id = tags.id AND git_commits.workspace_id = tags.workspace_id AND git_commits.deleted_at IS NULL)
+  + (SELECT COUNT(*) FROM report_tags
+    INNER JOIN reports ON reports.id = report_tags.report_id
+    WHERE report_tags.tag_id = tags.id AND reports.workspace_id = tags.workspace_id AND reports.deleted_at IS NULL)
+`
+
 export function normalizeTagName(value: string): string {
   const withoutHash = value.trim().replace(/^#/, '')
   const path = withoutHash
@@ -24,7 +42,8 @@ function toTag(row: Record<string, unknown>): Tag {
     public_id: row.public_id as string,
     name: row.name as string,
     path: row.path as string,
-    parent_id: row.parent_public_id as string | null
+    parent_id: row.parent_public_id as string | null,
+    usage_count: Number(row.usage_count ?? 0)
   }
 }
 
@@ -41,8 +60,10 @@ export class LocalTagRepository implements TagRepository {
   list(context: WorkspaceContext, pagination?: Pagination): Page<Tag> {
     const { limit, offset } = resolvePagination(pagination)
     const items = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, NULL AS parent_public_id
+      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id,
+        ${TAG_USAGE_COUNT_SQL} AS usage_count
       FROM tags
+      LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.deleted_at IS NULL
       WHERE tags.workspace_id = ? AND tags.deleted_at IS NULL
       ORDER BY tags.path ASC
       LIMIT ? OFFSET ?
@@ -56,8 +77,10 @@ export class LocalTagRepository implements TagRepository {
 
   get(context: WorkspaceContext, publicId: string, options: ReadOptions = {}): Tag | null {
     const row = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, NULL AS parent_public_id
+      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id,
+        ${TAG_USAGE_COUNT_SQL} AS usage_count
       FROM tags
+      LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.deleted_at IS NULL
       WHERE tags.workspace_id = ? AND tags.public_id = ? ${options.includeDeleted ? '' : 'AND tags.deleted_at IS NULL'}
     `).get(context.workspace_id, publicId) as Record<string, unknown> | undefined
     return row ? toTag(row) : null

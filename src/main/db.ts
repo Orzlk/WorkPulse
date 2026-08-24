@@ -8,6 +8,7 @@ import { backupDatabase, getDatabaseVersion, initializeDatabase, runMigrations }
 import type { WorkspaceContext } from './repositories/contracts'
 import { normalizeTagName } from './repositories/localTagRepository'
 import { assertStatsDays, DEFAULT_STATS_DAYS } from './lib/stats'
+import { buildFtsQuery } from './search/ftsQuery'
 
 let db: Database.Database
 
@@ -108,6 +109,128 @@ export function getDefaultWorkspaceContext(): WorkspaceContext {
   return context
 }
 
+export interface ClearWorkspaceDataResult {
+  backupPath: string
+  deleted: Record<string, number>
+}
+
+interface ClearWorkspaceOperation {
+  table: string
+  countSql: string
+  deleteSql: string
+}
+
+const CLEAR_WORKSPACE_OPERATIONS: ClearWorkspaceOperation[] = [
+  {
+    table: 'work_log_tags',
+    countSql: 'SELECT COUNT(*) AS count FROM work_log_tags WHERE work_log_id IN (SELECT id FROM work_logs WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM work_log_tags WHERE work_log_id IN (SELECT id FROM work_logs WHERE workspace_id = ?)'
+  },
+  {
+    table: 'task_tags',
+    countSql: 'SELECT COUNT(*) AS count FROM task_tags WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM task_tags WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)'
+  },
+  {
+    table: 'inbox_tags',
+    countSql: 'SELECT COUNT(*) AS count FROM inbox_tags WHERE inbox_item_id IN (SELECT id FROM inbox_items WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM inbox_tags WHERE inbox_item_id IN (SELECT id FROM inbox_items WHERE workspace_id = ?)'
+  },
+  {
+    table: 'git_commit_tags',
+    countSql: 'SELECT COUNT(*) AS count FROM git_commit_tags WHERE git_commit_id IN (SELECT id FROM git_commits WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM git_commit_tags WHERE git_commit_id IN (SELECT id FROM git_commits WHERE workspace_id = ?)'
+  },
+  {
+    table: 'report_tags',
+    countSql: 'SELECT COUNT(*) AS count FROM report_tags WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM report_tags WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)'
+  },
+  {
+    table: 'report_projects',
+    countSql: 'SELECT COUNT(*) AS count FROM report_projects WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM report_projects WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)'
+  },
+  {
+    table: 'report_repositories',
+    countSql: 'SELECT COUNT(*) AS count FROM report_repositories WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)',
+    deleteSql: 'DELETE FROM report_repositories WHERE report_id IN (SELECT id FROM reports WHERE workspace_id = ?)'
+  },
+  {
+    table: 'repository_bindings',
+    countSql: 'SELECT COUNT(*) AS count FROM repository_bindings WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM repository_bindings WHERE workspace_id = ?'
+  },
+  {
+    table: 'git_commits',
+    countSql: 'SELECT COUNT(*) AS count FROM git_commits WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM git_commits WHERE workspace_id = ?'
+  },
+  {
+    table: 'inbox_items',
+    countSql: 'SELECT COUNT(*) AS count FROM inbox_items WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM inbox_items WHERE workspace_id = ?'
+  },
+  {
+    table: 'work_logs',
+    countSql: 'SELECT COUNT(*) AS count FROM work_logs WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM work_logs WHERE workspace_id = ?'
+  },
+  {
+    table: 'tasks',
+    countSql: 'SELECT COUNT(*) AS count FROM tasks WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM tasks WHERE workspace_id = ?'
+  },
+  {
+    table: 'reports',
+    countSql: 'SELECT COUNT(*) AS count FROM reports WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM reports WHERE workspace_id = ?'
+  },
+  {
+    table: 'repositories',
+    countSql: 'SELECT COUNT(*) AS count FROM repositories WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM repositories WHERE workspace_id = ?'
+  },
+  {
+    table: 'projects',
+    countSql: 'SELECT COUNT(*) AS count FROM projects WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM projects WHERE workspace_id = ?'
+  },
+  {
+    table: 'tags',
+    countSql: 'SELECT COUNT(*) AS count FROM tags WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM tags WHERE workspace_id = ?'
+  },
+  {
+    table: 'sync_operations',
+    countSql: 'SELECT COUNT(*) AS count FROM sync_operations WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM sync_operations WHERE workspace_id = ?'
+  },
+  {
+    table: 'content_search',
+    countSql: 'SELECT COUNT(*) AS count FROM content_search WHERE workspace_id = ?',
+    deleteSql: 'DELETE FROM content_search WHERE workspace_id = ?'
+  }
+]
+
+export async function clearWorkspaceData(): Promise<ClearWorkspaceDataResult> {
+  const context = getDefaultWorkspaceContext()
+  const backupPath = getBackupPath(getDatabaseVersion(db))
+  await backupDatabase(db, backupPath)
+
+  const deleted = db.transaction(() => {
+    const counts: Record<string, number> = {}
+    for (const operation of CLEAR_WORKSPACE_OPERATIONS) {
+      const row = db.prepare(operation.countSql).get(context.workspace_id) as { count: number }
+      counts[operation.table] = row.count
+      db.prepare(operation.deleteSql).run(context.workspace_id)
+    }
+    return counts
+  })()
+
+  return { backupPath, deleted }
+}
+
 // --- Work Logs CRUD ---
 
 export interface WorkLog {
@@ -147,8 +270,12 @@ function associationPatch(associations: WorkItemAssociations): Record<string, un
 function ensureTagIds(names: string[], workspaceId: number, userId: number, now: string): number[] {
   const ids: number[] = []
   for (const rawName of Array.from(new Set(names.map((name) => normalizeTagName(name))))) {
-    const existing = db.prepare('SELECT id FROM tags WHERE workspace_id = ? AND path = ?').get(workspaceId, rawName) as { id: number } | undefined
+    const existing = db.prepare('SELECT id, public_id, deleted_at FROM tags WHERE workspace_id = ? AND path = ?').get(workspaceId, rawName) as { id: number; public_id: string; deleted_at: string | null } | undefined
     let tagId = existing?.id
+    if (existing && tagId && existing.deleted_at !== null) {
+      db.prepare('UPDATE tags SET deleted_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?').run(now, tagId, workspaceId)
+      db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, existing.public_id, JSON.stringify({ public_id: existing.public_id, path: rawName, deleted_at: null }), now, now)
+    }
     if (!tagId) {
       const tag = db.prepare(`INSERT INTO tags (public_id, workspace_id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id, public_id`).get(randomUUID(), workspaceId, rawName, rawName, now, now) as { id: number; public_id: string }
       tagId = tag.id
@@ -159,6 +286,60 @@ function ensureTagIds(names: string[], workspaceId: number, userId: number, now:
   return ids
 }
 
+function cleanupUnusedTags(workspaceId: number, now: string): void {
+  const candidates = db.prepare(`
+    SELECT id, public_id, path
+    FROM tags
+    WHERE workspace_id = ? AND deleted_at IS NULL
+    ORDER BY LENGTH(path) DESC, path DESC
+  `).all(workspaceId) as Array<{ id: number; public_id: string; path: string }>
+  const usage = db.prepare(`
+    WITH candidate_tags AS (
+      SELECT id FROM tags
+      WHERE workspace_id = ? AND deleted_at IS NULL AND (id = ? OR path LIKE ?)
+    )
+    SELECT 1
+    FROM work_log_tags
+    INNER JOIN work_logs ON work_logs.id = work_log_tags.work_log_id
+    WHERE work_log_tags.tag_id IN (SELECT id FROM candidate_tags)
+      AND work_logs.workspace_id = ? AND work_logs.deleted_at IS NULL
+    UNION ALL
+    SELECT 1
+    FROM task_tags
+    INNER JOIN tasks ON tasks.id = task_tags.task_id
+    WHERE task_tags.tag_id IN (SELECT id FROM candidate_tags)
+      AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL
+    UNION ALL
+    SELECT 1
+    FROM inbox_tags
+    INNER JOIN inbox_items ON inbox_items.id = inbox_tags.inbox_item_id
+    WHERE inbox_tags.tag_id IN (SELECT id FROM candidate_tags)
+      AND inbox_items.workspace_id = ? AND inbox_items.deleted_at IS NULL
+    UNION ALL
+    SELECT 1
+    FROM git_commit_tags
+    INNER JOIN git_commits ON git_commits.id = git_commit_tags.git_commit_id
+    WHERE git_commit_tags.tag_id IN (SELECT id FROM candidate_tags)
+      AND git_commits.workspace_id = ? AND git_commits.deleted_at IS NULL
+    UNION ALL
+    SELECT 1
+    FROM report_tags
+    INNER JOIN reports ON reports.id = report_tags.report_id
+    WHERE report_tags.tag_id IN (SELECT id FROM candidate_tags)
+      AND reports.workspace_id = ? AND reports.deleted_at IS NULL
+    LIMIT 1
+  `)
+  const remove = db.prepare('UPDATE tags SET deleted_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+  const enqueue = db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'delete', ?, ?, ?)`)
+  for (const tag of candidates) {
+    const used = usage.get(workspaceId, tag.id, `${tag.path}/%`, workspaceId, workspaceId, workspaceId, workspaceId, workspaceId)
+    if (used) continue
+    if (remove.run(now, now, tag.id, workspaceId).changes > 0) {
+      enqueue.run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path: tag.path, deleted_at: now }), now, now)
+    }
+  }
+}
+
 function setEntityTags(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_log_id' | 'task_id', entityId: number, entityPublicId: string, names: string[] | undefined, workspaceId: number, userId: number, now: string): void {
   if (names === undefined) return
   db.prepare(`DELETE FROM ${linkTable} WHERE ${entityColumn} = ?`).run(entityId)
@@ -166,6 +347,7 @@ function setEntityTags(linkTable: 'work_log_tags' | 'task_tags', entityColumn: '
   const insert = db.prepare(`INSERT OR IGNORE INTO ${linkTable} (${entityColumn}, tag_id) VALUES (?, ?)`)
   for (const tagId of tagIds) insert.run(entityId, tagId)
   db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, ?, ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, linkTable, entityPublicId, JSON.stringify({ tag_names: names }), now, now)
+  cleanupUnusedTags(workspaceId, now)
 }
 
 function tagNames(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_log_id' | 'task_id', entityId: number): string[] {
@@ -237,9 +419,59 @@ export function getWorkLogByPublicId(publicId: string): WorkLog | null {
   return getWorkLogById(publicId, getDefaultWorkspaceContext().workspace_id)
 }
 
-export function getWorkLogs(limit = 200, offset = 0): WorkLog[] {
+interface WorkLogTagFilter {
+  sql: string
+  params: string[]
+}
+
+function buildWorkLogTagFilter(tagPath?: string): WorkLogTagFilter {
+  if (!tagPath?.trim()) return { sql: '', params: [] }
+  const normalizedPath = normalizeTagName(tagPath)
+  return {
+    sql: `
+      AND EXISTS (
+        SELECT 1
+        FROM work_log_tags
+        INNER JOIN tags ON tags.id = work_log_tags.tag_id
+        WHERE work_log_tags.work_log_id = work_logs.id
+          AND tags.workspace_id = work_logs.workspace_id
+          AND tags.deleted_at IS NULL
+          AND (tags.path = ? OR tags.path LIKE ?)
+      )`,
+    params: [normalizedPath, `${normalizedPath}/%`]
+  }
+}
+
+function buildWorkLogProjectFilter(projectPublicId?: string): WorkLogTagFilter {
+  const normalizedProjectId = projectPublicId?.trim()
+  if (!normalizedProjectId) return { sql: '', params: [] }
+  return {
+    sql: `
+      AND EXISTS (
+        SELECT 1
+        FROM projects
+        WHERE projects.id = work_logs.project_id
+          AND projects.workspace_id = work_logs.workspace_id
+          AND projects.public_id = ?
+          AND projects.deleted_at IS NULL
+      )`,
+    params: [normalizedProjectId]
+  }
+}
+
+export function getWorkLogs(limit = 200, offset = 0, tagPath?: string, projectPublicId?: string): WorkLog[] {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const rows = db.prepare('SELECT public_id FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?').all(workspaceId, limit, offset) as Array<{ public_id: string }>
+  const tagFilter = buildWorkLogTagFilter(tagPath)
+  const projectFilter = buildWorkLogProjectFilter(projectPublicId)
+  const rows = db.prepare(`
+    SELECT work_logs.public_id
+    FROM work_logs
+    WHERE work_logs.workspace_id = ? AND work_logs.deleted_at IS NULL
+    ${tagFilter.sql}
+    ${projectFilter.sql}
+    ORDER BY work_logs.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(workspaceId, ...tagFilter.params, ...projectFilter.params, limit, offset) as Array<{ public_id: string }>
   return rows.map((row) => getWorkLogById(row.public_id, workspaceId)).filter((row): row is WorkLog => row !== null)
 }
 
@@ -249,9 +481,46 @@ export function getWorkLogsByDateRange(from: string, to: string): WorkLog[] {
   return rows.map((row) => getWorkLogById(row.public_id, workspaceId)).filter((row): row is WorkLog => row !== null)
 }
 
-export function searchWorkLogs(keyword: string, limit = 200): WorkLog[] {
+export function searchWorkLogs(keyword: string, limit = 200, tagPath?: string, projectPublicId?: string): WorkLog[] {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const rows = db.prepare('SELECT public_id FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND content LIKE ? ORDER BY created_at DESC LIMIT ?').all(workspaceId, `%${keyword}%`, limit) as Array<{ public_id: string }>
+  const tagFilter = buildWorkLogTagFilter(tagPath)
+  const projectFilter = buildWorkLogProjectFilter(projectPublicId)
+  const likeRows = (): Array<{ public_id: string }> => db.prepare(
+    `SELECT work_logs.public_id
+     FROM work_logs
+     WHERE work_logs.workspace_id = ? AND work_logs.deleted_at IS NULL
+     ${tagFilter.sql}
+     ${projectFilter.sql}
+       AND work_logs.content LIKE ?
+     ORDER BY work_logs.created_at DESC LIMIT ?`
+  ).all(workspaceId, ...tagFilter.params, ...projectFilter.params, `%${keyword}%`, limit) as Array<{ public_id: string }>
+
+  let rows: Array<{ public_id: string }>
+  if (!keyword.trim()) {
+    rows = likeRows()
+  } else {
+    try {
+      rows = db.prepare(`
+        SELECT work_logs.public_id
+        FROM work_logs
+        WHERE work_logs.workspace_id = ? AND work_logs.deleted_at IS NULL
+          ${tagFilter.sql}
+          ${projectFilter.sql}
+          AND EXISTS (
+            SELECT 1 FROM content_search
+            WHERE content_search MATCH ?
+              AND content_search.entity_type = 'work_log'
+              AND content_search.entity_id = CAST(work_logs.id AS TEXT)
+              AND content_search.workspace_id = work_logs.workspace_id
+          )
+        ORDER BY work_logs.created_at DESC
+        LIMIT ?
+      `).all(workspaceId, ...tagFilter.params, ...projectFilter.params, buildFtsQuery(keyword), limit) as Array<{ public_id: string }>
+      if (rows.length === 0) rows = likeRows()
+    } catch {
+      rows = likeRows()
+    }
+  }
   return rows.map((row) => getWorkLogById(row.public_id, workspaceId)).filter((row): row is WorkLog => row !== null)
 }
 
@@ -271,13 +540,20 @@ export function workLogExists(content: string, category: string, dateStr?: strin
 
 export function deleteWorkLog(id: number): boolean {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const stmt = db.prepare('DELETE FROM work_logs WHERE id = ? AND workspace_id = ?')
-  const result = stmt.run(id, workspaceId)
-  return result.changes > 0
+  const now = new Date().toISOString()
+  return db.transaction(() => {
+    const result = db.prepare('DELETE FROM work_logs WHERE id = ? AND workspace_id = ?').run(id, workspaceId)
+    if (result.changes > 0) cleanupUnusedTags(workspaceId, now)
+    return result.changes > 0
+  })()
 }
 
-export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id'>): WorkLog {
-  return addWorkLog(log.content, log.category, log.task_id, log.created_at)
+export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'repository_id' | 'tag_names'>): WorkLog {
+  return addWorkLog(log.content, log.category, log.task_id, log.created_at, {
+    projectId: log.project_id,
+    repositoryId: log.repository_id,
+    tagNames: log.tag_names
+  })
 }
 
 // --- Reports CRUD ---
@@ -479,8 +755,13 @@ export function updateTask(
 
 export function deleteTask(id: number): boolean {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const stmt = db.prepare('DELETE FROM tasks WHERE id = ? AND workspace_id = ?')
-  return stmt.run(id, workspaceId).changes > 0
+  const now = new Date().toISOString()
+  return db.transaction(() => {
+    const result = db.prepare('DELETE FROM tasks WHERE id = ? AND workspace_id = ?')
+    const deleted = result.run(id, workspaceId).changes > 0
+    if (deleted) cleanupUnusedTags(workspaceId, now)
+    return deleted
+  })()
 }
 
 export function reorderTasks(taskIds: number[], status: string): void {

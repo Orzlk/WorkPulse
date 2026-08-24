@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseFlomoHtml } from '../../src/main/importers/flomoHtmlImporter'
 
 describe('parseFlomoHtml', () => {
-  it('parses memo time, removes a standalone tag line, and keeps tags', () => {
+  it('parses memo time, preserves a standalone tag line and ordered lists, and keeps tags', () => {
     const result = parseFlomoHtml(`
       <div class="memo">
         <div class="time">2026-08-19 09:45:51</div>
@@ -14,10 +14,21 @@ describe('parseFlomoHtml', () => {
 
     expect(result.memos).toEqual([{
       createdAt: '2026-08-19 09:45:51',
-      content: '- 方案 A\n- 方案 B',
+      content: '#工作/三峡 #设计\n\n1. 方案 A\n2. 方案 B',
       tagNames: ['工作/三峡', '设计'],
       attachmentCount: 0
     }])
+  })
+
+  it('converts Flomo inline emphasis and block paragraphs to Markdown', () => {
+    const result = parseFlomoHtml(`
+      <div class="memo">
+        <div class="time">2026-08-20 10:00:00</div>
+        <div class="content"><p>普通段落</p><p><strong>重点</strong> 和 <em>说明</em></p><ul><li>项目 A</li><li>项目 B</li></ul></div>
+      </div>
+    `)
+
+    expect(result.memos[0]?.content).toBe('普通段落\n\n**重点** 和 *说明*\n\n- 项目 A\n- 项目 B')
   })
 
   it('decodes entities, preserves inline hashtags, and counts attachments', () => {
@@ -30,7 +41,7 @@ describe('parseFlomoHtml', () => {
     `)
 
     expect(result.memos[0]).toMatchObject({
-      content: '需求 & 验证 #保留\n下一行',
+      content: '需求 & 验证 #保留\n\n下一行',
       tagNames: ['保留'],
       attachmentCount: 2
     })

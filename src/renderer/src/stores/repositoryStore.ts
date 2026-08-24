@@ -14,7 +14,8 @@ interface RepositoryStore {
   loadByPublicId: (publicId: string) => Promise<Repository | null>
   loadMore: () => Promise<void>
   create: (input: Parameters<Window['api']['repository']['create']>[0]) => Promise<Repository>
-  update: (publicId: string, input: { project_id?: string | null; enabled?: boolean; scan_interval_minutes?: number | null }) => Promise<void>
+  update: (publicId: string, input: Parameters<Window['api']['repository']['update']>[1]) => Promise<void>
+  remove: (publicId: string) => Promise<void>
   scan: (publicId: string) => Promise<{ status: string; inserted_count: number; error?: string }>
   scanAll: () => Promise<{
     succeeded: number
@@ -66,6 +67,14 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   update: async (publicId, input) => {
     const item = await window.api.repository.update(publicId, input)
     if (item) set({ items: get().items.map((current) => current.public_id === publicId ? item : current) })
+  },
+  remove: async (publicId) => {
+    const item = await window.api.repository.delete(publicId)
+    if (!item) return
+    set((state) => ({
+      items: state.items.filter((current) => current.public_id !== publicId),
+      total: Math.max(0, state.total - 1)
+    }))
   },
   scan: async (publicId) => {
     const result = await window.api.repository.scan(publicId)

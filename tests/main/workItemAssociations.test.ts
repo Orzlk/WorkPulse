@@ -102,4 +102,28 @@ describe('work item associations', () => {
     expect(database.prepare("SELECT title FROM tasks WHERE public_id = 'task-other'").get()).toEqual({ title: 'Other workspace task' })
     expect(database.prepare("SELECT COUNT(*) AS count FROM tasks WHERE public_id = 'task-other'").get()).toEqual({ count: 1 })
   })
+
+  it('filters logs by a tag subtree without changing project ownership', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-associations-tag-filter-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+
+    const projectNow = new Date().toISOString()
+    getDatabase().prepare(`INSERT INTO projects (public_id, workspace_id, name, description, color, created_by, updated_by, created_at, updated_at) VALUES ('project-filter', 1, '项目', '', '#64748b', 1, 1, ?, ?)`).run(projectNow, projectNow)
+    addWorkLog('三峡日志', '', null, '2026-08-20T10:00:00.000Z', {
+      projectId: 'project-filter',
+      tagNames: ['工作/三峡']
+    })
+    addWorkLog('研发日志', '', null, '2026-08-20T09:00:00.000Z', {
+      tagNames: ['工作/研发']
+    })
+    addWorkLog('生活日志', '', null, '2026-08-20T08:00:00.000Z', {
+      tagNames: ['生活']
+    })
+
+    const logs = getWorkLogs(50, 0, '工作')
+    expect(logs.map((log) => log.content)).toEqual(['三峡日志', '研发日志'])
+    expect(logs[0]).toMatchObject({ project_id: 'project-filter', tag_names: ['工作/三峡'] })
+  })
 })

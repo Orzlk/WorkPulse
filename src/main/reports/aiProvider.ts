@@ -1,5 +1,27 @@
 export const AI_PROVIDER_RESPONSE_ERROR = 'AI provider response is invalid'
 
+export type AiProviderName = 'openai' | 'anthropic' | 'deepseek'
+
+export interface AiConnectionTestInput {
+  provider: AiProviderName
+  apiKey: string
+  baseUrl: string
+  model: string
+}
+
+export interface AiConnectionTestResult {
+  ok: boolean
+  provider: AiProviderName
+  model: string
+  latency_ms: number
+  error?: string
+}
+
+export interface AiConnectionTestDependencies {
+  fetchImpl?: typeof fetch
+  timeoutMs?: number
+}
+
 export interface ProviderMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -125,4 +147,56 @@ export function callDeepSeek(input: ProviderRequest): Promise<string> {
     temperature: 0.7,
     max_tokens: 2000
   }, chatContent)
+}
+
+function defaultModel(provider: AiProviderName): string {
+  if (provider === 'anthropic') return 'claude-sonnet-4-20250514'
+  if (provider === 'deepseek') return 'deepseek-chat'
+  return 'gpt-4o-mini'
+}
+
+function sanitizeError(error: unknown, apiKey: string): string {
+  const raw = error instanceof Error ? error.message : 'AI provider request failed'
+  const withoutKey = apiKey ? raw.split(apiKey).join('[REDACTED]') : raw
+  return withoutKey.slice(0, 500) || 'AI provider request failed'
+}
+
+export async function testAiConnection(
+  input: AiConnectionTestInput,
+  dependencies: AiConnectionTestDependencies = {}
+): Promise<AiConnectionTestResult> {
+  const model = input.model || defaultModel(input.provider)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), dependencies.timeoutMs ?? 10_000)
+  const startedAt = Date.now()
+  const request: ProviderRequest = {
+    apiKey: input.apiKey,
+    baseUrl: input.baseUrl,
+    model,
+    messages: [{ role: 'user', content: 'Reply with OK only.' }],
+    signal: controller.signal,
+    fetchImpl: dependencies.fetchImpl
+  }
+
+  try {
+    if (input.provider === 'anthropic') await callAnthropic(request)
+    else if (input.provider === 'deepseek') await callDeepSeek(request)
+    else await callOpenAI(request)
+    return {
+      ok: true,
+      provider: input.provider,
+      model,
+      latency_ms: Math.max(0, Date.now() - startedAt)
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      provider: input.provider,
+      model,
+      latency_ms: Math.max(0, Date.now() - startedAt),
+      error: controller.signal.aborted ? 'AI provider request timed out' : sanitizeError(error, input.apiKey)
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
 }

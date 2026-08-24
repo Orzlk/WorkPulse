@@ -5,7 +5,9 @@ import {
   parseReportListInput,
   parsePagination,
   parseReportRequest,
+  parseAiConnectionTestInput,
   parseRepositoryCreateInput,
+  parseRepositoryUpdateInput,
   parseSearchQueryInput,
   parseTagNames
 } from '../../src/main/ipcContracts'
@@ -33,6 +35,16 @@ describe('IPC contract validation', () => {
       .toThrow('INVALID_ARGUMENT')
   })
 
+  it('accepts editable repository metadata and rejects empty repository names', () => {
+    expect(parseRepositoryUpdateInput({
+      name: '新名称',
+      local_path: 'D:/new-repo',
+      remote_url: null,
+      project_id: null
+    })).toMatchObject({ name: '新名称', local_path: 'D:/new-repo', remote_url: null, project_id: null })
+    expect(() => parseRepositoryUpdateInput({ name: '' })).toThrow('INVALID_ARGUMENT')
+  })
+
   it('validates legacy numeric report pagination through the same parser', () => {
     expect(parseReportListInput(20)).toEqual({ limit: 20, offset: 0 })
     expect(() => parseReportListInput(0)).toThrow('INVALID_ARGUMENT')
@@ -56,5 +68,22 @@ describe('IPC contract validation', () => {
     }
     expect(parseReportRequest({ type: 'monthly', anchorDate: '2024-02-29', timeZone: 'Asia/Shanghai' }).anchorDate)
       .toBe('2024-02-29')
+  })
+
+  it('validates AI connection test input without accepting unknown providers or fields', () => {
+    expect(parseAiConnectionTestInput({
+      provider: 'openai',
+      api_key: 'test-key',
+      base_url: 'https://provider.test/v1',
+      model: 'test-model'
+    })).toEqual({
+      provider: 'openai',
+      api_key: 'test-key',
+      base_url: 'https://provider.test/v1',
+      model: 'test-model'
+    })
+    expect(() => parseAiConnectionTestInput({ provider: 'ollama', api_key: 'test-key' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: '' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: 'test-key', extra: true })).toThrow('INVALID_ARGUMENT')
   })
 })

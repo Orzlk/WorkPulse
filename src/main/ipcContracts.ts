@@ -2,6 +2,7 @@ import type { InboxState, InboxSuggestion } from './domain/types'
 import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
+import type { AiProviderName } from './reports/aiProvider'
 import { format, isValid, parseISO } from 'date-fns'
 import { DEFAULT_STATS_DAYS, isValidStatsDays } from './lib/stats'
 
@@ -191,19 +192,41 @@ export function parseRepositoryCreateInput(value: unknown): CreateRepositoryInpu
 }
 
 export function parseRepositoryUpdateInput(value: unknown): UpdateRepositoryInput {
-  const input = object(value, ['project_id', 'enabled', 'scan_interval_minutes'])
+  const input = object(value, ['name', 'local_path', 'remote_url', 'project_id', 'enabled', 'scan_interval_minutes'])
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw invalid('enabled must be a boolean')
   const interval = input.scan_interval_minutes
   if (interval !== undefined && interval !== null && (!Number.isSafeInteger(interval) || (interval as number) < 1 || (interval as number) > 24 * 60)) {
     throw invalid('scan_interval_minutes is invalid')
   }
-  if (input.project_id === undefined && input.enabled === undefined && input.scan_interval_minutes === undefined) {
+  if (input.name === undefined && input.local_path === undefined && input.remote_url === undefined && input.project_id === undefined && input.enabled === undefined && input.scan_interval_minutes === undefined) {
     throw invalid('No repository fields to update')
   }
+  const remoteUrl = input.remote_url === null ? null : optionalString(input.remote_url, 'remote_url', 2048)
   return {
+    name: input.name === undefined ? undefined : string(input.name, 'name', { max: 200 }),
+    local_path: input.local_path === undefined ? undefined : string(input.local_path, 'local_path', { max: 4096 }),
+    remote_url: remoteUrl,
     project_id: nullableId(input.project_id, 'project_id'),
     enabled: input.enabled as boolean | undefined,
     scan_interval_minutes: interval as number | null | undefined
+  }
+}
+
+export interface ParsedAiConnectionTestInput {
+  provider: AiProviderName
+  api_key: string
+  base_url: string
+  model: string
+}
+
+export function parseAiConnectionTestInput(value: unknown): ParsedAiConnectionTestInput {
+  const input = object(value, ['provider', 'api_key', 'base_url', 'model'])
+  if (!['openai', 'anthropic', 'deepseek'].includes(input.provider as string)) throw invalid('provider is invalid')
+  return {
+    provider: input.provider as AiProviderName,
+    api_key: string(input.api_key, 'api_key', { max: 4096 }),
+    base_url: optionalString(input.base_url, 'base_url', 2048) ?? '',
+    model: optionalString(input.model, 'model', 200) ?? ''
   }
 }
 

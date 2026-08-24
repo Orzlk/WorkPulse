@@ -13,12 +13,14 @@ import {
   Download,
   CheckCircle2,
   AlertCircle,
-  FolderOpen
+  FolderOpen,
+  AlertTriangle
 } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useThemeStore } from '../stores/themeStore'
 import { useI18n, useLanguageStore } from '../stores/languageStore'
 import type { AppLanguage, ResolvedLanguage } from '../lib/i18n'
+import { isClearDataConfirmationValid } from '../lib/clearDataConfirmation'
 
 // Convert a KeyboardEvent to an Electron-style accelerator string
 function eventToAccelerator(e: KeyboardEvent): string | null {
@@ -87,6 +89,11 @@ interface Props {
 }
 
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
+type AiProvider = 'openai' | 'anthropic' | 'deepseek'
+type AiTestState =
+  | { status: 'idle' | 'testing' }
+  | { status: 'success'; latencyMs: number; model: string }
+  | { status: 'error'; message: string }
 
 interface AppUpdateState {
   status: UpdateStatus
@@ -161,9 +168,10 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [hasKey, setHasKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [provider, setProvider] = useState('openai')
+  const [provider, setProvider] = useState<AiProvider>('openai')
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('')
+  const [aiTestState, setAiTestState] = useState<AiTestState>({ status: 'idle' })
   const [reportLanguage, setReportLanguage] = useState(resolvedLanguage === 'zh' ? '中文' : 'English')
   const [style, setStyle] = useState(t('settings.styleConcise'))
   const [systemPrompt, setSystemPrompt] = useState(getDefaultSystemPrompt(resolvedLanguage))
@@ -177,6 +185,9 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     status: 'idle',
     currentVersion: ''
   })
+  const [clearDataOpen, setClearDataOpen] = useState(false)
+  const [clearDataInput, setClearDataInput] = useState('')
+  const [clearingData, setClearingData] = useState(false)
   const toast = useToast()
   const { theme, setTheme } = useThemeStore()
   const styleOptions = [
@@ -228,7 +239,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
       setHasKey(true)
     }
     const p = await window.api.settings.get('ai_provider')
-    if (p) setProvider(p)
+    if (p === 'openai' || p === 'anthropic' || p === 'deepseek') setProvider(p)
     const b = await window.api.settings.get('ai_base_url')
     if (b) setBaseUrl(b)
     const m = await window.api.settings.get('ai_model')
@@ -303,9 +314,29 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     }
   }
 
-  const handleProviderChange = async (value: string): Promise<void> => {
+  const handleProviderChange = async (value: AiProvider): Promise<void> => {
     setProvider(value)
     await window.api.settings.set('ai_provider', value)
+  }
+
+  const handleAiConnectionTest = async (): Promise<void> => {
+    if (!apiKey.trim() || aiTestState.status === 'testing') return
+    setAiTestState({ status: 'testing' })
+    try {
+      const result = await window.api.ai.testConnection({
+        provider,
+        api_key: apiKey.trim(),
+        base_url: baseUrl.trim() || undefined,
+        model: model.trim() || undefined
+      })
+      if (result.ok) {
+        setAiTestState({ status: 'success', latencyMs: result.latency_ms, model: result.model })
+      } else {
+        setAiTestState({ status: 'error', message: result.error || t('settings.aiTestUnknownError') })
+      }
+    } catch {
+      setAiTestState({ status: 'error', message: t('settings.aiTestUnknownError') })
+    }
   }
 
   const handleBaseUrlBlur = async (): Promise<void> => {
@@ -381,6 +412,29 @@ function SettingsPage({ onBack }: Props): JSX.Element {
 
   const handleInstallUpdate = async (): Promise<void> => {
     await window.api.app.installUpdate()
+  }
+
+  const clearDataLanguage: 'zh' | 'en' = resolvedLanguage === 'zh' ? 'zh' : 'en'
+  const canConfirmClearData = isClearDataConfirmationValid(clearDataInput, clearDataLanguage)
+
+  const handleClearData = async (): Promise<void> => {
+    if (!canConfirmClearData || clearingData) return
+    setClearingData(true)
+    try {
+      const result = await window.api.database.clear()
+      setClearDataOpen(false)
+      setClearDataInput('')
+      toast.success(t('settings.clearDataSuccess', {
+        logs: result.deleted.work_logs ?? 0,
+        tasks: result.deleted.tasks ?? 0,
+        path: result.backupPath
+      }))
+      window.setTimeout(() => window.location.reload(), 700)
+    } catch {
+      toast.error(t('settings.clearDataFailed'))
+    } finally {
+      setClearingData(false)
+    }
   }
 
   const getUpdateMessage = (): string => {
@@ -495,7 +549,10 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.aiProvider')}</label>
               <select
                 value={provider}
-                onChange={(e) => handleProviderChange(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (value === 'openai' || value === 'anthropic' || value === 'deepseek') void handleProviderChange(value)
+                }}
                 className="px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
               >
                 <option value="openai">OpenAI</option>
@@ -533,6 +590,31 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 placeholder={provider === 'openai' ? 'gpt-4o-mini' : provider === 'deepseek' ? 'deepseek-chat' : 'claude-sonnet-4-20250514'}
                 className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
               />
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={() => { void handleAiConnectionTest() }}
+                disabled={!apiKey.trim() || aiTestState.status === 'testing'}
+                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                <RefreshCw className={`h-4 w-4 ${aiTestState.status === 'testing' ? 'animate-spin' : ''}`} aria-hidden="true" />
+                {aiTestState.status === 'testing' ? t('settings.aiTestTesting') : t('settings.aiTestConnection')}
+              </button>
+              {!apiKey.trim() && <span className="text-xs text-zinc-400">{t('settings.aiTestMissingKey')}</span>}
+              {aiTestState.status === 'success' && (
+                <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t('settings.aiTestSuccess', { latency: aiTestState.latencyMs, model: aiTestState.model })}
+                </span>
+              )}
+              {aiTestState.status === 'error' && (
+                <span className="inline-flex min-w-0 items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="break-all">{t('settings.aiTestFailed', { message: aiTestState.message })}</span>
+                </span>
+              )}
             </div>
           </section>
 
@@ -732,6 +814,33 @@ function SettingsPage({ onBack }: Props): JSX.Element {
             </div>
           </section>
 
+          {/* Data management */}
+          <section>
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">{t('settings.dataManagement')}</h2>
+            <div className="h-px bg-zinc-200 dark:bg-zinc-700 mb-4" />
+            <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-900/60 dark:bg-red-950/20">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-medium text-red-800 dark:text-red-300">{t('settings.clearDataTitle')}</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-red-700/80 dark:text-red-300/80">{t('settings.clearDataDescription')}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t('settings.clearDataKeep')}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearDataInput('')
+                      setClearDataOpen(true)
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    {t('settings.clearDataButton')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* About */}
           <section>
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">{t('settings.updates')}</h2>
@@ -804,6 +913,60 @@ function SettingsPage({ onBack }: Props): JSX.Element {
           </section>
         </div>
       </main>
+
+      {clearDataOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-data-dialog-title"
+            className="w-full max-w-md rounded-xl border border-red-200 bg-white p-5 shadow-2xl dark:border-red-900 dark:bg-zinc-900"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden="true" />
+              <div>
+                <h2 id="clear-data-dialog-title" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('settings.clearDataDialogTitle')}</h2>
+                <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{t('settings.clearDataDialogWarning')}</p>
+              </div>
+            </div>
+            <label htmlFor="clear-data-confirmation" className="mt-4 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
+              {t('settings.clearDataTypePrompt')}
+            </label>
+            <input
+              id="clear-data-confirmation"
+              type="text"
+              value={clearDataInput}
+              onChange={(event) => setClearDataInput(event.target.value)}
+              placeholder={t('settings.clearDataTypePlaceholder')}
+              autoFocus
+              disabled={clearingData}
+              className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:ring-red-900"
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (clearingData) return
+                  setClearDataOpen(false)
+                  setClearDataInput('')
+                }}
+                disabled={clearingData}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                {t('settings.clearDataCancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleClearData() }}
+                disabled={!canConfirmClearData || clearingData}
+                className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {clearingData ? t('settings.clearDataClearing') : t('settings.clearDataConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )

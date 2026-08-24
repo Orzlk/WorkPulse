@@ -19,11 +19,15 @@ interface WorkLogStore {
   loading: boolean
   hasMore: boolean
   searchKeyword: string
+  tagFilter: string
+  projectFilter: string
   lastDeleted: WorkLog | null
-  fetchLogs: () => Promise<void>
+  fetchLogs: (tagPath?: string, projectPublicId?: string) => Promise<void>
   loadByPublicId: (publicId: string) => Promise<WorkLog | null>
   loadMore: () => Promise<void>
-  searchLogs: (keyword: string) => Promise<void>
+  searchLogs: (keyword: string, tagPath?: string, projectPublicId?: string) => Promise<void>
+  setTagFilter: (tagPath: string) => Promise<void>
+  setProjectFilter: (projectPublicId: string) => Promise<void>
   clearSearch: () => Promise<void>
   addLog: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
   deleteLog: (id: number) => Promise<void>
@@ -40,12 +44,14 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   loading: false,
   hasMore: true,
   searchKeyword: '',
+  tagFilter: '',
+  projectFilter: '',
   lastDeleted: null,
 
-  fetchLogs: async () => {
-    set({ loading: true })
+  fetchLogs: async (tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
+    set({ loading: true, tagFilter: tagPath, projectFilter: projectPublicId })
     try {
-      const logs = await window.api.worklog.list(PAGE_SIZE, 0)
+      const logs = await window.api.worklog.list(PAGE_SIZE, 0, tagPath || undefined, projectPublicId || undefined)
       set({ logs, hasMore: logs.length >= PAGE_SIZE })
     } finally {
       set({ loading: false })
@@ -65,7 +71,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     if (get().loading || !get().hasMore || get().searchKeyword) return
     set({ loading: true })
     try {
-      const more = await window.api.worklog.list(PAGE_SIZE, get().logs.length)
+      const more = await window.api.worklog.list(PAGE_SIZE, get().logs.length, get().tagFilter || undefined, get().projectFilter || undefined)
       set({
         logs: [...get().logs, ...more],
         hasMore: more.length >= PAGE_SIZE
@@ -75,11 +81,11 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     }
   },
 
-  searchLogs: async (keyword: string) => {
+  searchLogs: async (keyword: string, tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
     const requestId = searchGate.next()
-    set({ loading: true, searchKeyword: keyword })
+    set({ loading: true, searchKeyword: keyword, tagFilter: tagPath, projectFilter: projectPublicId })
     try {
-      const logs = await window.api.worklog.search(keyword)
+      const logs = await window.api.worklog.search(keyword, tagPath || undefined, projectPublicId || undefined)
       if (searchGate.isCurrent(requestId)) set({ logs })
     } finally {
       if (searchGate.isCurrent(requestId)) set({ loading: false })
@@ -89,14 +95,34 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   clearSearch: async () => {
     searchGate.next()
     set({ searchKeyword: '' })
-    await get().fetchLogs()
+    await get().fetchLogs(get().tagFilter, get().projectFilter)
+  },
+
+  setTagFilter: async (tagPath: string) => {
+    set({ tagFilter: tagPath })
+    if (get().searchKeyword) {
+      await get().searchLogs(get().searchKeyword, tagPath, get().projectFilter)
+    } else {
+      await get().fetchLogs(tagPath, get().projectFilter)
+    }
+  },
+
+  setProjectFilter: async (projectPublicId: string) => {
+    set({ projectFilter: projectPublicId })
+    if (get().searchKeyword) {
+      await get().searchLogs(get().searchKeyword, get().tagFilter, projectPublicId)
+    } else {
+      await get().fetchLogs(get().tagFilter, projectPublicId)
+    }
   },
 
   addLog: async (content: string, category?: string, associations?: WorkItemAssociations) => {
     const log = await window.api.worklog.add(content, category, associations)
     // If searching, re-run search; otherwise prepend
     if (get().searchKeyword) {
-      await get().searchLogs(get().searchKeyword)
+      await get().searchLogs(get().searchKeyword, get().tagFilter, get().projectFilter)
+    } else if (get().tagFilter || get().projectFilter) {
+      await get().fetchLogs(get().tagFilter, get().projectFilter)
     } else {
       set({ logs: [log, ...get().logs] })
     }
@@ -116,7 +142,9 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     set({ lastDeleted: null })
     // Refresh to get correct ordering
     if (get().searchKeyword) {
-      await get().searchLogs(get().searchKeyword)
+      await get().searchLogs(get().searchKeyword, get().tagFilter, get().projectFilter)
+    } else if (get().tagFilter || get().projectFilter) {
+      await get().fetchLogs(get().tagFilter, get().projectFilter)
     } else {
       await get().fetchLogs()
     }
@@ -130,7 +158,11 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     const updated = await window.api.worklog.update(id, content, category, created_at, associations)
     if (updated) {
       if (get().searchKeyword) {
-        await get().searchLogs(get().searchKeyword)
+        await get().searchLogs(get().searchKeyword, get().tagFilter, get().projectFilter)
+        return
+      }
+      if (get().tagFilter || get().projectFilter) {
+        await get().fetchLogs(get().tagFilter, get().projectFilter)
         return
       }
       const logs = get()

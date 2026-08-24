@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
-  Check,
+  AtSign,
   ClipboardEdit,
   Download,
-  PenLine,
+  Hash,
+  Image,
+  List,
+  ListOrdered,
+  MoreHorizontal,
   Pencil,
   Search,
+  Send,
+  Type,
   Trash2,
   Undo2,
   Upload,
@@ -13,46 +19,108 @@ import {
 } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useWorkLogStore } from '../stores/worklogStore'
-import { formatDate, formatTime, groupLogsByDate } from '../lib/dateUtils'
+import { groupLogsByDate } from '../lib/dateUtils'
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
-import { extractHashTags } from '../lib/workspaceInteractions'
+import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { TagHighlightTextarea } from '../components/TagHighlightTextarea'
+import { InteractiveMarkdown } from '../components/InteractiveMarkdown'
+import { TagTreeSidebar } from '../components/TagTreeSidebar'
+import { buildTagTree, type TagTreeNode } from '../lib/tagTree'
+import type { Tag } from '../lib/workspaceTypes'
 
 function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.Element {
-  const { logs, fetchLogs, loadByPublicId, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, updateLog } =
+  const { logs, fetchLogs, loadByPublicId, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, tagFilter, setTagFilter, projectFilter, setProjectFilter } =
     useWorkLogStore()
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
   const [shaking, setShaking] = useState(false)
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editContent, setEditContent] = useState('')
-  const [editCategory, setEditCategory] = useState('')
-  const [editDate, setEditDate] = useState('')
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null)
   const [projectId, setProjectId] = useState('')
   const [repositoryId, setRepositoryId] = useState('')
   const [tagsInput, setTagsInput] = useState('')
-  const [editProjectId, setEditProjectId] = useState('')
-  const [editRepositoryId, setEditRepositoryId] = useState('')
-  const [editTagsInput, setEditTagsInput] = useState('')
   const [categorySuggestions, setCategorySuggestions] = useState<string[]>([])
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [projectMention, setProjectMention] = useState<ProjectMentionRange | null>(null)
+  const [tagMention, setTagMention] = useState<ProjectMentionRange | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [tagTree, setTagTree] = useState<TagTreeNode[]>([])
+  const [tagOptions, setTagOptions] = useState<Tag[]>([])
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const projectSelectRef = useRef<HTMLSelectElement>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const toast = useToast()
-  const { resolvedLanguage, t } = useI18n()
+  const { t } = useI18n()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
   const repositories = useRepositoryStore((state) => state.items)
   const fetchRepositories = useRepositoryStore((state) => state.fetch)
+  const projectSuggestions = useMemo(() => {
+    if (!projectMention) return []
+    const query = projectMention.query.trim().toLocaleLowerCase()
+    return projects
+      .filter((project) => !query || project.name.toLocaleLowerCase().includes(query))
+      .slice(0, 8)
+  }, [projects, projectMention])
+
+  const tagSuggestions = useMemo(() => {
+    if (!tagMention) return []
+    const query = tagMention.query.trim().toLocaleLowerCase()
+    return tagOptions
+      .filter((tag) => !query || tag.path.toLocaleLowerCase().includes(query))
+      .slice(0, 8)
+  }, [tagMention, tagOptions])
+
+  const refreshTagTree = (): Promise<void> =>
+    window.api.tag.list({ limit: 200, offset: 0 })
+      .then((page) => {
+        setTagTree(buildTagTree(page.items))
+        setTagOptions(page.items)
+      })
+      .catch(() => {
+        setTagTree([])
+        setTagOptions([])
+      })
 
   useEffect(() => {
     void fetchLogs()
     void fetchProjects()
     void fetchRepositories()
+    void refreshTagTree()
     window.api.worklog.categories().then(setCategorySuggestions).catch(() => setCategorySuggestions([]))
     inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!(event.target instanceof Element) || !event.target.closest('.log-card-menu')) {
+        setOpenMenuId(null)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpenMenuId(null)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = window.api.on.worklogEditorChanged(() => {
+      const state = useWorkLogStore.getState()
+      if (state.searchKeyword) {
+        void state.searchLogs(state.searchKeyword, state.tagFilter || undefined, state.projectFilter || undefined)
+      } else {
+        void state.fetchLogs(state.tagFilter || undefined, state.projectFilter || undefined)
+      }
+      void refreshTagTree()
+    })
+    return unsubscribe
   }, [])
 
   useEffect(() => {
@@ -67,14 +135,6 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
     })
   }, [focusPublicId, loadByPublicId])
 
-  const parseCategory = (text: string): { content: string; category: string } => {
-    const match = text.match(/#(\S+)\s*/)
-    if (match) {
-      return { content: text.replace(match[0], '').trim(), category: match[1] }
-    }
-    return { content: text, category: '' }
-  }
-
   const handleSubmit = async (): Promise<void> => {
     const trimmed = input.trim()
     if (!trimmed) {
@@ -88,20 +148,111 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
     }
 
     try {
-      const { content, category } = parseCategory(trimmed)
-      await addLog(content, category, { project_id: projectId || null, repository_id: repositoryId || null, tag_names: extractHashTags(`${trimmed} ${tagsInput}`).tags })
+      await addLog(trimmed, '', { project_id: projectId || null, repository_id: repositoryId || null, tag_names: extractHashTags(`${trimmed} ${tagsInput}`).tags })
+      await refreshTagTree()
       setInput('')
+      setProjectMention(null)
+      setTagMention(null)
     } catch {
       setError(t('worklog.saveError'))
     }
     inputRef.current?.focus()
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+  const syncComposerMention = (value: string, cursor: number): void => {
+    const nextProjectMention = findProjectMention(value, cursor)
+    const nextTagMention = findTagMention(value, cursor)
+    if (nextProjectMention && (!nextTagMention || nextProjectMention.start > nextTagMention.start)) {
+      setProjectMention(nextProjectMention)
+      setTagMention(null)
+    } else if (nextTagMention) {
+      setProjectMention(null)
+      setTagMention(nextTagMention)
+    } else {
+      setProjectMention(null)
+      setTagMention(null)
     }
+    setMentionIndex(0)
+  }
+
+  const handleComposerChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
+    const value = event.target.value
+    setInput(value)
+    syncComposerMention(value, event.target.selectionStart)
+  }
+
+  const selectProjectMention = (projectPublicId: string): void => {
+    if (!projectMention) return
+    const project = projects.find((item) => item.public_id === projectPublicId)
+    if (!project) return
+    const next = replaceProjectMention(input, projectMention, `@${project.name}`)
+    setInput(next.text)
+    setProjectId(project.public_id)
+    setProjectMention(null)
+    setTagMention(null)
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(next.cursor, next.cursor)
+    })
+  }
+
+  const selectTagMention = (tagPath: string): void => {
+    if (!tagMention) return
+    const next = replaceProjectMention(input, tagMention, `#${tagPath}`)
+    setInput(next.text)
+    setTagMention(null)
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(next.cursor, next.cursor)
+    })
+  }
+
+  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    const activeMention = projectMention ?? tagMention
+    const activeSuggestions = projectMention ? projectSuggestions : tagSuggestions
+    if (event.key === 'Escape' && activeMention) {
+      event.preventDefault()
+      setProjectMention(null)
+      setTagMention(null)
+      return
+    }
+    if (!activeMention || activeSuggestions.length === 0) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setMentionIndex((current) => (current + 1) % activeSuggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setMentionIndex((current) => (current - 1 + activeSuggestions.length) % activeSuggestions.length)
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      if (projectMention) {
+        selectProjectMention(projectSuggestions[mentionIndex]?.public_id ?? projectSuggestions[0].public_id)
+      } else {
+        selectTagMention(tagSuggestions[mentionIndex]?.path ?? tagSuggestions[0].path)
+      }
+    }
+  }
+
+  const insertComposerText = (text: string): void => {
+    const textarea = inputRef.current
+    if (!textarea) {
+      setInput((current) => current + text)
+      return
+    }
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const next = `${input.slice(0, start)}${text}${input.slice(end)}`
+    setInput(next)
+    syncComposerMention(next, start + text.length)
+    requestAnimationFrame(() => {
+      textarea.focus()
+      const cursor = start + text.length
+      textarea.setSelectionRange(cursor, cursor)
+    })
   }
 
   const handleSearchChange = (value: string): void => {
@@ -121,8 +272,17 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
     clearSearch()
   }
 
+  const handleTagSelect = (path: string): void => {
+    void setTagFilter(path)
+  }
+
+  const handleProjectSelect = (publicId: string): void => {
+    void setProjectFilter(projectFilter === publicId ? '' : publicId)
+  }
+
   const handleDelete = async (id: number): Promise<void> => {
     await deleteLog(id)
+    await refreshTagTree()
     setDeletingId(null)
     toast.success(t('worklog.deleted'))
   }
@@ -132,48 +292,102 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
     toast.success(t('worklog.restored'))
   }
 
-  const handleEditSave = async (): Promise<void> => {
-    if (!editingId) return
-    const trimmedContent = editContent.trim()
-    if (!trimmedContent) return
-    const log = logs.find((l) => l.id === editingId)
-    const timePart = log ? log.created_at.slice(10) : ''
-    const newCreatedAt = editDate ? editDate + timePart : undefined
-    try {
-      await updateLog(editingId, trimmedContent, editCategory.trim(), newCreatedAt, { project_id: editProjectId || null, repository_id: editRepositoryId || null, tag_names: extractHashTags(editTagsInput).tags })
-      setEditingId(null)
-      toast.success(t('worklog.editSave'))
-    } catch {
-      setError(t('worklog.saveError'))
-    }
-  }
-
-  const handleEditCancel = (): void => {
-    setEditingId(null)
-  }
-
   const grouped = groupLogsByDate(logs)
+  const activeMention = projectMention ?? tagMention
+  const activeSuggestions = projectMention ? projectSuggestions : tagSuggestions
+  const mentionMenuId = projectMention ? 'worklog-project-mention-list' : 'worklog-tag-mention-list'
 
   return (
     <div className="worklog-page">
+      <div className="worklog-layout">
+        <TagTreeSidebar
+          nodes={tagTree}
+          selectedPath={tagFilter}
+          allLabel={t('workspace.allTags')}
+          emptyLabel={t('workspace.noTags')}
+          onSelect={handleTagSelect}
+        />
+        <main className="worklog-main">
       {/* Input */}
       <div className="quick-entry-section">
         <div className={`quick-entry ${shaking ? 'animate-shake is-error' : ''}`}>
-          <PenLine className="quick-entry-icon" aria-hidden="true" />
-          <input
+          <TagHighlightTextarea
             ref={inputRef}
-            type="text"
+            rows={5}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={handleComposerChange}
+            onKeyDown={handleComposerKeyDown}
             placeholder={t('worklog.inputPlaceholder')}
             aria-label={t('worklog.inputAria')}
-            list="worklog-category-suggestions"
-            className="quick-entry-input"
+            aria-controls={activeMention ? mentionMenuId : undefined}
+            aria-expanded={Boolean(activeMention)}
           />
+          {activeMention && (
+            <div id={mentionMenuId} className={`project-mention-menu ${tagMention ? 'tag-mention-menu' : ''}`} role="listbox" aria-label={t(projectMention ? 'worklog.projectMentionSuggestions' : 'worklog.tagMentionSuggestions')}>
+              {activeSuggestions.length > 0 ? projectMention ? projectSuggestions.map((project, index) => (
+                <button
+                  key={project.public_id}
+                  type="button"
+                  role="option"
+                  aria-selected={index === mentionIndex}
+                  className={`project-mention-option ${index === mentionIndex ? 'is-selected' : ''}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectProjectMention(project.public_id)}
+                >
+                  <span className="project-mention-symbol">@</span>
+                  <span>{project.name}</span>
+                </button>
+              )) : tagSuggestions.map((tag, index) => (
+                <button
+                  key={tag.public_id}
+                  type="button"
+                  role="option"
+                  aria-selected={index === mentionIndex}
+                  className={`project-mention-option tag-mention-option ${index === mentionIndex ? 'is-selected' : ''}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectTagMention(tag.path)}
+                >
+                  <span className="tag-mention-symbol">#</span>
+                  <span>{tag.path}</span>
+                </button>
+              )) : (
+                <p className="project-mention-empty">{t(projectMention ? 'worklog.projectMentionEmpty' : 'worklog.tagMentionEmpty')}</p>
+              )}
+            </div>
+          )}
+          <div className="quick-entry-footer">
+            <div className="quick-entry-actions" aria-label={t('worklog.inputTools')}>
+              <button type="button" onClick={() => insertComposerText('#')} aria-label={t('worklog.insertTag')} title={t('worklog.insertTag')}>
+                <Hash aria-hidden="true" />
+              </button>
+              <button type="button" disabled aria-label={t('worklog.attachmentsComingSoon')} title={t('worklog.attachmentsComingSoon')}>
+                <Image aria-hidden="true" />
+              </button>
+              <span className="quick-entry-divider" aria-hidden="true" />
+              <button type="button" disabled aria-label={t('worklog.formatComingSoon')} title={t('worklog.formatComingSoon')}>
+                <Type aria-hidden="true" />
+              </button>
+              <button type="button" onClick={() => insertComposerText('- ')} aria-label={t('worklog.insertBulletList')} title={t('worklog.insertBulletList')}>
+                <List aria-hidden="true" />
+              </button>
+              <button type="button" onClick={() => insertComposerText('1. ')} aria-label={t('worklog.insertNumberedList')} title={t('worklog.insertNumberedList')}>
+                <ListOrdered aria-hidden="true" />
+              </button>
+              <span className="quick-entry-divider" aria-hidden="true" />
+              <button type="button" onClick={() => insertComposerText('@')} aria-label={t('worklog.chooseAssociation')} title={t('worklog.chooseAssociation')}>
+                <AtSign aria-hidden="true" />
+              </button>
+            </div>
+            <div className="quick-entry-submit">
+              <span aria-label={t('worklog.characterCount')}>{input.length}</span>
+              <button type="button" onClick={() => void handleSubmit()} aria-label={t('worklog.submit')} title={t('worklog.submit')}>
+                <Send aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
         {error && <p className="quick-entry-error">{error}</p>}
-        <div className="quick-create-associations worklog-associations"><label>{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select></label><label>{t('workspace.tags')}<input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder="#tag1 #tag2" /></label></div>
+        <div className="quick-create-associations worklog-associations"><label>{t('workspace.project')}<select ref={projectSelectRef} value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select></label><label>{t('workspace.tags')}<input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder="#tag1 #tag2" /></label></div>
       </div>
 
       {/* Search + Export */}
@@ -214,6 +428,7 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
                     : ''
                   toast.success(`${message}${attachmentMessage}`)
                   await fetchLogs()
+                  await refreshTagTree()
                 }
               } catch {
                 toast.error(t('worklog.importFailed'))
@@ -285,9 +500,6 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
         <div role="list" className="log-timeline">
           {Array.from(grouped.entries()).map(([dateKey, dateLogs]) => (
             <section key={dateKey} role="group" className="log-day">
-              <h3 className="log-day-title">
-                {formatDate(dateKey + 'T00:00:00', resolvedLanguage)}
-              </h3>
               <div className="log-day-items stagger-children">
                 {dateLogs.map((log) => (
                   <div
@@ -297,117 +509,79 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
                     className="log-row group"
                   >
                     <span className="log-dot" aria-hidden="true" />
-                    {editingId === log.id ? (
-                      <>
-                        <div className="log-content flex-wrap">
-                          <input
-                            type="text"
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleEditSave()
-                              if (e.key === 'Escape') handleEditCancel()
-                            }}
-                            className="w-full sm:min-w-[180px] sm:flex-1 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:border-blue-400 bg-white dark:bg-zinc-700 dark:text-zinc-100"
-                            autoFocus
-                          />
-                          <label className="sr-only" htmlFor={`edit-project-${log.id}`}>{t('workspace.project')}</label>
-                          <select id={`edit-project-${log.id}`} value={editProjectId} onChange={(e) => setEditProjectId(e.target.value)} className="w-full sm:w-36 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select>
-                          <label className="sr-only" htmlFor={`edit-repository-${log.id}`}>{t('workspace.repository')}</label>
-                          <select id={`edit-repository-${log.id}`} value={editRepositoryId} onChange={(e) => setEditRepositoryId(e.target.value)} className="w-full sm:w-36 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100"><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}</select>
-                          <input type="text" value={editTagsInput} onChange={(e) => setEditTagsInput(e.target.value)} placeholder={t('workspace.tagsPlaceholder')} className="w-full sm:w-32 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 dark:text-zinc-100" />
-                          <input
-                            type="text"
-                            value={editCategory}
-                            onChange={(e) => setEditCategory(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleEditSave()
-                              if (e.key === 'Escape') handleEditCancel()
-                            }}
-                            placeholder="#tag"
-                            list="worklog-category-suggestions"
-                            className="w-full sm:w-28 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:border-blue-400 bg-white dark:bg-zinc-700 dark:text-zinc-100"
-                          />
-                          <input
-                            type="date"
-                            value={editDate}
-                            onChange={(e) => setEditDate(e.target.value)}
-                            className="w-full sm:w-36 px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:border-blue-400 bg-white dark:bg-zinc-700 dark:text-zinc-100"
-                          />
+                    <div className="log-card-header">
+                      <time className="log-card-time" dateTime={log.created_at}>{log.created_at.slice(0, 16).replace('T', ' ')}</time>
+                      {deletingId === log.id ? (
+                        <div className="log-delete-confirm" role="group" aria-label={t('worklog.deleteAria')}>
+                          <button type="button" onClick={() => void handleDelete(log.id)}>{t('common.confirm')}</button>
+                          <button type="button" onClick={() => setDeletingId(null)}>{t('common.cancel')}</button>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                      ) : (
+                        <div className="log-card-menu">
                           <button
-                            onClick={handleEditSave}
-                            className="p-1 text-green-500 hover:text-green-600"
-                            title={t('worklog.editSave')}
+                            type="button"
+                            className="log-menu-trigger"
+                            onClick={() => setOpenMenuId((current) => current === log.id ? null : log.id)}
+                            aria-label={t('worklog.moreActions')}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuId === log.id}
                           >
-                            <Check className="w-3.5 h-3.5" />
+                            <MoreHorizontal aria-hidden="true" />
                           </button>
-                          <button
-                            onClick={handleEditCancel}
-                            className="p-1 text-zinc-400 hover:text-zinc-600"
-                            title={t('worklog.editCancel')}
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="log-content">
-                          <span className="log-content-text">{log.content}</span>
-                          {log.category && (
-                            <span className="log-category">
-                              {log.category}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-zinc-400">{formatTime(log.created_at)}</span>
-                          {deletingId === log.id ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleDelete(log.id)}
-                                className="text-xs text-red-500 hover:text-red-700 px-1"
-                              >
-                                {t('common.confirm')}
+                          {openMenuId === log.id && (
+                            <div className="log-card-menu-popover" role="menu">
+                              <button type="button" role="menuitem" onClick={() => { setOpenMenuId(null); void window.api.worklogEditor.open(log.public_id) }}>
+                                <Pencil aria-hidden="true" />{t('worklog.edit')}
                               </button>
-                              <button
-                                onClick={() => setDeletingId(null)}
-                                className="text-xs text-zinc-400 hover:text-zinc-600 px-1"
-                              >
-                                {t('common.cancel')}
+                              <button type="button" role="menuitem" onClick={() => { setOpenMenuId(null); setDeletingId(log.id) }}>
+                                <Trash2 aria-hidden="true" />{t('common.delete')}
                               </button>
                             </div>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => {
-                                  setEditingId(log.id)
-                                  setEditContent(log.content)
-                                  setEditCategory(log.category)
-                                  setEditDate(log.created_at.slice(0, 10))
-                                  setEditProjectId(log.project_id ?? '')
-                                  setEditRepositoryId(log.repository_id ?? '')
-                                  setEditTagsInput(log.tag_names.map((tag) => `#${tag}`).join(' '))
-                                }}
-                                className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-blue-500 transition-all"
-                                aria-label={t('worklog.editAria')}
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => setDeletingId(log.id)}
-                                className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-500 transition-all"
-                                aria-label={t('worklog.deleteAria')}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
                           )}
                         </div>
-                      </>
-                    )}
+                      )}
+                    </div>
+                     <div className="log-content">
+                           <div className="log-content-markdown">
+                             <InteractiveMarkdown
+                               content={log.content}
+                               projectId={log.project_id}
+                               projectName={projects.find((project) => project.public_id === log.project_id)?.name}
+                               selectedProjectId={projectFilter}
+                               selectedTagPath={tagFilter}
+                               onProjectClick={handleProjectSelect}
+                               onTagClick={handleTagSelect}
+                             />
+                           </div>
+                           {(log.project_id || log.tag_names.length > 0 || log.category) && (
+                             <div className="log-associations" aria-label={t('workspace.associations')}>
+                               {log.project_id && (
+                                 <button
+                                   type="button"
+                                   className={`log-project-badge ${projectFilter === log.project_id ? 'is-selected' : ''}`}
+                                   onClick={() => handleProjectSelect(log.project_id as string)}
+                                 >
+                                   {projects.find((project) => project.public_id === log.project_id)?.name ?? log.project_id}
+                                 </button>
+                               )}
+                              {log.tag_names.map((tag) => (
+                                <button
+                                  type="button"
+                                  key={tag}
+                                  className={`log-tag-badge ${tagFilter === tag ? 'is-selected' : ''}`}
+                                  onClick={() => handleTagSelect(tag)}
+                                >
+                                  #{tag}
+                                </button>
+                              ))}
+                              {log.category && (
+                                <span className="log-category">
+                                  {log.category}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                   </div>
                 ))}
               </div>
@@ -448,6 +622,8 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
           </button>
         </div>
       )}
+        </main>
+      </div>
       <datalist id="worklog-category-suggestions">
         {categorySuggestions.map((category) => <option key={category} value={`#${category}`} />)}
       </datalist>

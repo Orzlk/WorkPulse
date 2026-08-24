@@ -61,6 +61,7 @@ export interface Tag {
   name: string
   path: string
   parent_id: string | null
+  usage_count?: number
 }
 
 export interface Page<T> {

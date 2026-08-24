@@ -31,7 +31,7 @@ export function parseFlomoHtml(html: string): FlomoImportParseResult {
     const time = extractClassInner(block, 'time')
     const rawContent = extractClassInner(block, 'content')
     const createdAt = decodeHtmlEntities(time ?? '').trim()
-    const content = toPlainText(rawContent ?? '')
+    const content = toMarkdown(rawContent ?? '')
     if (!isValidFlomoTime(createdAt) || !content) continue
 
     const { content: body, tags } = extractTags(content)
@@ -99,24 +99,50 @@ function isValidFlomoTime(value: string): boolean {
     date.getSeconds() === Number(second)
 }
 
-function toPlainText(html: string): string {
+function toMarkdown(html: string): string {
   const withoutUnsafe = html
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-  const withLineBreaks = withoutUnsafe
+  const withLists = withoutUnsafe
+    .replace(/<ol\b[^>]*>([\s\S]*?)<\/ol\s*>/gi, (_match, inner: string) => renderList(inner, true))
+    .replace(/<ul\b[^>]*>([\s\S]*?)<\/ul\s*>/gi, (_match, inner: string) => renderList(inner, false))
+  const withBlocks = withLists
+    .replace(/<p\b[^>]*>([\s\S]*?)<\/p\s*>/gi, (_match, inner: string) => `${convertInlineHtml(inner)}\n\n`)
+    .replace(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]\s*>/gi, (_match, inner: string) => `**${convertInlineHtml(inner)}**\n\n`)
     .replace(/<br\s*\/?\s*>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '\n- ')
-    .replace(/<\/(?:li|p|div|ol|ul|h[1-6])\s*>/gi, '\n')
+    .replace(/<\/(?:div|section)\s*>/gi, '\n\n')
+  const stripped = withBlocks
     .replace(/<[^>]+>/g, '')
 
-  return decodeHtmlEntities(withLineBreaks)
+  return decodeHtmlEntities(stripped)
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.trim())
     .join('\n')
-    .replace(/\n{2,}/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+function renderList(html: string, ordered: boolean): string {
+  let index = 0
+  const lines = html.replace(/<li\b[^>]*>([\s\S]*?)<\/li\s*>/gi, (_match, inner: string) => {
+    const content = convertInlineHtml(inner).replace(/\s*\n\s*/g, ' ').trim()
+    if (!content) return ''
+    index++
+    return `${ordered ? `${index}.` : '-'} ${content}\n`
+  })
+  return `${lines.trim()}\n\n`
+}
+
+function convertInlineHtml(html: string): string {
+  return html
+    .replace(/<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)\s*>/gi, '**$1**')
+    .replace(/<(?:em|i)\b[^>]*>([\s\S]*?)<\/(?:em|i)\s*>/gi, '*$1*')
+    .replace(/<(?:del|s)\b[^>]*>([\s\S]*?)<\/(?:del|s)\s*>/gi, '~~$1~~')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/?(?:p|span)\b[^>]*>/gi, '')
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a\s*>/gi, '$1')
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -141,18 +167,7 @@ function extractTags(content: string): { content: string; tags: string[] } {
     const tag = cleanTag(match[1])
     if (tag && !tags.includes(tag)) tags.push(tag)
   }
-
-  const lines = content.split('\n')
-  const firstContentLine = lines.findIndex((line) => line.trim())
-  if (firstContentLine >= 0 && isStandaloneTagLine(lines[firstContentLine])) {
-    lines.splice(firstContentLine, 1)
-  }
-
-  return { content: lines.join('\n').replace(/\n{2,}/g, '\n').trim(), tags }
-}
-
-function isStandaloneTagLine(line: string): boolean {
-  return line.trim().split(/\s+/).every((token) => /^#[^\s#]+$/.test(token))
+  return { content: content.replace(/\n{3,}/g, '\n\n').trim(), tags }
 }
 
 function cleanTag(value: string): string {

@@ -130,7 +130,7 @@ describe('database transfer package', () => {
 
     const exported = createDatabaseExport(database, context(database))
 
-    expect(exported.schema_version).toBe(11)
+    expect(exported.schema_version).toBe(12)
     expect(exported.tables.projects).toHaveLength(1)
     expect(JSON.stringify(exported)).not.toContain('secret-value')
     expect(exported.tables.settings).toBeUndefined()

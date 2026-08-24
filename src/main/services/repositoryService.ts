@@ -45,6 +45,9 @@ export interface CreateRepositoryInput {
 }
 
 export interface UpdateRepositoryInput {
+  name?: string
+  local_path?: string
+  remote_url?: string | null
   project_id?: string | null
   enabled?: boolean
   scan_interval_minutes?: number | null
@@ -175,12 +178,24 @@ export class RepositoryService {
 
   update(publicId: string, input: UpdateRepositoryInput): Repository | null {
     this.assertWorkspace()
+    const name = input.name === undefined ? undefined : input.name.trim()
+    const localPath = input.local_path === undefined ? undefined : input.local_path.trim()
+    if (input.name !== undefined && !name) throw new Error('Repository name is required')
+    if (input.local_path !== undefined && !localPath) throw new Error('Repository local path is required')
     if (input.project_id !== undefined) this.assertProject(input.project_id)
     if (input.scan_interval_minutes !== undefined && input.scan_interval_minutes !== null && input.scan_interval_minutes <= 0) {
       throw new Error('Repository scan interval must be positive')
     }
     const fields: string[] = []
     const values: unknown[] = []
+    if (name !== undefined) {
+      fields.push('name = ?')
+      values.push(name)
+    }
+    if (input.remote_url !== undefined) {
+      fields.push('remote_url = ?')
+      values.push(input.remote_url?.trim() || null)
+    }
     if (input.project_id !== undefined) {
       fields.push('project_id = (SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL)')
       values.push(this.context.workspace_id, input.project_id)
@@ -193,18 +208,56 @@ export class RepositoryService {
       fields.push('scan_interval_minutes = ?')
       values.push(input.scan_interval_minutes)
     }
-    if (fields.length === 0) return this.get(publicId)
+    const hasBindingUpdate = localPath !== undefined
+    if (fields.length === 0 && !hasBindingUpdate) return this.get(publicId)
 
     const now = new Date().toISOString()
     const transaction = this.database.transaction(() => {
-      this.database.prepare(`
-        UPDATE repositories SET ${fields.join(', ')}, updated_by = ?, updated_at = ?
-        WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
-      `).run(...values, this.context.user_id, now, this.context.workspace_id, publicId)
+      if (hasBindingUpdate) {
+        fields.push('last_scanned_at = NULL', 'last_failed_at = NULL', 'last_scan_error = NULL')
+      }
+      if (fields.length > 0) {
+        this.database.prepare(`
+          UPDATE repositories SET ${fields.join(', ')}, updated_by = ?, updated_at = ?
+          WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
+        `).run(...values, this.context.user_id, now, this.context.workspace_id, publicId)
+      }
+      if (hasBindingUpdate) {
+        const repository = this.findRow(publicId)
+        if (!repository) return null
+        this.database.prepare(`
+          UPDATE repository_bindings
+          SET local_path = ?, branch = NULL, updated_by = ?, updated_at = ?
+          WHERE id = ? AND repository_id = ? AND workspace_id = ? AND deleted_at IS NULL
+        `).run(localPath, this.context.user_id, now, repository.binding_id, repository.id, this.context.workspace_id)
+      }
       const row = this.findRow(publicId)
       if (!row) return null
       const repository = toRepository(row)
       this.enqueueSync('repository', repository.public_id, 'update', repository, now)
+      return repository
+    })
+    return transaction()
+  }
+
+  softDelete(publicId: string): Repository | null {
+    this.assertWorkspace()
+    const transaction = this.database.transaction(() => {
+      const row = this.findRow(publicId)
+      if (!row) return null
+      const now = new Date().toISOString()
+      this.database.prepare(`
+        UPDATE repositories
+        SET deleted_at = ?, updated_by = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+      `).run(now, this.context.user_id, now, row.id, this.context.workspace_id)
+      this.database.prepare(`
+        UPDATE repository_bindings
+        SET deleted_at = ?, updated_by = ?, updated_at = ?
+        WHERE repository_id = ? AND workspace_id = ? AND deleted_at IS NULL
+      `).run(now, this.context.user_id, now, row.id, this.context.workspace_id)
+      const repository = toRepository(row)
+      this.enqueueSync('repository', repository.public_id, 'delete', { ...repository, deleted_at: now }, now)
       return repository
     })
     return transaction()
@@ -231,7 +284,7 @@ export class RepositoryService {
         } satisfies RepositoryBinding,
         { since: this.getSince(repository.last_scanned_at, now), until: now }
       )
-      const insertedCount = this.persistScan(repository, scan.commits, now)
+      const insertedCount = this.persistScan(repository, scan.commits, scan.branch, now)
       return { repository_id: publicId, status: 'succeeded', inserted_count: insertedCount }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Git 扫描失败'
@@ -311,7 +364,7 @@ export class RepositoryService {
     return nowMs - lastMs < intervalMinutes * 60 * 1000
   }
 
-  private persistScan(repository: RepositoryRow, commits: GitCommitSummary[], now: string): number {
+  private persistScan(repository: RepositoryRow, commits: GitCommitSummary[], branch: string | null, now: string): number {
     const persist = this.database.transaction(() => {
       const insert = this.database.prepare(`
         INSERT OR IGNORE INTO git_commits (
@@ -353,6 +406,11 @@ export class RepositoryService {
         }
       }
       this.database.prepare(`
+        UPDATE repository_bindings
+        SET branch = ?, updated_by = ?, updated_at = ?
+        WHERE id = ? AND repository_id = ? AND workspace_id = ? AND deleted_at IS NULL
+      `).run(branch || 'HEAD', this.context.user_id, now, repository.binding_id, repository.id, this.context.workspace_id)
+      this.database.prepare(`
         UPDATE repositories
         SET last_scanned_at = ?, last_failed_at = NULL, last_scan_error = NULL,
           updated_by = ?, updated_at = ?
@@ -385,7 +443,7 @@ export class RepositoryService {
   private enqueueSync(
     entityType: string,
     entityPublicId: string,
-    operationType: 'create' | 'update',
+    operationType: 'create' | 'update' | 'delete',
     payload: unknown,
     now: string
   ): void {

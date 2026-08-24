@@ -17,6 +17,7 @@ import {
   getSetting,
   setSetting,
   deleteSetting,
+  clearWorkspaceData,
   addTask,
   getTasks,
   getTaskByPublicId,
@@ -35,6 +36,7 @@ import { TagService } from './services/tagService'
 import { SearchService } from './services/searchService'
 import { RepositoryService } from './services/repositoryService'
 import { ReportService } from './reports/reportService'
+import { testAiConnection } from './reports/aiProvider'
 import {
   IpcContractError,
   id,
@@ -44,6 +46,7 @@ import {
   parseReportListInput,
   parseReportRequest,
   parseStatsDays,
+  parseAiConnectionTestInput,
   parseRepositoryCreateInput,
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
@@ -105,8 +108,8 @@ export function registerIpcHandlers(): void {
     return addWorkLog(content, category, null, undefined, parseWorkItemAssociations(associations))
   })
 
-  ipcMain.handle('worklog:list', (_event, limit?: number, offset?: number) => {
-    return getWorkLogs(limit, offset)
+  ipcMain.handle('worklog:list', (_event, limit?: number, offset?: number, tagPath?: string, projectPublicId?: string) => {
+    return getWorkLogs(limit, offset, tagPath, projectPublicId)
   })
 
   ipcMain.handle('worklog:get', guarded((publicId: unknown) => getWorkLogByPublicId(id(publicId, 'worklog id'))))
@@ -115,8 +118,8 @@ export function registerIpcHandlers(): void {
     return getWorkLogsByDateRange(from, to)
   })
 
-  ipcMain.handle('worklog:search', (_event, keyword: string) => {
-    return searchWorkLogs(keyword)
+  ipcMain.handle('worklog:search', (_event, keyword: string, tagPath?: string, projectPublicId?: string) => {
+    return searchWorkLogs(keyword, undefined, tagPath, projectPublicId)
   })
 
   ipcMain.handle('worklog:categories', () => {
@@ -137,7 +140,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'worklog:restore',
-    (_event, log: { content: string; category: string; created_at: string; task_id: number | null }) => {
+    (_event, log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; repository_id: string | null; tag_names: string[] }) => {
       return restoreWorkLog(log)
     }
   )
@@ -167,6 +170,16 @@ export function registerIpcHandlers(): void {
       throw new IpcContractError('INVALID_ARGUMENT', 'Report content is required')
     }
     return services().reports.updateContent(id(publicId, 'report id'), value.content)
+  }))
+
+  ipcMain.handle('ai:testConnection', guarded((input: unknown) => {
+    const value = parseAiConnectionTestInput(input)
+    return testAiConnection({
+      provider: value.provider,
+      apiKey: value.api_key,
+      baseUrl: value.base_url,
+      model: value.model
+    })
   }))
 
   // --- Project / inbox / tag / search / repository domain APIs ---
@@ -214,6 +227,7 @@ export function registerIpcHandlers(): void {
     const value = parseRepositoryUpdateInput(input)
     return services().repositories.update(id(publicId, 'repository id'), value)
   }))
+  ipcMain.handle('repository:delete', guarded((publicId: unknown) => services().repositories.softDelete(id(publicId, 'repository id'))))
   ipcMain.handle('repository:scan', guarded((publicId: unknown) => services().repositories.scanOne(id(publicId, 'repository id'))))
   ipcMain.handle('repository:scanAll', guarded(async () => {
     const results = await services().repositories.scanAllEnabled()
@@ -269,6 +283,8 @@ export function registerIpcHandlers(): void {
     const payload = pendingImports.take(action.token, String(event.sender.id))
     return mergeDatabaseImport(getDatabase(), getDefaultWorkspaceContext(), payload)
   }))
+
+  ipcMain.handle('database:clear', guarded(() => clearWorkspaceData()))
 
   // --- Tasks ---
 

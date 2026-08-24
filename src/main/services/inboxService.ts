@@ -60,7 +60,6 @@ export class InboxService {
         input.tag_names ?? [],
         (tag) => this.tags.assignToInbox(this.context, inboxId, tag)
       )
-      this.updateSearchIndex(inboxId, item.content)
       this.enqueueSync('inbox_item', item.public_id, 'create', item)
       return item
     })
@@ -283,17 +282,6 @@ export class InboxService {
       now,
       now
     )
-  }
-
-  private updateSearchIndex(inboxId: number, content: string): void {
-    this.database.prepare(`
-      DELETE FROM content_search
-      WHERE entity_type = 'inbox_item' AND entity_id = ? AND workspace_id = ?
-    `).run(String(inboxId), this.context.workspace_id)
-    this.database.prepare(`
-      INSERT INTO content_search (entity_type, entity_id, workspace_id, content)
-      VALUES ('inbox_item', ?, ?, ?)
-    `).run(String(inboxId), this.context.workspace_id, content)
   }
 
   private validateSuggestion(suggestion: InboxSuggestion | null): InboxSuggestion | null {

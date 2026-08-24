@@ -5,6 +5,7 @@ import {
   callAnthropic,
   callDeepSeek,
   callOpenAI,
+  testAiConnection,
   type ProviderRequest
 } from '../../src/main/reports/aiProvider'
 
@@ -56,5 +57,59 @@ describe('AI provider response validation', () => {
     await expect(callOpenAI({ ...request, fetchImpl })).resolves.toBe('核心功能已完成')
     await expect(callAnthropic({ ...request, fetchImpl: anthropicFetch })).resolves.toBe('核心功能已完成')
     await expect(callDeepSeek({ ...request, fetchImpl })).resolves.toBe('核心功能已完成')
+  })
+})
+
+describe('AI provider connection test', () => {
+  it.each([
+    ['openai', callOpenAI, { choices: [{ message: { content: 'OK' } }] }],
+    ['anthropic', callAnthropic, { content: [{ type: 'text', text: 'OK' }] }],
+    ['deepseek', callDeepSeek, { choices: [{ message: { content: 'OK' } }] }]
+  ] as const)('returns a successful result for %s', async (provider, _call, body) => {
+    const result = await testAiConnection({
+      provider,
+      apiKey: 'test-key',
+      baseUrl: 'https://provider.test',
+      model: 'test-model'
+    }, { fetchImpl: async () => response(body) })
+
+    expect(result).toMatchObject({ ok: true, provider, model: 'test-model' })
+    expect(result.latency_ms).toBeGreaterThanOrEqual(0)
+  })
+
+  it('returns a bounded error and never exposes the API key', async () => {
+    const result = await testAiConnection({
+      provider: 'openai',
+      apiKey: 'secret-test-key',
+      baseUrl: 'https://provider.test',
+      model: 'test-model'
+    }, {
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+        text: async () => 'invalid secret-test-key'
+      } as Response)
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).not.toContain('secret-test-key')
+    expect(result.error?.length).toBeLessThanOrEqual(500)
+  })
+
+  it('returns a timeout result when the provider does not respond', async () => {
+    const result = await testAiConnection({
+      provider: 'openai',
+      apiKey: 'test-key',
+      baseUrl: 'https://provider.test',
+      model: 'test-model'
+    }, {
+      timeoutMs: 5,
+      fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    })
+
+    expect(result).toMatchObject({ ok: false, error: 'AI provider request timed out' })
   })
 })

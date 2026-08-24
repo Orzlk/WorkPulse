@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -222,6 +222,7 @@ describe('GitScanner', () => {
     `).get() as { entity_public_id: string; payload: string }
     expect(outbox.entity_public_id).toBe(commit.public_id)
     expect(JSON.parse(outbox.payload)).toMatchObject({ repository_id: repository.public_id })
+    expect(service.get(repository.public_id)?.branch).toBeTruthy()
     database.close()
   })
 
@@ -262,6 +263,22 @@ describe('GitScanner', () => {
     database.close()
   })
 
+  it('创建仓库时保留项目归属，编辑仓库信息不会意外清空项目', () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const projects = new ProjectService(database, context)
+    const repositories = new RepositoryService(database, context)
+    const project = projects.create({ name: '仓库所属项目', description: '', color: '#64748b' })
+
+    const repository = repositories.create({ name: '已归属仓库', local_path: directory, project_id: project.public_id })
+    expect(repository.project_id).toBe(project.public_id)
+
+    const updated = repositories.update(repository.public_id, { name: '编辑后的仓库' })
+    expect(updated?.project_id).toBe(project.public_id)
+    expect(repositories.get(repository.public_id)?.project_id).toBe(project.public_id)
+    database.close()
+  })
+
   it('在一个事务中应用仓库的组合更新 patch', () => {
     const directory = createGitRepository()
     const { database, context } = createDatabase()
@@ -279,6 +296,43 @@ describe('GitScanner', () => {
     expect(updated).toMatchObject({ project_id: project.public_id, enabled: false, scan_interval_minutes: 15 })
     expect(database.prepare('SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type = ? AND entity_public_id = ?').get('repository', repository.public_id))
       .toEqual({ count: 2 })
+    database.close()
+  })
+
+  it('编辑仓库名称和路径时清空旧分支与扫描游标', () => {
+    const directory = createGitRepository()
+    const nextDirectory = createTemporaryDirectory('workpulse-git-next-')
+    const { database, context } = createDatabase()
+    const repositories = new RepositoryService(database, context)
+    const repository = repositories.create({ name: '待编辑仓库', local_path: directory })
+    database.prepare('UPDATE repository_bindings SET branch = ?, updated_at = ? WHERE repository_id = ?').run('main', new Date().toISOString(), repository.public_id)
+    database.prepare('UPDATE repositories SET last_scanned_at = ? WHERE public_id = ?').run(new Date().toISOString(), repository.public_id)
+
+    const updated = repositories.update(repository.public_id, {
+      name: '已编辑仓库',
+      local_path: nextDirectory,
+      remote_url: 'https://example.test/repository.git'
+    })
+
+    expect(updated).toMatchObject({ name: '已编辑仓库', local_path: nextDirectory, remote_url: 'https://example.test/repository.git', branch: null, last_scanned_at: null })
+    database.close()
+  })
+
+  it('软删除仓库跟踪项但保留本地目录和可恢复的数据库记录', () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const repositories = new RepositoryService(database, context)
+    const repository = repositories.create({ name: '待删除仓库', local_path: directory })
+
+    const deleted = repositories.softDelete(repository.public_id)
+
+    expect(deleted).toMatchObject({ public_id: repository.public_id, name: '待删除仓库' })
+    expect(repositories.get(repository.public_id)).toBeNull()
+    expect(repositories.list()).toMatchObject({ items: [], total: 0 })
+    expect(existsSync(directory)).toBe(true)
+    expect(database.prepare('SELECT deleted_at FROM repositories WHERE public_id = ?').get(repository.public_id)).toMatchObject({ deleted_at: expect.any(String) })
+    expect(database.prepare('SELECT deleted_at FROM repository_bindings WHERE repository_id = (SELECT id FROM repositories WHERE public_id = ?)').get(repository.public_id)).toMatchObject({ deleted_at: expect.any(String) })
+    expect(database.prepare('SELECT operation_type FROM sync_operations WHERE entity_type = ? AND entity_public_id = ? ORDER BY id DESC LIMIT 1').get('repository', repository.public_id)).toEqual({ operation_type: 'delete' })
     database.close()
   })
 

@@ -80,6 +80,19 @@ describe('SearchService unified search', () => {
     database.close()
   })
 
+  it('uses FTS5 for text candidates and falls back for Chinese substrings', () => {
+    const database = createSearchDatabase()
+    const prepare = vi.spyOn(database, 'prepare')
+    const service = new SearchService(database, { workspace_id: 1, user_id: 1 })
+
+    const page = service.search({ text: '志', limit: 20 })
+
+    expect(page.items.some((item) => item.public_id === 'log-1')).toBe(true)
+    expect(prepare.mock.calls.some(([sql]) => String(sql).includes('content_search MATCH'))).toBe(true)
+    expect(() => service.search({ text: 'alpha "beta', limit: 20 })).not.toThrow()
+    database.close()
+  })
+
   it('does not return soft-deleted rows from another workspace', () => {
     const database = createSearchDatabase()
     database.prepare('UPDATE tasks SET deleted_at = ? WHERE public_id = ?').run('2026-08-23T11:00:00.000Z', 'task-1')

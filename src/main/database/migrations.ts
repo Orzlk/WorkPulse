@@ -7,7 +7,7 @@ import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-export const CURRENT_SCHEMA_VERSION = 11
+export const CURRENT_SCHEMA_VERSION = 12
 
 function tableExists(database: Database.Database, tableName: string): boolean {
   return Boolean(
@@ -222,6 +222,81 @@ function convertLegacyTimestamps(database: Database.Database, timeZone: string):
         if (converted !== row.value) update.run(converted, row.migration_rowid)
       }
     }
+  }
+}
+
+const CONTENT_SEARCH_ENTITIES = [
+  {
+    tableName: 'work_logs',
+    entityType: 'work_log',
+    contentExpression: "COALESCE(NEW.content, '') || char(10) || COALESCE(NEW.category, '')",
+    backfillExpression: "COALESCE(content, '') || char(10) || COALESCE(category, '')"
+  },
+  {
+    tableName: 'tasks',
+    entityType: 'task',
+    contentExpression: "COALESCE(NEW.title, '') || char(10) || COALESCE(NEW.description, '')",
+    backfillExpression: "COALESCE(title, '') || char(10) || COALESCE(description, '')"
+  },
+  {
+    tableName: 'inbox_items',
+    entityType: 'inbox_item',
+    contentExpression: "COALESCE(NEW.content, '')",
+    backfillExpression: "COALESCE(content, '')"
+  },
+  {
+    tableName: 'git_commits',
+    entityType: 'git_commit',
+    contentExpression: "COALESCE(NEW.message, '') || char(10) || COALESCE(NEW.commit_hash, '')",
+    backfillExpression: "COALESCE(message, '') || char(10) || COALESCE(commit_hash, '')"
+  },
+  {
+    tableName: 'reports',
+    entityType: 'report',
+    contentExpression: "COALESCE(NEW.type, '') || char(10) || COALESCE(NEW.content, '')",
+    backfillExpression: "COALESCE(type, '') || char(10) || COALESCE(content, '')"
+  }
+] as const
+
+function createContentSearchTriggers(database: Database.Database): void {
+  for (const entity of CONTENT_SEARCH_ENTITIES) {
+    const documentKey = `entity_type = '${entity.entityType}' AND entity_id = CAST(OLD.id AS TEXT) AND workspace_id = OLD.workspace_id`
+    database.exec(`
+      CREATE TRIGGER IF NOT EXISTS content_search_${entity.tableName}_ai
+      AFTER INSERT ON ${entity.tableName}
+      WHEN NEW.deleted_at IS NULL
+      BEGIN
+        INSERT INTO content_search (entity_type, entity_id, workspace_id, content)
+        VALUES ('${entity.entityType}', CAST(NEW.id AS TEXT), NEW.workspace_id, ${entity.contentExpression});
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS content_search_${entity.tableName}_au
+      AFTER UPDATE ON ${entity.tableName}
+      BEGIN
+        DELETE FROM content_search WHERE ${documentKey};
+        INSERT INTO content_search (entity_type, entity_id, workspace_id, content)
+        SELECT '${entity.entityType}', CAST(NEW.id AS TEXT), NEW.workspace_id, ${entity.contentExpression}
+        WHERE NEW.deleted_at IS NULL;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS content_search_${entity.tableName}_ad
+      AFTER DELETE ON ${entity.tableName}
+      BEGIN
+        DELETE FROM content_search WHERE ${documentKey};
+      END;
+    `)
+  }
+}
+
+function rebuildContentSearchIndex(database: Database.Database): void {
+  database.exec('DELETE FROM content_search')
+  for (const entity of CONTENT_SEARCH_ENTITIES) {
+    database.exec(`
+      INSERT INTO content_search (entity_type, entity_id, workspace_id, content)
+      SELECT '${entity.entityType}', CAST(id AS TEXT), workspace_id, ${entity.backfillExpression}
+      FROM ${entity.tableName}
+      WHERE deleted_at IS NULL
+    `)
   }
 }
 
@@ -596,7 +671,7 @@ const migrations: SchemaMigration[] = [
     }
   },
   {
-    version: CURRENT_SCHEMA_VERSION,
+    version: 11,
     name: '011_work_item_associations',
     up: (database) => {
       addColumnIfMissing(database, 'work_logs', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
@@ -619,6 +694,14 @@ const migrations: SchemaMigration[] = [
         CREATE INDEX IF NOT EXISTS idx_work_log_tags_tag ON work_log_tags(tag_id, work_log_id);
         CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag_id, task_id);
       `)
+    }
+  },
+  {
+    version: CURRENT_SCHEMA_VERSION,
+    name: '012_content_search_completion',
+    up: (database) => {
+      createContentSearchTriggers(database)
+      rebuildContentSearchIndex(database)
     }
   }
 ]

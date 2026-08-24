@@ -36,7 +36,7 @@ describe('importFlomoMemos', () => {
     expect(importFlomoMemos(parsed.memos, writer)).toEqual({ imported: 1, skipped: 0 })
     expect(importFlomoMemos(parsed.memos, writer)).toEqual({ imported: 0, skipped: 1 })
 
-    expect(getWorkLogs()).toEqual([expect.objectContaining({ content: '历史日志', tag_names: ['工作/三峡'] })])
+    expect(getWorkLogs()).toEqual([expect.objectContaining({ content: '#工作/三峡\n\n历史日志', tag_names: ['工作/三峡'] })])
     expect((getDatabase().prepare('SELECT COUNT(*) AS count FROM work_log_tags').get() as { count: number }).count).toBe(1)
   })
 })

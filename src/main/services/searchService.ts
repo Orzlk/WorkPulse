@@ -4,6 +4,7 @@ import type { InboxItem, Page, SearchResult } from '../domain/types'
 import type { Pagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
 import { normalizeTagName } from '../repositories/localTagRepository'
+import { buildFtsQuery } from '../search/ftsQuery'
 
 export interface InboxSearchQuery extends Pagination {
   text?: string
@@ -23,6 +24,7 @@ export interface UnifiedSearchQuery extends Pagination {
 }
 
 interface SearchFilterSpec {
+  entityType: 'work_log' | 'task' | 'inbox_item' | 'git_commit' | 'report'
   textFields: string[]
   tagTable: 'work_log_tags' | 'task_tags' | 'inbox_tags' | 'git_commit_tags' | 'report_tags'
   tagColumn: 'work_log_id' | 'task_id' | 'inbox_item_id' | 'git_commit_id' | 'report_id'
@@ -41,6 +43,14 @@ export class SearchService {
   ) {}
 
   searchInbox(query: InboxSearchQuery = {}): Page<InboxItem> {
+    const page = this.searchInboxWithTextMode(query, 'fts')
+    if (query.text?.trim() && page.total === 0) {
+      return this.searchInboxWithTextMode(query, 'like')
+    }
+    return page
+  }
+
+  private searchInboxWithTextMode(query: InboxSearchQuery, textMode: 'fts' | 'like'): Page<InboxItem> {
     this.assertWorkspace()
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 200)
     const offset = Math.max(query.offset ?? 0, 0)
@@ -69,14 +79,25 @@ export class SearchService {
       values.push(query.state)
     }
     if (query.text?.trim()) {
-      conditions.push(`EXISTS (
-        SELECT 1 FROM content_search
-        WHERE content_search.entity_type = 'inbox_item'
-          AND content_search.entity_id = CAST(inbox_items.id AS TEXT)
-          AND content_search.workspace_id = inbox_items.workspace_id
-          AND content_search.content LIKE ?
-      )`)
-      values.push(`%${query.text.trim()}%`)
+      if (textMode === 'fts') {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM content_search
+          WHERE content_search MATCH ?
+            AND content_search.entity_type = 'inbox_item'
+            AND content_search.entity_id = CAST(inbox_items.id AS TEXT)
+            AND content_search.workspace_id = inbox_items.workspace_id
+        )`)
+        values.push(buildFtsQuery(query.text))
+      } else {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM content_search
+          WHERE content_search.entity_type = 'inbox_item'
+            AND content_search.entity_id = CAST(inbox_items.id AS TEXT)
+            AND content_search.workspace_id = inbox_items.workspace_id
+            AND content_search.content LIKE ?
+        )`)
+        values.push(`%${query.text.trim()}%`)
+      }
     }
     for (const tagName of query.tag_names ?? []) {
       const path = normalizeTagName(tagName)
@@ -110,6 +131,14 @@ export class SearchService {
   }
 
   search(query: UnifiedSearchQuery = {}): Page<SearchResult> {
+    const page = this.searchWithTextMode(query, 'fts')
+    if (query.text?.trim() && page.total === 0) {
+      return this.searchWithTextMode(query, 'like')
+    }
+    return page
+  }
+
+  private searchWithTextMode(query: UnifiedSearchQuery, textMode: 'fts' | 'like'): Page<SearchResult> {
     this.assertWorkspace()
     const text = query.text?.trim() ?? ''
     const like = `%${text}%`
@@ -168,8 +197,19 @@ export class SearchService {
       const where = ['entity.workspace_id = ?', 'entity.deleted_at IS NULL']
       const params: unknown[] = [this.context.workspace_id]
       if (text) {
-        where.push(`(${spec.textFields.map((field) => `${field} LIKE ?`).join(' OR ')})`)
-        params.push(...spec.textFields.map(() => like))
+        if (textMode === 'fts') {
+          where.push(`EXISTS (
+            SELECT 1 FROM content_search
+            WHERE content_search MATCH ?
+              AND content_search.entity_type = ?
+              AND content_search.entity_id = CAST(entity.id AS TEXT)
+              AND content_search.workspace_id = entity.workspace_id
+          )`)
+          params.push(buildFtsQuery(text), spec.entityType)
+        } else {
+          where.push(`(${spec.textFields.map((field) => `${field} LIKE ?`).join(' OR ')})`)
+          params.push(...spec.textFields.map(() => like))
+        }
       }
       if (query.project_id !== undefined) {
         where.push(query.project_id === null ? spec.projectUnassigned : spec.projectMatch)
@@ -201,16 +241,19 @@ export class SearchService {
     const projectRelation = standardRelation('projects', 'project_id')
     const repositoryRelation = standardRelation('repositories', 'repository_id')
     const workLogFilters = filters({
+      entityType: 'work_log',
       textFields: ['entity.content', 'entity.category'], tagTable: 'work_log_tags', tagColumn: 'work_log_id',
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
       repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
     })
     const taskFilters = filters({
+      entityType: 'task',
       textFields: ['entity.title', 'entity.description'], tagTable: 'task_tags', tagColumn: 'task_id',
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
       repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
     })
     const inboxFilters = filters({
+      entityType: 'inbox_item',
       textFields: ['entity.content'], tagTable: 'inbox_tags', tagColumn: 'inbox_item_id', inboxState: true,
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
       repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
@@ -237,11 +280,13 @@ export class SearchService {
       )`
     }
     const gitFilters = filters({
+      entityType: 'git_commit',
       textFields: ['entity.message', 'entity.commit_hash'], tagTable: 'git_commit_tags', tagColumn: 'git_commit_id',
       projectMatch: gitProjectRelation.match, projectUnassigned: gitProjectRelation.unassigned,
       repositoryMatch: gitRepositoryRelation.match, repositoryUnassigned: gitRepositoryRelation.unassigned
     })
     const reportFilters = filters({
+      entityType: 'report',
       textFields: ['entity.content', 'entity.type'], tagTable: 'report_tags', tagColumn: 'report_id',
       projectMatch: reportProjectRelation.match, projectUnassigned: reportProjectRelation.unassigned,
       repositoryMatch: reportRepositoryRelation.match, repositoryUnassigned: reportRepositoryRelation.unassigned
