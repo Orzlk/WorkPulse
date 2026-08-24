@@ -283,6 +283,8 @@ const api = {
         imported: number
         skipped: number
         filePath: string
+        source: 'file' | 'flomo'
+        attachmentsSkipped: number
       } | null>
   },
   on: {

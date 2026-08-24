@@ -52,6 +52,8 @@ import {
 } from './ipcContracts'
 import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
 import { ImportTokenStore } from './database/importTokenStore'
+import { parseFlomoHtml } from './importers/flomoHtmlImporter'
+import { importFlomoMemos } from './importers/flomoLogImport'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const pendingImports = new ImportTokenStore<unknown>(10 * 60 * 1000)
@@ -411,7 +413,7 @@ export function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog({
       title: '导入工作日志',
       filters: [
-        { name: 'CSV / Markdown', extensions: ['csv', 'md'] }
+        { name: 'CSV / Markdown / Flomo HTML', extensions: ['csv', 'md', 'html', 'htm'] }
       ],
       properties: ['openFile']
     })
@@ -420,7 +422,24 @@ export function registerIpcHandlers(): void {
 
     const filePath = result.filePaths[0]
     const content = readFileSync(filePath, 'utf-8')
-    const ext = filePath.toLowerCase().endsWith('.csv') ? 'csv' : 'md'
+    const lowerFilePath = filePath.toLowerCase()
+    const ext = lowerFilePath.endsWith('.csv')
+      ? 'csv'
+      : lowerFilePath.endsWith('.html') || lowerFilePath.endsWith('.htm')
+        ? 'html'
+        : 'md'
+
+    if (ext === 'html') {
+      const parsed = parseFlomoHtml(content)
+      if (parsed.memos.length === 0) throw new Error('未找到有效的 Flomo HTML 笔记')
+      const summary = importFlomoMemos(parsed.memos, { addWorkLog, workLogExists })
+      return {
+        ...summary,
+        filePath,
+        source: 'flomo' as const,
+        attachmentsSkipped: parsed.attachmentCount
+      }
+    }
 
     let imported = 0
     let skipped = 0
@@ -469,7 +488,7 @@ export function registerIpcHandlers(): void {
       }
     }
 
-    return { imported, skipped, filePath }
+    return { imported, skipped, filePath, source: 'file' as const, attachmentsSkipped: 0 }
   })
 
   // --- App ---

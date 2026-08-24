@@ -281,7 +281,13 @@ export interface API {
     report: (content: string, dateRange: string) => Promise<string | null>
   }
   import: {
-    logs: () => Promise<{ imported: number; skipped: number; filePath: string } | null>
+    logs: () => Promise<{
+      imported: number
+      skipped: number
+      filePath: string
+      source: 'file' | 'flomo'
+      attachmentsSkipped: number
+    } | null>
   }
 }
 

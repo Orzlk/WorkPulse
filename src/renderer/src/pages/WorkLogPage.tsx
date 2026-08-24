@@ -199,13 +199,24 @@ function WorkLogPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
-              const result = await window.api.import.logs()
-              if (result) {
-                const msg = result.skipped > 0
-                  ? t('worklog.importedSkipped', { imported: result.imported, skipped: result.skipped })
-                  : t('worklog.imported', { count: result.imported })
-                toast.success(msg)
-                await fetchLogs()
+              try {
+                const result = await window.api.import.logs()
+                if (result) {
+                  const message = result.source === 'flomo'
+                    ? result.skipped > 0
+                      ? t('worklog.importedFlomoSkipped', { imported: result.imported, skipped: result.skipped })
+                      : t('worklog.importedFlomo', { count: result.imported })
+                    : result.skipped > 0
+                      ? t('worklog.importedSkipped', { imported: result.imported, skipped: result.skipped })
+                      : t('worklog.imported', { count: result.imported })
+                  const attachmentMessage = result.source === 'flomo' && result.attachmentsSkipped > 0
+                    ? ` · ${t('worklog.flomoAttachmentsSkipped', { count: result.attachmentsSkipped })}`
+                    : ''
+                  toast.success(`${message}${attachmentMessage}`)
+                  await fetchLogs()
+                }
+              } catch {
+                toast.error(t('worklog.importFailed'))
               }
             }}
             className="export-button btn-bounce"
