@@ -41,7 +41,7 @@ const translations = {
     taskDraft: '草稿',
     taskDue: '截止 {{date}}',
     taskCompletedAt: '完成于 {{date}}',
-    reportUserMessage: '以下是我的工作日志，请生成工作总结报告：\n\n{{logs}}{{tasks}}\n\n请参考以下格式模板输出：\n{{template}}',
+    reportUserMessage: '以下是统计周期内的工作日志和任务记录，请按项目或主题归纳并生成适合团队汇报的工作总结：\n\n{{logs}}{{tasks}}\n\n严格参考以下格式模板输出；只保留有证据支持的内容：\n{{template}}',
     taskContextTitle: '\n\n相关任务上下文：\n{{tasks}}'
   },
   en: {
@@ -80,7 +80,7 @@ const translations = {
     taskDraft: 'Draft',
     taskDue: 'due {{date}}',
     taskCompletedAt: 'completed {{date}}',
-    reportUserMessage: 'Here are my work logs. Generate a work summary report:\n\n{{logs}}{{tasks}}\n\nUse this output template as the structure:\n{{template}}',
+    reportUserMessage: 'Here are the work logs and task records for the reporting period. Group them by project or topic and generate a team-ready work report:\n\n{{logs}}{{tasks}}\n\nFollow this output template and include only evidence-based content:\n{{template}}',
     taskContextTitle: '\n\nRelated task context:\n{{tasks}}'
   }
 } as const

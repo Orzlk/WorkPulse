@@ -1,4 +1,4 @@
-import type { InboxItem, Page, Project, ProjectInput, Tag } from '../domain/types'
+import type { InboxItem, InboxState, Page, Project, ProjectInput, Tag } from '../domain/types'
 
 export interface WorkspaceContext {
   workspace_id: number
@@ -8,6 +8,10 @@ export interface WorkspaceContext {
 export interface Pagination {
   limit?: number
   offset?: number
+}
+
+export interface InboxPagination extends Pagination {
+  state?: InboxState
 }
 
 export interface ReadOptions {
@@ -23,7 +27,7 @@ export interface ProjectRepository {
 }
 
 export interface InboxRepository {
-  list(context: WorkspaceContext, pagination?: Pagination): Page<InboxItem>
+  list(context: WorkspaceContext, pagination?: InboxPagination): Page<InboxItem>
   get(context: WorkspaceContext, publicId: string, options?: ReadOptions): InboxItem | null
   create(context: WorkspaceContext, input: InboxItem): InboxItem
   update(context: WorkspaceContext, publicId: string, input: Partial<InboxItem>): InboxItem | null

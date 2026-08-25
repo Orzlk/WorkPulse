@@ -15,8 +15,14 @@ import type {
   SavedPeriodReport
 } from './reportTypes'
 
+export interface ReportGenerationOptions {
+  signal?: AbortSignal
+  onChunk?: (chunk: string) => void
+  onStage?: (stage: 'reading' | 'generating') => void
+}
+
 interface ReportGenerator {
-  generateContent(snapshot: ReportSourceSnapshot, request: ReportRequest): Promise<string>
+  generateContent(snapshot: ReportSourceSnapshot, request: ReportRequest, options?: ReportGenerationOptions): Promise<string>
 }
 
 interface ReportRow {
@@ -44,16 +50,17 @@ export class ReportService {
     private readonly database: Database.Database,
     private readonly context: WorkspaceContext,
     private readonly generator: ReportGenerator = {
-      generateContent: async (snapshot, request) => {
+      generateContent: async (snapshot, request, options) => {
         const { generatePeriodReportContent } = await import('../ai')
-        return generatePeriodReportContent(snapshot, request.type, snapshot.period)
+        return generatePeriodReportContent(snapshot, request.type, snapshot.period, options)
       }
     }
   ) {
     this.query = new ReportQueryService(database, context)
   }
 
-  async generate(request: ReportRequest): Promise<SavedPeriodReport> {
+  async generate(request: ReportRequest, options: ReportGenerationOptions = {}): Promise<SavedPeriodReport> {
+    options.onStage?.('reading')
     const snapshot = this.query.buildSnapshot(request)
     const now = new Date().toISOString()
     const projectScope = JSON.stringify([...(request.projectIds ?? [])].sort())
@@ -61,7 +68,9 @@ export class ReportService {
     const created = this.database.transaction(() => this.createGeneratingReport(snapshot, request, projectScope, repositoryScope, now))()
 
     try {
-      const content = await this.generator.generateContent(snapshot, request)
+      if (options.signal?.aborted) throw new Error('AI request cancelled')
+      options.onStage?.('generating')
+      const content = await this.generator.generateContent(snapshot, request, options)
       if (!content.trim()) throw new Error('AI response content is empty')
       return this.database.transaction(() => this.finishReport(created.public_id, content.trim(), now))()
     } catch (error) {

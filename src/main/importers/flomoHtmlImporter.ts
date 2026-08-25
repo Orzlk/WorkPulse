@@ -3,6 +3,13 @@ export interface FlomoMemo {
   content: string
   tagNames: string[]
   attachmentCount: number
+  attachments: FlomoAttachmentReference[]
+}
+
+export interface FlomoAttachmentReference {
+  source: string
+  alt: string
+  kind: 'image' | 'audio' | 'video'
 }
 
 export interface FlomoImportParseResult {
@@ -25,13 +32,20 @@ export function parseFlomoHtml(html: string): FlomoImportParseResult {
     const end = memoStarts[index + 1] ?? html.length
     const block = html.slice(start, end)
     const files = extractClassInner(block, 'files')
-    const memoAttachmentCount = countAttachments(files ?? '')
-    attachmentCount += memoAttachmentCount
+    const rawContent = extractClassInner(block, 'content')
+    const contentAttachments = extractAttachments(rawContent ?? '')
+    const fileAttachments = extractAttachments(files ?? '')
+    const attachments = dedupeAttachments([...contentAttachments, ...fileAttachments])
+    attachmentCount += attachments.length
 
     const time = extractClassInner(block, 'time')
-    const rawContent = extractClassInner(block, 'content')
     const createdAt = decodeHtmlEntities(time ?? '').trim()
-    const content = toMarkdown(rawContent ?? '')
+    const markdownContent = toMarkdown(rawContent ?? '')
+    const fileImages = fileAttachments
+      .filter((attachment) => attachment.kind === 'image')
+      .filter((attachment) => !contentAttachments.some((current) => current.kind === 'image' && current.source === attachment.source))
+      .map((attachment) => `![${attachment.alt}](${attachment.source})`)
+    const content = [markdownContent, ...fileImages].filter(Boolean).join('\n\n')
     if (!isValidFlomoTime(createdAt) || !content) continue
 
     const { content: body, tags } = extractTags(content)
@@ -41,7 +55,8 @@ export function parseFlomoHtml(html: string): FlomoImportParseResult {
       createdAt,
       content: body,
       tagNames: tags,
-      attachmentCount: memoAttachmentCount
+      attachmentCount: attachments.length,
+      attachments
     })
   }
 
@@ -81,8 +96,45 @@ function findClosingDiv(source: string, openingStart: number, openingEnd: number
   return -1
 }
 
-function countAttachments(files: string): number {
-  return (files.match(/<(?:img|audio|video)\b/gi) ?? []).length
+function extractAttachments(source: string): FlomoAttachmentReference[] {
+  const attachments: FlomoAttachmentReference[] = []
+  const pattern = /<(img|audio|video)\b([^>]*)>/gi
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(source)) !== null) {
+    const rawSource = getAttribute(match[2], 'src')
+    if (!rawSource) continue
+    const attachmentSource = decodeHtmlEntities(rawSource).trim()
+    if (!attachmentSource) continue
+    const element = match[1].toLowerCase()
+    const kind: FlomoAttachmentReference['kind'] = element === 'img'
+      ? 'image'
+      : element === 'audio'
+        ? 'audio'
+        : 'video'
+    attachments.push({
+      source: attachmentSource,
+      alt: decodeHtmlEntities(getAttribute(match[2], 'alt') ?? '').trim(),
+      kind
+    })
+  }
+  return attachments
+}
+
+function dedupeAttachments(attachments: FlomoAttachmentReference[]): FlomoAttachmentReference[] {
+  const seen = new Set<string>()
+  return attachments.filter((attachment) => {
+    const key = `${attachment.kind}:${attachment.source}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function getAttribute(attributes: string, name: string): string | null {
+  const quoted = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(attributes)
+  if (quoted) return quoted[2]
+  const unquoted = new RegExp(`\\b${name}\\s*=\\s*([^\\s>]+)`, 'i').exec(attributes)
+  return unquoted?.[1] ?? null
 }
 
 function isValidFlomoTime(value: string): boolean {
@@ -137,12 +189,20 @@ function renderList(html: string, ordered: boolean): string {
 
 function convertInlineHtml(html: string): string {
   return html
+    .replace(/<img\b([^>]*)>/gi, (_match, attributes: string) => renderImage(attributes))
     .replace(/<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)\s*>/gi, '**$1**')
     .replace(/<(?:em|i)\b[^>]*>([\s\S]*?)<\/(?:em|i)\s*>/gi, '*$1*')
     .replace(/<(?:del|s)\b[^>]*>([\s\S]*?)<\/(?:del|s)\s*>/gi, '~~$1~~')
     .replace(/<br\s*\/?\s*>/gi, '\n')
     .replace(/<\/?(?:p|span)\b[^>]*>/gi, '')
     .replace(/<a\b[^>]*>([\s\S]*?)<\/a\s*>/gi, '$1')
+}
+
+function renderImage(attributes: string): string {
+  const source = getAttribute(attributes, 'src')
+  if (!source) return ''
+  const alt = getAttribute(attributes, 'alt') ?? ''
+  return `![${decodeHtmlEntities(alt)}](${decodeHtmlEntities(source)})`
 }
 
 function decodeHtmlEntities(value: string): string {

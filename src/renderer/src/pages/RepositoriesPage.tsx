@@ -5,6 +5,8 @@ import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
 import { useI18n } from '../stores/languageStore'
 import { summarizeRepositoryScan } from '../lib/workspaceInteractions'
+import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
+import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import type { Repository } from '../lib/workspaceTypes'
 import type { TranslationKey } from '../lib/i18n'
 
@@ -17,7 +19,7 @@ interface RepositoryForm {
 
 const emptyRepositoryForm: RepositoryForm = { name: '', local_path: '', remote_url: '', project_id: '' }
 
-function RepositoriesPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.Element {
+function RepositoriesPage({ focusPublicId, onOpenProjects }: { focusPublicId?: string | null; onOpenProjects?: () => void }): JSX.Element {
   const { items, total, status, error, fetch, loadByPublicId, loadMore, create, update, remove, scan, scanAll } = useRepositoryStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
@@ -184,7 +186,8 @@ function RepositoriesPage({ focusPublicId }: { focusPublicId?: string | null }):
   }
 
   return <div className="workspace-page">
-    <header className="workspace-page-heading"><p className="workspace-kicker">{t('workspace.repositoriesKicker')}</p><h2>{t('workspace.repositoriesTitle')}</h2><p>{t('workspace.repositoriesSubtitle')}</p></header>
+    <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={[{ label: t('nav.projects') }, { label: t('nav.repositories'), current: true }]} title={t('workspace.repositoriesTitle')} description={t('workspace.repositoriesSubtitle')} />
+    <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'projects', label: t('nav.projects'), onClick: onOpenProjects }, { id: 'repositories', label: t('nav.repositories'), active: true }]} />
     <section className="repository-create"><label>{t('workspace.repositoryName')}<input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('workspace.repositoryNamePlaceholder')} /></label><label>{t('workspace.localPath')}<input value={path} onChange={(event) => setPath(event.target.value)} placeholder={t('workspace.localPathPlaceholder')} /></label><label>{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><button className="primary-action" onClick={() => void add()} disabled={!name.trim() || !path.trim() || isBusy}>{t('workspace.addRepository')}</button><button onClick={() => void scanAllRepositories()} disabled={isBusy}><RefreshCw aria-hidden="true" />{operation?.kind === 'scanAll' ? t('workspace.scanning') : t('workspace.scanAll')}</button></section>
     {(status === 'error' || operationError) && <div className="inline-error" role="alert"><p>{operationError || translatedError}</p><button onClick={() => retry ? void retry() : void fetch()}>{t('common.retry')}</button>{scanFailures.map((failure) => <div key={failure.repository_id} className="repository-scan-failure"><span>{failure.name}: {failure.error}</span><button onClick={() => void scanOne(failure.repository_id)} disabled={isBusy}>{t('workspace.retryRepository')}</button></div>)}</div>}
     <section className="repository-list">{items.map((repository) => <article className="repository-card" key={repository.public_id} id={`repository-${repository.public_id}`} tabIndex={-1}>

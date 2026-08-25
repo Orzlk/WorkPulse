@@ -83,6 +83,13 @@ export function parsePagination(value: unknown): Required<Pagination> {
   return { limit: limit as number, offset: offset as number }
 }
 
+export function parseInboxListInput(value: unknown): Required<Pagination> & { state?: InboxState } {
+  const input = value === undefined ? {} : object(value, ['limit', 'offset', 'state'])
+  const pagination = parsePagination({ limit: input.limit, offset: input.offset })
+  if (input.state !== undefined) parseInboxState(input.state)
+  return { ...pagination, state: input.state as InboxState | undefined }
+}
+
 export function parseReportListInput(value: unknown): Required<Pagination> {
   if (value === undefined) return parsePagination(undefined)
   if (typeof value === 'number') return parsePagination({ limit: value, offset: 0 })
@@ -227,6 +234,40 @@ export function parseAiConnectionTestInput(value: unknown): ParsedAiConnectionTe
     api_key: string(input.api_key, 'api_key', { max: 4096 }),
     base_url: optionalString(input.base_url, 'base_url', 2048) ?? '',
     model: optionalString(input.model, 'model', 200) ?? ''
+  }
+}
+
+export interface ParsedInboxAiInput {
+  public_ids?: string[]
+  limit: number
+}
+
+export function parseInboxAiInput(value: unknown): ParsedInboxAiInput {
+  const input = value === undefined ? {} : object(value, ['public_ids', 'limit'])
+  const publicIds = input.public_ids === undefined ? undefined : (() => {
+    if (!Array.isArray(input.public_ids) || input.public_ids.length > 20) throw invalid('public_ids is invalid')
+    return Array.from(new Set(input.public_ids.map((item) => id(item, 'public_id'))))
+  })()
+  const limit = input.limit === undefined ? 20 : input.limit
+  if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 20) throw invalid('limit must be between 1 and 20')
+  return { public_ids: publicIds, limit: limit as number }
+}
+
+export interface ParsedAttachmentInput {
+  fileName: string
+  mimeType: string
+  data: ArrayBuffer | Uint8Array
+}
+
+export function parseAttachmentInput(value: unknown): ParsedAttachmentInput {
+  const input = object(value, ['fileName', 'mimeType', 'data'])
+  if (typeof input.data === 'string' || (!(input.data instanceof ArrayBuffer) && !ArrayBuffer.isView(input.data))) {
+    throw invalid('data is invalid')
+  }
+  return {
+    fileName: string(input.fileName, 'fileName', { max: 255 }),
+    mimeType: string(input.mimeType, 'mimeType', { max: 120 }),
+    data: input.data as ArrayBuffer | Uint8Array
   }
 }
 

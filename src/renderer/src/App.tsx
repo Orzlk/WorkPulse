@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { BarChart3, ClipboardList, Columns3, FileText, FolderGit2, FolderKanban, Inbox, Plus, Search, Settings } from 'lucide-react'
+import { BarChart3, ClipboardList, Columns3, FolderKanban, Plus, Search, Settings } from 'lucide-react'
 import { QuickCreate } from './components/QuickCreate'
 import { GlobalSearch } from './components/GlobalSearch'
 import { useToast } from './components/Toast'
@@ -10,7 +10,7 @@ import { useRepositoryStore } from './stores/repositoryStore'
 import { useI18n } from './stores/languageStore'
 import type { SearchResult } from './lib/workspaceTypes'
 import { parseWorkLogEditorRoute } from './lib/workLogEditorRoute'
-import brandSeal from './assets/brand-seal.png'
+import workpulseMark from './assets/workpulse-mark.svg'
 
 const WorkLogPage = lazy(() => import('./pages/WorkLogPage'))
 const KanbanPage = lazy(() => import('./pages/KanbanPage'))
@@ -25,14 +25,17 @@ const WorkLogEditorPage = lazy(() => import('./pages/WorkLogEditorPage'))
 type Page = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type QuickCreateMode = 'log' | 'task' | 'inbox' | null
 
-const navigation: Array<{ page: Exclude<Page, 'settings'>; Icon: typeof ClipboardList }> = [
-  { page: 'worklog', Icon: ClipboardList },
-  { page: 'inbox', Icon: Inbox },
-  { page: 'kanban', Icon: Columns3 },
-  { page: 'projects', Icon: FolderKanban },
-  { page: 'repositories', Icon: FolderGit2 },
-  { page: 'report', Icon: FileText },
-  { page: 'stats', Icon: BarChart3 }
+const primaryNavigation: Array<{
+  id: string
+  labelKey: 'nav.records' | 'nav.tasks' | 'nav.projects' | 'nav.review'
+  Icon: typeof ClipboardList
+  defaultPage: Exclude<Page, 'settings'>
+  pages: Array<Exclude<Page, 'settings'>>
+}> = [
+  { id: 'records', labelKey: 'nav.records', Icon: ClipboardList, defaultPage: 'worklog', pages: ['worklog', 'inbox'] },
+  { id: 'tasks', labelKey: 'nav.tasks', Icon: Columns3, defaultPage: 'kanban', pages: ['kanban'] },
+  { id: 'projects', labelKey: 'nav.projects', Icon: FolderKanban, defaultPage: 'projects', pages: ['projects', 'repositories'] },
+  { id: 'review', labelKey: 'nav.review', Icon: BarChart3, defaultPage: 'report', pages: ['report', 'stats'] }
 ]
 
 function MainApp(): JSX.Element {
@@ -72,8 +75,8 @@ function MainApp(): JSX.Element {
       if (mod && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen((open) => !open); return }
       if (mod && event.key === '1') { event.preventDefault(); setCurrentPage('worklog') }
       else if (mod && event.key === '2') { event.preventDefault(); setCurrentPage('kanban') }
-      else if (mod && event.key === '3') { event.preventDefault(); setCurrentPage('report') }
-      else if (mod && event.key === '4') { event.preventDefault(); setCurrentPage('stats') }
+      else if (mod && event.key === '3') { event.preventDefault(); setCurrentPage('projects') }
+      else if (mod && event.key === '4') { event.preventDefault(); setCurrentPage('report') }
       else if (mod && event.key === '5') { event.preventDefault(); setCurrentPage('inbox') }
       else if (mod && event.key === ',') { event.preventDefault(); setCurrentPage('settings') }
       else if (event.key === 'Escape') { setSearchOpen(false); if (currentPage === 'settings') setCurrentPage('worklog') }
@@ -107,19 +110,19 @@ function MainApp(): JSX.Element {
     setSearchOpen(false)
   }, [])
   const renderPage = (): JSX.Element => {
-    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} />
+    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} onOpenInbox={() => setCurrentPage('inbox')} />
     if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} />
-    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} onOpenInbox={() => setCurrentPage('inbox')} />
-    if (currentPage === 'stats') return <StatsPage />
+    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} onOpenInbox={() => setCurrentPage('inbox')} onOpenStats={() => setCurrentPage('stats')} />
+    if (currentPage === 'stats') return <StatsPage onOpenReports={() => setCurrentPage('report')} />
     if (currentPage === 'settings') return <SettingsPage onBack={() => setCurrentPage('worklog')} />
-    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} />
-    if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); setCurrentPage('report') }} />
-    return <RepositoriesPage focusPublicId={repositoryFocusId} />
+    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} onOpenRecords={() => setCurrentPage('worklog')} />
+    if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); setCurrentPage('report') }} onOpenRepositories={() => setCurrentPage('repositories')} />
+    return <RepositoriesPage focusPublicId={repositoryFocusId} onOpenProjects={() => setCurrentPage('projects')} />
   }
 
   return <div className="hallmark-app workspace-shell h-screen flex flex-col">
     <header className="app-header workspace-header">
-      <div className="app-header-main"><button className="app-brand" onClick={() => setCurrentPage('worklog')} aria-label={t('nav.home')}><img src={brandSeal} alt="" className="app-brand-mark" /><h1>WorkPulse</h1></button><nav className="app-nav workspace-nav" aria-label={t('nav.main')}>{navigation.map(({ page, Icon }) => <button key={page} onClick={() => setCurrentPage(page)} className={`app-nav-button ${currentPage === page ? 'is-active' : ''}`} aria-current={currentPage === page ? 'page' : undefined}><Icon aria-hidden="true" />{t(`nav.${page}` as Parameters<typeof t>[0])}</button>)}</nav></div>
+      <div className="app-header-main"><button className="app-brand" onClick={() => setCurrentPage('worklog')} aria-label={t('nav.home')}><img src={workpulseMark} alt="" className="app-brand-mark" /><h1>WorkPulse</h1></button><nav className="app-nav workspace-nav" aria-label={t('nav.main')}>{primaryNavigation.map((group) => { const active = group.pages.includes(currentPage as Exclude<Page, 'settings'>); return <button key={group.id} onClick={() => setCurrentPage(group.defaultPage)} className={`app-nav-button ${active ? 'is-active' : ''}`} aria-current={active ? 'page' : undefined} data-navigation-group={group.id}><group.Icon aria-hidden="true" />{t(group.labelKey)}</button> })}</nav></div>
       <div className="header-actions"><button className="header-icon-button" onClick={() => setSearchOpen((open) => !open)} aria-label={t('nav.search')} aria-expanded={searchOpen}><Search aria-hidden="true" /></button><button ref={quickCreateTriggerRef} className="header-create-button" onClick={() => setQuickCreate('inbox')}><Plus aria-hidden="true" />{t('nav.quickCreate')}</button><button onClick={() => setCurrentPage('settings')} className="app-settings-button settings-spin" aria-label={t('nav.settings')}><Settings aria-hidden="true" /></button></div>
       {searchOpen && <GlobalSearch onOpenResult={openSearchResult} />}
     </header>

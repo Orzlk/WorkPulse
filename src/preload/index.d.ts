@@ -125,6 +125,24 @@ interface ReportPreview {
   unorganized_inbox_count: number
 }
 
+interface ReportStreamEvent {
+  request_id: string
+  type: 'stage' | 'chunk' | 'done' | 'error'
+  stage?: 'reading' | 'generating'
+  chunk?: string
+  report?: PeriodReport
+  code?: 'cancelled' | 'failed'
+  message?: string
+}
+
+interface SavedAttachment {
+  id: string
+  fileName: string
+  mimeType: string
+  size: number
+  url: string
+}
+
 interface AiConnectionTestResult {
   ok: boolean
   provider: 'openai' | 'anthropic' | 'deepseek'
@@ -208,6 +226,7 @@ export interface API {
     navigate: (cb: (page: NavigatePage) => void) => () => void
     updateStatus: (cb: (state: AppUpdateState) => void) => () => void
     worklogEditorChanged: (cb: (publicId: string) => void) => () => void
+    reportStream: (cb: (event: ReportStreamEvent) => void) => () => void
   }
   task: {
     add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
@@ -242,6 +261,8 @@ export interface API {
   }
   report: {
     generate: (request: ReportRequest) => Promise<PeriodReport>
+    startStream: (request: ReportRequest) => Promise<string>
+    cancel: (requestId: string) => Promise<void>
     preview: (request: ReportRequest) => Promise<ReportPreview>
     list: (limit?: number) => Promise<PeriodReport[]>
     get: (publicId: string) => Promise<PeriodReport | null>
@@ -257,11 +278,12 @@ export interface API {
     archive: (publicId: string) => Promise<Project | null>
   }
   inbox: {
-    list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<InboxItem>>
+    list: (pagination?: { limit?: number; offset?: number; state?: InboxItem['state'] }) => Promise<Page<InboxItem>>
     get: (publicId: string) => Promise<InboxItem | null>
     create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => Promise<InboxItem>
     update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => Promise<InboxItem | null>
     organize: (publicId: string) => Promise<{ target: string; target_public_id: string | null }>
+    aiOrganize: (input?: { public_ids?: string[]; limit?: number }) => Promise<{ processed: number; updated: number; failed: number; items: InboxItem[] }>
     ignore: (publicId: string) => Promise<InboxItem | null>
     archive: (publicId: string) => Promise<InboxItem | null>
   }
@@ -270,6 +292,9 @@ export interface API {
     create: (name: string) => Promise<Tag>
     rename: (publicId: string, name: string) => Promise<Tag | null>
     search: (query: string, pagination?: { limit?: number; offset?: number }) => Promise<Page<Tag>>
+  }
+  attachment: {
+    save: (input: { fileName: string; mimeType: string; data: ArrayBuffer }) => Promise<SavedAttachment>
   }
   search: {
     query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => Promise<Page<SearchResult>>
@@ -312,6 +337,7 @@ export interface API {
       skipped: number
       filePath: string
       source: 'file' | 'flomo'
+      attachmentsImported: number
       attachmentsSkipped: number
     } | null>
   }

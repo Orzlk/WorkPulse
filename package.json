@@ -48,12 +48,8 @@
     ],
     "extraResources": [
       {
-        "from": "resources/tray-icon.png",
-        "to": "tray-icon.png"
-      },
-      {
-        "from": "resources/icon-hallmark-master.png",
-        "to": "icon-hallmark.png"
+        "from": "resources/icon.png",
+        "to": "icon.png"
       }
     ],
     "mac": {
@@ -73,7 +69,7 @@
           ]
         }
       ],
-      "icon": "resources/icon-hallmark.icns",
+      "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
       "darkModeSupport": true,
       "hardenedRuntime": true,
@@ -115,7 +111,7 @@
           ]
         }
       ],
-      "icon": "resources/icon-hallmark.ico"
+      "icon": "resources/icon.ico"
     },
     "nsis": {
       "artifactName": "WorkPulse-Setup-${version}-${arch}.${ext}",
@@ -132,7 +128,7 @@
         "AppImage",
         "deb"
       ],
-      "icon": "resources/icon-hallmark-master.png",
+      "icon": "resources/icon.png",
       "category": "Office"
     }
   },

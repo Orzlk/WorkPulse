@@ -95,6 +95,61 @@ export interface InlineReference {
   value: string
 }
 
+export interface ProjectReferenceCandidate {
+  public_id: string
+  name: string
+}
+
+export interface ProjectReferenceMatch extends ProjectReferenceCandidate {
+  start: number
+  end: number
+}
+
+const PROJECT_REFERENCE_END = '(?=$|\\s|[，。；、,.!?！？:：;；\\]）)])'
+
+export function findProjectReferences(content: string, projects: ProjectReferenceCandidate[]): ProjectReferenceMatch[] {
+  const matches: ProjectReferenceMatch[] = []
+  const candidates = [...projects]
+    .map((project) => ({ ...project, name: project.name.trim() }))
+    .filter((project) => project.name)
+    .sort((left, right) => right.name.length - left.name.length)
+
+  for (const project of candidates) {
+    const escapedName = project.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp(`(^|\\s)@${escapedName}${PROJECT_REFERENCE_END}`, 'g')
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(content)) !== null) {
+      const prefixLength = match[1]?.length ?? 0
+      const start = match.index + prefixLength
+      const end = start + project.name.length + 1
+      if (!matches.some((item) => item.start === start && item.end === end)) {
+        matches.push({ ...project, start, end })
+      }
+    }
+  }
+
+  return matches.sort((left, right) => left.start - right.start || right.end - left.end)
+}
+
+export function resolveProjectReference(content: string, projects: ProjectReferenceCandidate[]): string | null {
+  return findProjectReferences(content, projects)[0]?.public_id ?? null
+}
+
+export function syncProjectReference(
+  content: string,
+  projects: ProjectReferenceCandidate[],
+  projectPublicId: string | null
+): string {
+  const existing = findProjectReferences(content, projects)[0]
+  const selected = projectPublicId ? projects.find((project) => project.public_id === projectPublicId) : null
+  if (existing) {
+    const replacement = selected ? `@${selected.name}` : ''
+    return `${content.slice(0, existing.start)}${replacement}${content.slice(existing.end)}`
+  }
+  if (!selected) return content
+  return `@${selected.name}\n${content}`
+}
+
 const INLINE_TAG_PATTERN = /(^|\s)(#[^\s#，。；、,.!?！？:：;；\]）)]+)/g
 const INLINE_REFERENCE_BOUNDARY = /[A-Za-z0-9_@]/
 

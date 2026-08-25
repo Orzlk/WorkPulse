@@ -81,3 +81,5 @@ export interface InboxItem {
   created_at: string
   updated_at: string
 }
+
+export type InboxFilter = 'all' | InboxItem['state']

@@ -258,6 +258,7 @@ describe('项目、收件箱和标签服务', () => {
       inboxService.create({ content: '收件箱二' }).public_id,
       inboxService.create({ content: '收件箱三' }).public_id
     ]
+    inboxRepository.update(context, inboxIds[1], { state: 'confirmed' })
     const tagIds = [
       tagRepository.create(context, '#标签一').public_id,
       tagRepository.create(context, '#标签二').public_id,
@@ -268,6 +269,8 @@ describe('项目、收件箱和标签服务', () => {
     expect(projectRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
     expect(inboxRepository.list(context, { limit: 2, offset: 1 })).toMatchObject({ total: 3 })
     expect(inboxRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
+    expect(inboxRepository.list(context, { state: 'unorganized' }).total).toBe(2)
+    expect(inboxRepository.list(context, { state: 'confirmed' }).items.map((item) => item.public_id)).toEqual([inboxIds[1]])
     expect(tagRepository.list(context, { limit: 2, offset: 1 })).toMatchObject({ total: 3 })
     expect(tagRepository.list(context, { limit: 2, offset: 1 }).items).toHaveLength(2)
 

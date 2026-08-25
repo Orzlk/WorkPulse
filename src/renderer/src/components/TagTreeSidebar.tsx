@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { TagTreeNode } from '../lib/tagTree'
 
 interface TagTreeSidebarProps {
+  id?: string
   nodes: TagTreeNode[]
   selectedPath: string
   allLabel: string
@@ -64,9 +65,9 @@ function TagTreeItem({ node, depth, selectedPath, onSelect }: TagTreeItemProps):
   )
 }
 
-export function TagTreeSidebar({ nodes, selectedPath, allLabel, emptyLabel, onSelect }: TagTreeSidebarProps): JSX.Element {
+export function TagTreeSidebar({ id, nodes, selectedPath, allLabel, emptyLabel, onSelect }: TagTreeSidebarProps): JSX.Element {
   return (
-    <aside className="tag-tree-sidebar" aria-label={allLabel}>
+    <div id={id} className="tag-tree-sidebar" aria-label={allLabel} tabIndex={-1}>
       <button
         type="button"
         className={`tag-tree-all ${selectedPath === '' ? 'is-selected' : ''}`}
@@ -89,6 +90,6 @@ export function TagTreeSidebar({ nodes, selectedPath, allLabel, emptyLabel, onSe
       ) : (
         <p className="tag-tree-empty">{emptyLabel}</p>
       )}
-    </aside>
+    </div>
   )
 }

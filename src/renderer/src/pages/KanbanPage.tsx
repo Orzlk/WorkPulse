@@ -28,6 +28,8 @@ import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
 import { extractHashTags } from '../lib/workspaceInteractions'
 import type { WorkItemAssociations } from '../lib/workspaceTypes'
+import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
+import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 
 interface Task {
   id: number
@@ -673,7 +675,10 @@ function KanbanPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.E
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="kanban-layout flex gap-4">
+      <div className="workspace-page kanban-page">
+        <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={[{ label: t('nav.kanban'), current: true }]} title={t('nav.kanban')} />
+        <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'board', label: t('nav.kanban'), active: true }, { id: 'drafts', label: t('kanban.drafts'), onClick: () => { document.querySelector<HTMLElement>('.kanban-drafts')?.scrollIntoView({ block: 'nearest' }) } }]} />
+        <div className="kanban-layout flex gap-4">
         {/* Main Board Area */}
         <div className="flex-1 min-w-0">
           {/* Add task */}
@@ -861,6 +866,7 @@ function KanbanPage({ focusPublicId }: { focusPublicId?: string | null }): JSX.E
               </SortableContext>
             </div>
           )}
+        </div>
         </div>
       </div>
 

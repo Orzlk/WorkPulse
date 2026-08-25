@@ -8,7 +8,7 @@ Built for individual contributors who want a frictionless way to remember what t
 
 ## Features
 
-**Work Log** — Type what you just did, press Enter. That's it. Supports `#tag` for auto-categorization, full-text search, undo delete, and CSV/Markdown export with categories. You can also import Flomo HTML notes while keeping their original timestamps and tags; Flomo attachments are reported but not copied into WorkPulse.
+**Work Log** — Type what you just did, press Enter. That's it. Supports `#tag` for auto-categorization, full-text search, undo delete, and CSV/Markdown export with categories. You can also import Flomo HTML notes while keeping their original timestamps, tags, Markdown formatting, and image attachments. Images are copied into WorkPulse's attachment directory; audio, video, missing, and unsupported attachments are not copied and are reported in the import result.
 
 **Kanban Board** — Drag tasks between Todo → In Progress → Done. Includes a draft box for "maybe later" ideas, due date tracking, and inline editing. Completing a task auto-generates a work log entry.
 

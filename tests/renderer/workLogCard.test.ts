@@ -23,16 +23,19 @@ describe('work log card layout', () => {
     expect(styles).toMatch(/\.quick-entry\s*\{[^}]*border-radius:\s*16px;/s)
   })
 
-  it('keeps project, repository and tag associations inside the composer card', () => {
+  it('keeps project and tags in the正文 instead of duplicating them below the card', () => {
     const cardStart = page.indexOf('className={`quick-entry')
     const associationBlock = page.indexOf('className="quick-create-associations quick-entry-associations worklog-associations"')
     const footer = page.indexOf('className="quick-entry-footer"')
 
     expect(cardStart).toBeGreaterThanOrEqual(0)
-    expect(associationBlock).toBeGreaterThan(cardStart)
-    expect(associationBlock).toBeLessThan(footer)
+    expect(associationBlock).toBe(-1)
+    expect(page).not.toContain('className="log-project-badge')
+    expect(page).not.toContain('className="log-tag-badge')
+    expect(page).toContain('resolveProjectReference')
+    expect(page).toContain('extractHashTags(trimmed)')
+    expect(footer).toBeGreaterThan(cardStart)
     expect(styles).toMatch(/\.quick-entry\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s)
-    expect(styles).toMatch(/\.quick-entry \.quick-entry-associations\s*\{[^}]*order:\s*2;/s)
     expect(styles).toMatch(/\.quick-entry-footer\s*\{[^}]*order:\s*3;/s)
   })
 
@@ -63,6 +66,9 @@ describe('work log card layout', () => {
     expect(component).toContain('onProjectClick')
     expect(styles).toContain('.inline-reference')
     expect(styles).toContain('.inline-reference.is-selected')
+    expect(page).toContain('onProjectClick={handleProjectSelect}')
+    expect(page).toContain('onTagClick={handleTagSelect}')
+    expect(page).toContain("setTagFilter(tagFilter === path ? '' : path)")
   })
 
   it('uses a separate project color while keeping the existing tag color', () => {

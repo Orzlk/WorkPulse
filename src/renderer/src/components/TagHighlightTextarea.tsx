@@ -1,9 +1,15 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { TextareaHTMLAttributes, UIEvent } from 'react'
 import { highlightComposerReferences } from '../lib/workspaceInteractions'
 
-export const TagHighlightTextarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  function TagHighlightTextarea({ value, onScroll, className = '', ...props }, forwardedRef): JSX.Element {
+interface TagHighlightTextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  autoGrow?: boolean
+  autoGrowMinHeight?: number
+  autoGrowMaxHeight?: number
+}
+
+export const TagHighlightTextarea = forwardRef<HTMLTextAreaElement, TagHighlightTextareaProps>(
+  function TagHighlightTextarea({ value, onScroll, className = '', autoGrow = false, autoGrowMinHeight = 220, autoGrowMaxHeight = 560, ...props }, forwardedRef): JSX.Element {
     const highlightRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement | null>(null)
     const text = String(value ?? '')
@@ -15,6 +21,20 @@ export const TagHighlightTextarea = forwardRef<HTMLTextAreaElement, TextareaHTML
         textareaRef.current?.scrollTo(0, 0)
       }
     }, [text])
+
+    useLayoutEffect(() => {
+      if (!autoGrow) return
+      const textarea = textareaRef.current
+      const wrapper = textarea?.parentElement
+      if (!textarea || !wrapper) return
+
+      wrapper.style.height = 'auto'
+      textarea.style.height = 'auto'
+      const contentHeight = Math.min(Math.max(textarea.scrollHeight, autoGrowMinHeight), autoGrowMaxHeight)
+      wrapper.style.height = `${contentHeight}px`
+      textarea.style.height = '100%'
+      textarea.style.overflowY = 'auto'
+    }, [autoGrow, autoGrowMaxHeight, autoGrowMinHeight, text])
 
     useImperativeHandle(forwardedRef, () => textareaRef.current as HTMLTextAreaElement, [])
 

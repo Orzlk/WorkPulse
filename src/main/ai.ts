@@ -9,6 +9,15 @@ import {
   type PeriodReportProvider
 } from './reports/periodReportAi'
 import { callAnthropic, callDeepSeek, callOpenAI } from './reports/aiProvider'
+import { buildInboxSuggestionPrompt, parseInboxSuggestion, type InboxAiReferences } from './inbox/inboxAi'
+import type { InboxSuggestion } from './domain/types'
+import {
+  DEFAULT_REPORT_TEMPLATE,
+  DEFAULT_REPORT_TEMPLATE_EN,
+  DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_SYSTEM_PROMPT_EN,
+  replaceReportPromptVariables
+} from './reports/reportDefaults'
 
 export type { PeriodReportOptions, PeriodReportProvider } from './reports/periodReportAi'
 
@@ -24,50 +33,6 @@ interface ReportTaskContext {
   due_date?: string | null
   completed_at?: string | null
 }
-
-const DEFAULT_SYSTEM_PROMPT = `你是一个专业的工作报告助手。请根据用户提供的工作日志，生成一份结构化的工作总结报告。
-
-要求：
-- 语言：{{language}}
-- 风格：{{style}}
-- 时间范围：{{dateFrom}} 至 {{dateTo}}
-- 输出格式：Markdown
-- 按主题/项目分类归纳
-- 突出关键成果和产出
-- 简洁有力，避免流水账`
-
-const DEFAULT_REPORT_TEMPLATE = `## 工作总结 ({{dateFrom}} - {{dateTo}})
-
-### 主要产出
-（按项目/主题分类列出关键成果）
-
-### 进行中的工作
-（尚未完成但有进展的事项）
-
-### 下周计划
-（基于当前工作的合理推断）`
-
-const DEFAULT_SYSTEM_PROMPT_EN = `You are a professional work report assistant. Generate a structured work summary from the user's work logs.
-
-Requirements:
-- Language: {{language}}
-- Style: {{style}}
-- Date range: {{dateFrom}} to {{dateTo}}
-- Output format: Markdown
-- Group work by topic/project
-- Highlight key outcomes and deliverables
-- Keep it concise and useful; avoid a raw chronological dump`
-
-const DEFAULT_REPORT_TEMPLATE_EN = `## Work Summary ({{dateFrom}} - {{dateTo}})
-
-### Key Outcomes
-(Group important outcomes by project/topic)
-
-### Work in Progress
-(Items that are not finished but have meaningful progress)
-
-### Next Plan
-(Reasonable next steps based on current work)`
 
 export async function generateReport(
   logs: { content: string; created_at: string }[],
@@ -90,8 +55,8 @@ export async function generateReport(
   const reportTemplate = getSetting('report_template') || (resolvedLanguage === 'zh' ? DEFAULT_REPORT_TEMPLATE : DEFAULT_REPORT_TEMPLATE_EN)
 
   const vars: Record<string, string> = { language, style, dateFrom, dateTo }
-  const systemPrompt = replaceVars(customPrompt, vars)
-  const templateHint = replaceVars(reportTemplate, vars)
+  const systemPrompt = replaceReportPromptVariables(customPrompt, vars)
+  const templateHint = replaceReportPromptVariables(reportTemplate, vars)
 
   const logsText = logs
     .map((log) => `[${log.created_at}] ${log.content}`)
@@ -125,26 +90,63 @@ export async function generatePeriodReportContent(
   period: ReportPeriod,
   options: Partial<PeriodReportOptions> = {}
 ): Promise<string> {
+  const resolvedLanguage = getResolvedLanguage()
+  const useConfiguredSettings = !options.provider
+  const configuredSetting = (key: string, fallback: string): string => useConfiguredSettings ? (getSetting(key) || fallback) : fallback
+  const language = options.language ?? configuredSetting('report_language', resolvedLanguage === 'zh' ? '中文' : 'English')
+  const style = options.style ?? configuredSetting('report_style', resolvedLanguage === 'zh' ? '简洁专业' : 'Concise professional')
+  const systemPrompt = options.systemPrompt ?? configuredSetting('system_prompt', resolvedLanguage === 'zh' ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_EN)
+  const reportTemplate = options.reportTemplate ?? configuredSetting('report_template', resolvedLanguage === 'zh' ? DEFAULT_REPORT_TEMPLATE : DEFAULT_REPORT_TEMPLATE_EN)
   const provider: PeriodReportProvider = options.provider ?? ((input) =>
-    callConfiguredPeriodProvider(input.systemPrompt, input.userPrompt, input.signal)
+    callConfiguredPeriodProvider(input.systemPrompt, input.userPrompt, input.signal, input.onChunk)
   )
-  return generatePurePeriodReportContent(snapshot, reportType, period, { provider, timeoutMs: options.timeoutMs })
+  return generatePurePeriodReportContent(snapshot, reportType, period, {
+    provider,
+    timeoutMs: options.timeoutMs,
+    signal: options.signal,
+    onChunk: options.onChunk,
+    systemPrompt,
+    reportTemplate,
+    language,
+    style
+  })
 }
 
-async function callConfiguredPeriodProvider(systemPrompt: string, userPrompt: string, signal: AbortSignal): Promise<string> {
+async function callConfiguredPeriodProvider(systemPrompt: string, userPrompt: string, signal: AbortSignal, onChunk?: (chunk: string) => void): Promise<string> {
   const apiKey = getStoredApiKey()
   if (!apiKey) throw new Error(tMain('apiKeyMissing'))
   const provider = getSetting('ai_provider') || 'openai'
   const baseUrl = getSetting('ai_base_url') || ''
   const model = getSetting('ai_model') || ''
   const messages: Message[] = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
-  if (provider === 'anthropic') return callAnthropic({ apiKey, baseUrl, model, messages, signal })
-  if (provider === 'deepseek') return callDeepSeek({ apiKey, baseUrl, model, messages, signal })
-  return callOpenAI({ apiKey, baseUrl, model, messages, signal })
+  if (provider === 'anthropic') return callAnthropic({ apiKey, baseUrl, model, messages, signal, onChunk })
+  if (provider === 'deepseek') return callDeepSeek({ apiKey, baseUrl, model, messages, signal, onChunk })
+  return callOpenAI({ apiKey, baseUrl, model, messages, signal, onChunk })
 }
 
-function replaceVars(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '')
+export async function generateInboxSuggestion(content: string, references: InboxAiReferences, signal?: AbortSignal): Promise<InboxSuggestion> {
+  const apiKey = getStoredApiKey()
+  if (!apiKey) throw new Error(tMain('apiKeyMissing'))
+  const provider = getSetting('ai_provider') || 'openai'
+  const baseUrl = getSetting('ai_base_url') || ''
+  const model = getSetting('ai_model') || ''
+  const messages: Message[] = [
+    {
+      role: 'system',
+      content: '你是 WorkPulse 收件箱整理助手。只输出合法 JSON，不要 Markdown 代码围栏。只能使用给定的项目、仓库和标签。不要自动执行整理。'
+    },
+    { role: 'user', content: buildInboxSuggestionPrompt(content, references) }
+  ]
+  const request = { apiKey, baseUrl, model, messages, signal }
+  const raw = provider === 'anthropic'
+    ? await callAnthropic(request)
+    : provider === 'deepseek'
+      ? await callDeepSeek(request)
+      : await callOpenAI(request)
+  return parseInboxSuggestion(raw, {
+    projectIds: references.projects.map((project) => project.public_id),
+    repositoryIds: references.repositories.map((repository) => repository.public_id)
+  })
 }
 
 function formatTaskContext(tasks: ReportTaskContext[]): string {

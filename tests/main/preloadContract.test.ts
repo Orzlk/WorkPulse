@@ -25,6 +25,8 @@ describe('preload API contract', () => {
     }
     expect(implementation).toContain('worklogEditorChanged:')
     expect(declaration).toContain('worklogEditorChanged:')
+    expect(implementation).toContain('attachmentsImported: number')
+    expect(declaration).toContain('attachmentsImported: number')
     expect(implementation).not.toContain('updates: Record<string, unknown>')
   })
 

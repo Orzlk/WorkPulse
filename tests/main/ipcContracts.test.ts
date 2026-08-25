@@ -9,6 +9,7 @@ import {
   parseRepositoryCreateInput,
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
+  parseInboxListInput,
   parseTagNames
 } from '../../src/main/ipcContracts'
 
@@ -33,6 +34,17 @@ describe('IPC contract validation', () => {
     expect(() => parsePagination({ limit: 201 })).toThrow('INVALID_ARGUMENT')
     expect(() => parseRepositoryCreateInput({ name: 'repo', local_path: 'C:/repo', command: 'reset' }))
       .toThrow('INVALID_ARGUMENT')
+  })
+
+  it('accepts an inbox state filter without allowing unknown list fields', () => {
+    expect(parseInboxListInput({ limit: 20, offset: 4, state: 'unorganized' })).toEqual({
+      limit: 20,
+      offset: 4,
+      state: 'unorganized'
+    })
+    expect(parseInboxListInput(undefined)).toEqual({ limit: 50, offset: 0 })
+    expect(() => parseInboxListInput({ state: 'unknown' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseInboxListInput({ state: 'unorganized', extra: true })).toThrow('INVALID_ARGUMENT')
   })
 
   it('accepts editable repository metadata and rejects empty repository names', () => {

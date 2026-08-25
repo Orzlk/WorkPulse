@@ -7,6 +7,8 @@ import { buildReportExportName, getHistoryReportState, getLatestCompleteReportAn
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
+import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
+import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
 type Stage = 'idle' | 'reading' | 'git' | 'grouping' | 'generating' | 'failed'
@@ -20,10 +22,10 @@ interface Preview {
   type: WorkflowReportType; display_start: string; display_end_inclusive: string; project_count: number; repository_count: number
   work_log_count: number; task_count: number; inbox_count: number; git_commit_count: number; unorganized_inbox_count: number
 }
-interface Props { projectId: string | null; onProjectChange: (projectId: string | null) => void; onOpenInbox: () => void }
+interface Props { projectId: string | null; onProjectChange: (projectId: string | null) => void; onOpenInbox: () => void; onOpenStats?: () => void }
 
 const EMPTY_PREVIEW: Preview = { type: 'weekly', display_start: '', display_end_inclusive: '', project_count: 0, repository_count: 0, work_log_count: 0, task_count: 0, inbox_count: 0, git_commit_count: 0, unorganized_inbox_count: 0 }
-function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Element {
+function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Props): JSX.Element {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const toast = useToast()
   const { t } = useI18n()
@@ -48,6 +50,7 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Ele
   const [editing, setEditing] = useState(false)
   const [copied, setCopied] = useState(false)
   const timers = useRef<number[]>([])
+  const activeStreamId = useRef<string | null>(null)
   const request = useMemo(() => ({ type, anchorDate, timeZone, projectIds, repositoryIds }), [anchorDate, projectIds, repositoryIds, timeZone, type])
 
   const clearTimers = (): void => { timers.current.forEach(window.clearTimeout); timers.current = [] }
@@ -58,7 +61,38 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Ele
 
   useEffect(() => {
     void fetchProjects(); void fetchRepositories(); void loadHistory(); void checkKey()
-    return clearTimers
+    const unsubscribe = window.api.on.reportStream((event) => {
+      if (event.request_id !== activeStreamId.current) return
+      if (event.type === 'stage') {
+        setStage(event.stage === 'reading' ? 'reading' : 'generating')
+        return
+      }
+      if (event.type === 'chunk') {
+        setContent((current) => current + (event.chunk ?? ''))
+        return
+      }
+      activeStreamId.current = null
+      clearTimers()
+      if (event.type === 'done' && event.report) {
+        const report = event.report as Report
+        setActive(report)
+        setContent(report.content)
+        setStatus(report.content ? 'success' : 'no_data')
+        setStage('idle')
+        void loadHistory()
+        return
+      }
+      setStage('failed')
+      setError(event.code === 'cancelled' ? t('common.cancel') : t('report.error.unknown'))
+      setStatus('error')
+    })
+    return () => {
+      unsubscribe()
+      clearTimers()
+      const requestId = activeStreamId.current
+      if (requestId) void window.api.report.cancel(requestId)
+      activeStreamId.current = null
+    }
   }, [fetchProjects, fetchRepositories])
   useEffect(() => {
     let closed = false
@@ -74,22 +108,28 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Ele
   const chooseType = (next: WorkflowReportType): void => {
     setType(next); setAnchorDate(getLatestCompleteReportAnchor(next, timeZone))
   }
-  const setProgress = (): void => {
-    clearTimers(); setStage('reading')
-    timers.current = [window.setTimeout(() => setStage('git'), 260), window.setTimeout(() => setStage('grouping'), 650), window.setTimeout(() => setStage('generating'), 1200)]
-  }
   const generate = async (input: typeof request | MouseEvent<HTMLButtonElement> = request, bypassEmptyPreview = false): Promise<void> => {
     if (status === 'no_key' || previewLoading) return
     if (!bypassEmptyPreview && !hasReportPreviewData(preview)) {
       setStatus('no_data'); setStage('idle'); return
     }
     const inputRequest = 'anchorDate' in input ? input : request
-    setStatus('generating'); setError(''); setViewing(null); setActive(null); setProgress()
+    setStatus('generating'); setError(''); setViewing(null); setActive(null); setContent(''); setStage('reading')
     try {
-      const report = await window.api.report.generate(inputRequest) as Report
-      clearTimers(); setActive(report); setContent(report.content); setStatus(report.content ? 'success' : 'no_data'); setStage('idle'); await loadHistory()
+      activeStreamId.current = await window.api.report.startStream(inputRequest)
     } catch (cause) {
+      activeStreamId.current = null
       clearTimers(); setStage('failed'); setError(t(`report.error.${getReportGenerationError(cause)}`)); setStatus('error')
+    }
+  }
+  const cancelGeneration = async (): Promise<void> => {
+    const requestId = activeStreamId.current
+    if (!requestId) return
+    try {
+      await window.api.report.cancel(requestId)
+    } catch {
+      setError(t('common.cancel'))
+      setStatus('error')
     }
   }
   const retryActiveReport = (): void => {
@@ -121,6 +161,8 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Ele
   const isHistory = viewing !== null
 
   return <div className="mx-auto max-w-6xl space-y-6 pb-10">
+    <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={isHistory ? [{ label: t('nav.report'), onClick: () => { setViewing(null); setActive(null); setContent(''); setStatus('idle'); setEditing(false) } }, { label: t('report.history'), current: true }] : [{ label: t('nav.report'), current: true }]} title={t('report.workflowTitle')} description={t('report.workflowSubtitle')} />
+    <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'reports', label: t('nav.report'), active: true }, { id: 'stats', label: t('nav.stats'), onClick: onOpenStats }]} />
     {isHistory ? <HistoryHeader report={viewing} onBack={() => { setViewing(null); setActive(null); setContent(''); setStatus('idle'); setEditing(false) }} t={t} timeZone={timeZone} /> : <>
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold tracking-[0.16em] text-zinc-500">{t('report.kicker')}</p><h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('report.workflowTitle')}</h1><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{t('report.workflowSubtitle')}</p></div><span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{timeZone}</span></div>
@@ -130,8 +172,9 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox }: Props): JSX.Ele
         </div>
       </section>
       <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-700 dark:bg-zinc-900/60" aria-live="polite"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t('report.previewTitle')}</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{previewLoading ? t('report.previewLoading') : `${preview.display_start || '—'} ${t('common.to')} ${preview.display_end_inclusive || '—'}`}</p></div><span className="text-xs text-zinc-500">{t('report.previewTimezone', { timeZone })}</span></div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"><Metric label={t('report.previewProjects')} value={preview.project_count} /><Metric label={t('report.previewRepositories')} value={preview.repository_count} /><Metric label={t('report.previewLogs')} value={preview.work_log_count} /><Metric label={t('report.previewTasks')} value={preview.task_count} /><Metric label={t('report.previewInbox')} value={preview.inbox_count} /><Metric label={t('report.previewGit')} value={preview.git_commit_count} /></div>{preview.unorganized_inbox_count > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><span className="flex items-center gap-2"><AlertCircle className="h-4 w-4" aria-hidden="true" />{t('report.unorganizedReminder', { count: preview.unorganized_inbox_count })}</span><button type="button" onClick={onOpenInbox} className="min-h-9 rounded-md px-2 font-medium underline underline-offset-4 focus:outline-none focus:ring-2 focus:ring-amber-600">{t('report.openInbox')}</button></div>}<p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{t('report.inboxReminder')}</p></section>
-      <button type="button" onClick={() => void generate()} disabled={status === 'no_key' || status === 'generating' || previewLoading} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 dark:focus:ring-offset-zinc-950">{status === 'generating' ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}{status === 'generating' ? `${t('report.estimatedPhase')} ${t(`report.stage.${stage}`)}` : t('report.generate')}</button>
+      <button type="button" onClick={() => status === 'generating' ? void cancelGeneration() : void generate()} disabled={status === 'no_key' || previewLoading} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 dark:focus:ring-offset-zinc-950">{status === 'generating' ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}{status === 'generating' ? t('common.cancel') : t('report.generate')}</button>
     </>}
+    {status === 'generating' && content && <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-live="polite"><div className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-600 dark:text-zinc-300"><LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t('report.generating')}</div><div className="prose prose-zinc max-w-none dark:prose-invert" role="article"><ReactMarkdown>{content}</ReactMarkdown></div></section>}
     {status === 'no_key' && !isHistory && <Notice tone="warning" title={t('report.noKeyTitle')} detail={t('report.noKeySubtitle')} />}
     {status === 'error' && <Notice tone="error" title={error} detail={active ? t('report.errorWithRetryCount', { count: active.retry_count }) : t('report.error.retryHint')} action={<button type="button" onClick={() => active?.status === 'error' ? retryActiveReport() : void generate()} className="min-h-9 rounded-md px-2 text-sm font-medium underline underline-offset-4 focus:outline-none focus:ring-2 focus:ring-red-500">{t('common.retry')}</button>} />}
     {status === 'no_data' && !isHistory && <Notice tone="neutral" title={t('report.noDataTitle')} detail={t('report.noDataSubtitle')} />}

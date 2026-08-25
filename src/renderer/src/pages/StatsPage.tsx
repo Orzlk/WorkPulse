@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { Flame, FileText, CheckCircle2, ListTodo } from 'lucide-react'
 import { useI18n } from '../stores/languageStore'
+import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
+import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 
 interface DailyStats {
   date: string
@@ -223,7 +225,7 @@ function HeatMap({ data }: { data: DailyStats[] }): JSX.Element {
   )
 }
 
-function StatsPage(): JSX.Element {
+function StatsPage({ onOpenReports }: { onOpenReports?: () => void }): JSX.Element {
   const [stats, setStats] = useState<Stats | null>(null)
   const { t } = useI18n()
 
@@ -259,6 +261,8 @@ function StatsPage(): JSX.Element {
 
   return (
     <div>
+      <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={[{ label: t('nav.stats'), current: true }]} title={t('nav.stats')} />
+      <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'reports', label: t('nav.report'), onClick: onOpenReports }, { id: 'stats', label: t('nav.stats'), active: true }]} />
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-3 mb-6">
         <StatCard

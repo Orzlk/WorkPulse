@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 
 import type { InboxItem, InboxSuggestion, InboxTarget, Page } from '../domain/types'
-import type { Pagination, WorkspaceContext } from '../repositories/contracts'
+import type { InboxPagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
 import { LocalTagRepository, normalizeTagName } from '../repositories/localTagRepository'
 
@@ -66,9 +66,14 @@ export class InboxService {
     return create()
   }
 
-  list(pagination?: Pagination): Page<InboxItem> {
+  list(pagination?: InboxPagination): Page<InboxItem> {
     this.assertWorkspace()
     return this.inbox.list(this.context, pagination)
+  }
+
+  listUnorganized(limit = 20, publicIds?: string[]): InboxItem[] {
+    this.assertWorkspace()
+    return this.inbox.listUnorganized(this.context, limit, publicIds)
   }
 
   get(publicId: string): InboxItem | null {

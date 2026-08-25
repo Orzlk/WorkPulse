@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Check, X } from 'lucide-react'
+import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { Check, Image, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { TagHighlightTextarea } from '../components/TagHighlightTextarea'
 import { useI18n, useLanguageStore } from '../stores/languageStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
-import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, resolveProjectReference, syncProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
 import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
 import type { Tag } from '../lib/workspaceTypes'
 
@@ -32,7 +32,6 @@ interface EditorValues {
   date: string
   projectId: string
   repositoryId: string
-  tagsInput: string
 }
 
 function serializeEditorValues(values: EditorValues): string {
@@ -46,7 +45,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
   const [date, setDate] = useState('')
   const [projectId, setProjectId] = useState('')
   const [repositoryId, setRepositoryId] = useState('')
-  const [tagsInput, setTagsInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -56,8 +54,10 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
   const [tagOptions, setTagOptions] = useState<Tag[]>([])
   const [mentionPosition, setMentionPosition] = useState<MentionMenuPosition | null>(null)
   const [mentionPositionTick, setMentionPositionTick] = useState(0)
+  const [attachmentSaving, setAttachmentSaving] = useState(false)
   const initialValuesRef = useRef<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
   const contentShellRef = useRef<HTMLDivElement>(null)
   const mentionMenuRef = useRef<HTMLDivElement>(null)
   const initTheme = useThemeStore((state) => state.init)
@@ -85,7 +85,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       .slice(0, 8)
   }, [tagMention, tagOptions])
 
-  const values: EditorValues = { content, category, date, projectId, repositoryId, tagsInput }
+  const values: EditorValues = { content, category, date, projectId, repositoryId }
   const isDirty = Boolean(log && initialValuesRef.current && serializeEditorValues(values) !== initialValuesRef.current)
 
   useEffect(() => {
@@ -112,8 +112,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
         category: loadedLog.category,
         date: loadedLog.created_at.slice(0, 10),
         projectId: loadedLog.project_id ?? '',
-        repositoryId: loadedLog.repository_id ?? '',
-        tagsInput: loadedLog.tag_names.map((tag) => `#${tag}`).join(' ')
+        repositoryId: loadedLog.repository_id ?? ''
       }
       initialValuesRef.current = serializeEditorValues(nextValues)
       setLog(loadedLog)
@@ -122,7 +121,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       setDate(nextValues.date)
       setProjectId(nextValues.projectId)
       setRepositoryId(nextValues.repositoryId)
-      setTagsInput(nextValues.tagsInput)
       setLoading(false)
     }).catch(() => {
       if (!active) return
@@ -161,6 +159,57 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
     syncEditorMention(value, event.target.selectionStart)
   }
 
+  const insertEditorText = (text: string): void => {
+    const textarea = inputRef.current
+    if (!textarea) {
+      setContent((current) => `${current}${text}`)
+      return
+    }
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const next = `${content.slice(0, start)}${text}${content.slice(end)}`
+    setContent(next)
+    syncEditorMention(next, start + text.length)
+    requestAnimationFrame(() => {
+      textarea.focus()
+      const cursor = start + text.length
+      textarea.setSelectionRange(cursor, cursor)
+    })
+  }
+
+  const insertEditorAttachment = async (file: File): Promise<void> => {
+    if (!file.type.startsWith('image/')) {
+      setError(t('worklog.saveError'))
+      return
+    }
+    setAttachmentSaving(true)
+    try {
+      const saved = await window.api.attachment.save({
+        fileName: file.name || 'pasted-image.png',
+        mimeType: file.type || 'image/png',
+        data: await file.arrayBuffer()
+      })
+      insertEditorText(`![${saved.fileName}](${saved.url})`)
+    } catch {
+      setError(t('worklog.saveError'))
+    } finally {
+      setAttachmentSaving(false)
+    }
+  }
+
+  const handleEditorPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+    const image = Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/'))
+    if (!image) return
+    event.preventDefault()
+    void insertEditorAttachment(image)
+  }
+
+  const handleEditorDrop = (event: ReactDragEvent<HTMLTextAreaElement>): void => {
+    event.preventDefault()
+    const image = Array.from(event.dataTransfer.files).find((file) => file.type.startsWith('image/'))
+    if (image) void insertEditorAttachment(image)
+  }
+
   const selectProjectMention = (projectPublicId: string): void => {
     if (!projectMention) return
     const project = projects.find((item) => item.public_id === projectPublicId)
@@ -190,6 +239,11 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       textarea.focus()
       textarea.setSelectionRange(next.cursor, next.cursor)
     })
+  }
+
+  const handleProjectChange = (nextProjectId: string): void => {
+    setProjectId(nextProjectId)
+    setContent(syncProjectReference(content, projects, nextProjectId || null))
   }
 
   const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -242,13 +296,13 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       const updated = await window.api.worklog.update(
         log.id,
         trimmedContent,
-        category.trim(),
-        date ? `${date}${log.created_at.slice(10)}` : undefined,
-        {
-          project_id: projectId || null,
+          category.trim(),
+          date ? `${date}${log.created_at.slice(10)}` : undefined,
+          {
+          project_id: resolveProjectReference(trimmedContent, projects) ?? (projectId || null),
           repository_id: repositoryId || null,
-          tag_names: extractHashTags(`${trimmedContent} ${tagsInput}`).tags
-        }
+          tag_names: extractHashTags(trimmedContent).tags
+          }
       )
       if (!updated) {
         setError(t('worklog.saveError'))
@@ -319,6 +373,38 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       </header>
 
       <main className="worklog-editor-main">
+        <section className="worklog-editor-property-bar" aria-label={t('workspace.associations')}>
+          <label>
+            <span>{t('workspace.project')}</span>
+            <select value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
+              <option value="">{t('workspace.unassigned')}</option>
+              {projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>{t('workspace.repository')}</span>
+            <select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
+              <option value="">{t('workspace.unassigned')}</option>
+              {repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}
+            </select>
+          </label>
+          <div className="worklog-editor-property-tags">
+            <span>{t('workspace.tags')}</span>
+            <div className="worklog-editor-tag-list">
+              {extractHashTags(content).tags.length > 0
+                ? extractHashTags(content).tags.map((tag) => <span key={tag}>#{tag}</span>)
+                : <em>{t('workspace.noTags')}</em>}
+            </div>
+          </div>
+          <label>
+            <span>{t('worklog.category')}</span>
+            <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="#tag" />
+          </label>
+          <label>
+            <span>{t('common.date')}</span>
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+        </section>
         <label htmlFor="worklog-editor-content" className="worklog-editor-label">{t('worklog.editorContentLabel')}</label>
         <div ref={contentShellRef} className="worklog-editor-content-shell">
           <TagHighlightTextarea
@@ -327,13 +413,30 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
             value={content}
             onChange={handleEditorChange}
             onKeyDown={handleEditorKeyDown}
+            onPaste={handleEditorPaste}
+            onDrop={handleEditorDrop}
+            onDragOver={(event) => event.preventDefault()}
             onSelect={() => setMentionPositionTick((current) => current + 1)}
             onScroll={() => setMentionPositionTick((current) => current + 1)}
             placeholder={t('worklog.editorContentPlaceholder')}
             className="worklog-editor-composer"
+            autoGrow
+            autoGrowMinHeight={220}
+            autoGrowMaxHeight={560}
             aria-controls={activeMention ? mentionMenuId : undefined}
             aria-expanded={Boolean(activeMention)}
             autoFocus
+          />
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => {
+              const image = event.target.files?.[0]
+              if (image) void insertEditorAttachment(image)
+              event.currentTarget.value = ''
+            }}
           />
           {activeMention && (
             <div ref={mentionMenuRef} id={mentionMenuId} style={mentionPosition ? { left: mentionPosition.left, top: mentionPosition.top } : undefined} className={`project-mention-menu worklog-mention-menu worklog-editor-mention-menu ${tagMention ? 'tag-mention-menu' : ''}`} role="listbox" aria-label={t(projectMention ? 'worklog.projectMentionSuggestions' : 'worklog.tagMentionSuggestions')}>
@@ -370,40 +473,15 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
           )}
         </div>
 
-        <section className="worklog-editor-associations" aria-label={t('workspace.associations')}>
-          <label>
-            <span>{t('workspace.project')}</span>
-            <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-              <option value="">{t('workspace.unassigned')}</option>
-              {projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>{t('workspace.repository')}</span>
-            <select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
-              <option value="">{t('workspace.unassigned')}</option>
-              {repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>{t('workspace.tags')}</span>
-            <input value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} placeholder={t('workspace.tagsPlaceholder')} />
-          </label>
-          <label>
-            <span>{t('worklog.category')}</span>
-            <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="#tag" />
-          </label>
-          <label>
-            <span>{t('common.date')}</span>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          </label>
-        </section>
         {error && <p className="worklog-editor-error" role="alert">{error}</p>}
       </main>
 
       <footer className="worklog-editor-footer">
         <span className="worklog-editor-hint">{t('worklog.editorShortcut')}</span>
         <div className="worklog-editor-actions">
+          <button type="button" onClick={() => attachmentInputRef.current?.click()} className="worklog-editor-secondary-button" disabled={saving || attachmentSaving} title={t('common.save')}>
+            <Image aria-hidden="true" />{t('common.save')}
+          </button>
           <button type="button" onClick={handleCancel} className="worklog-editor-secondary-button" disabled={saving}>
             <X aria-hidden="true" />{t('worklog.editCancel')}
           </button>

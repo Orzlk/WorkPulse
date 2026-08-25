@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 
 import type { InboxItem, InboxState, InboxSuggestion, Page } from '../domain/types'
-import type { InboxRepository, Pagination, ReadOptions, WorkspaceContext } from './contracts'
+import type { InboxPagination, InboxRepository, Pagination, ReadOptions, WorkspaceContext } from './contracts'
 
 const DEFAULT_LIMIT = 50
 
@@ -70,18 +70,40 @@ const inboxSelect = `
 export class LocalInboxRepository implements InboxRepository {
   constructor(private readonly database: Database.Database) {}
 
-  list(context: WorkspaceContext, pagination?: Pagination): Page<InboxItem> {
+  list(context: WorkspaceContext, pagination?: InboxPagination): Page<InboxItem> {
     const { limit, offset } = resolvePagination(pagination)
+    const stateClause = pagination?.state ? ' AND inbox_items.state = ?' : ''
+    const listArguments: unknown[] = [context.workspace_id]
+    if (pagination?.state) listArguments.push(pagination.state)
+    listArguments.push(limit, offset)
     const items = this.database.prepare(`${inboxSelect}
-      WHERE inbox_items.workspace_id = ? AND inbox_items.deleted_at IS NULL
+      WHERE inbox_items.workspace_id = ? AND inbox_items.deleted_at IS NULL${stateClause}
       ORDER BY inbox_items.created_at DESC, inbox_items.id DESC
       LIMIT ? OFFSET ?
-    `).all(context.workspace_id, limit, offset) as InboxRow[]
+    `).all(...listArguments) as InboxRow[]
+    const totalArguments: unknown[] = [context.workspace_id]
+    if (pagination?.state) totalArguments.push(pagination.state)
     const total = this.database.prepare(`
       SELECT COUNT(*) AS count FROM inbox_items
-      WHERE workspace_id = ? AND deleted_at IS NULL
-    `).get(context.workspace_id) as { count: number }
+      WHERE workspace_id = ? AND deleted_at IS NULL${pagination?.state ? ' AND state = ?' : ''}
+    `).get(...totalArguments) as { count: number }
     return { items: items.map(toInboxItem), total: total.count }
+  }
+
+  listUnorganized(context: WorkspaceContext, limit = 20, publicIds?: string[]): InboxItem[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 20)
+    if (publicIds?.length) {
+      return publicIds
+        .map((publicId) => this.get(context, publicId))
+        .filter((item): item is InboxItem => Boolean(item && item.state === 'unorganized'))
+        .slice(0, safeLimit)
+    }
+    const items = this.database.prepare(`${inboxSelect}
+      WHERE inbox_items.workspace_id = ? AND inbox_items.deleted_at IS NULL AND inbox_items.state = 'unorganized'
+      ORDER BY inbox_items.created_at DESC, inbox_items.id DESC
+      LIMIT ?
+    `).all(context.workspace_id, safeLimit) as InboxRow[]
+    return items.map(toInboxItem)
   }
 
   get(context: WorkspaceContext, publicId: string, options: ReadOptions = {}): InboxItem | null {

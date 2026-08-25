@@ -173,6 +173,24 @@ interface ReportPreview {
   unorganized_inbox_count: number
 }
 
+interface ReportStreamEvent {
+  request_id: string
+  type: 'stage' | 'chunk' | 'done' | 'error'
+  stage?: 'reading' | 'generating'
+  chunk?: string
+  report?: PeriodReport
+  code?: 'cancelled' | 'failed'
+  message?: string
+}
+
+interface SavedAttachment {
+  id: string
+  fileName: string
+  mimeType: string
+  size: number
+  url: string
+}
+
 interface AiConnectionTestResult {
   ok: boolean
   provider: 'openai' | 'anthropic' | 'deepseek'
@@ -241,6 +259,10 @@ const api = {
   report: {
     generate: (request: ReportRequest) =>
       ipcRenderer.invoke('report:generate', request) as Promise<PeriodReport>,
+    startStream: (request: ReportRequest) =>
+      ipcRenderer.invoke('report:stream:start', request) as Promise<string>,
+    cancel: (requestId: string) =>
+      ipcRenderer.invoke('report:stream:cancel', requestId) as Promise<void>,
     preview: (request: ReportRequest) =>
       ipcRenderer.invoke('report:preview', request) as Promise<ReportPreview>,
     list: (limit?: number) => ipcRenderer.invoke('report:list', limit) as Promise<PeriodReport[]>,
@@ -259,11 +281,13 @@ const api = {
     archive: (publicId: string) => ipcRenderer.invoke('project:archive', publicId) as Promise<Project | null>
   },
   inbox: {
-    list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('inbox:list', pagination) as Promise<Page<InboxItem>>,
+    list: (pagination?: { limit?: number; offset?: number; state?: InboxItem['state'] }) => ipcRenderer.invoke('inbox:list', pagination) as Promise<Page<InboxItem>>,
     get: (publicId: string) => ipcRenderer.invoke('inbox:get', publicId) as Promise<InboxItem | null>,
     create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => ipcRenderer.invoke('inbox:create', input) as Promise<InboxItem>,
     update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => ipcRenderer.invoke('inbox:update', publicId, input) as Promise<InboxItem | null>,
     organize: (publicId: string) => ipcRenderer.invoke('inbox:organize', publicId) as Promise<{ target: string; target_public_id: string | null }>,
+    aiOrganize: (input?: { public_ids?: string[]; limit?: number }) =>
+      ipcRenderer.invoke('inbox:ai-organize', input) as Promise<{ processed: number; updated: number; failed: number; items: InboxItem[] }>,
     ignore: (publicId: string) => ipcRenderer.invoke('inbox:ignore', publicId) as Promise<InboxItem | null>,
     archive: (publicId: string) => ipcRenderer.invoke('inbox:archive', publicId) as Promise<InboxItem | null>
   },
@@ -272,6 +296,10 @@ const api = {
     create: (name: string) => ipcRenderer.invoke('tag:create', name) as Promise<Tag>,
     rename: (publicId: string, name: string) => ipcRenderer.invoke('tag:rename', publicId, name) as Promise<Tag | null>,
     search: (query: string, pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('tag:search', query, pagination) as Promise<Page<Tag>>
+  },
+  attachment: {
+    save: (input: { fileName: string; mimeType: string; data: ArrayBuffer }) =>
+      ipcRenderer.invoke('attachment:save', input) as Promise<SavedAttachment>
   },
   search: {
     query: (input: { text?: string; tag_names?: string[]; project_id?: string | null; repository_id?: string | null; state?: InboxItem['state']; limit?: number; offset?: number }) => ipcRenderer.invoke('search:query', input) as Promise<Page<SearchResult>>
@@ -316,6 +344,7 @@ const api = {
         skipped: number
         filePath: string
         source: 'file' | 'flomo'
+        attachmentsImported: number
         attachmentsSkipped: number
       } | null>
   },
@@ -357,6 +386,13 @@ const api = {
       ipcRenderer.on('worklog-editor:changed', handler)
       return () => {
         ipcRenderer.removeListener('worklog-editor:changed', handler)
+      }
+    },
+    reportStream: (cb: (event: ReportStreamEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, value: ReportStreamEvent): void => cb(value)
+      ipcRenderer.on('report:stream', handler)
+      return () => {
+        ipcRenderer.removeListener('report:stream', handler)
       }
     }
   }

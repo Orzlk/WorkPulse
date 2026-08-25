@@ -1,6 +1,7 @@
 import { ipcMain, dialog, app, shell } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { writeFileSync, readFileSync, statSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import {
   addWorkLog,
   getWorkLogs,
@@ -37,16 +38,21 @@ import { SearchService } from './services/searchService'
 import { RepositoryService } from './services/repositoryService'
 import { ReportService } from './reports/reportService'
 import { testAiConnection } from './reports/aiProvider'
+import { generateInboxSuggestion } from './ai'
+import { saveAttachment } from './attachments/attachmentStorage'
 import {
   IpcContractError,
   id,
   parseInboxInput,
   parsePagination,
+  parseInboxListInput,
   parseProjectInput,
   parseReportListInput,
   parseReportRequest,
   parseStatsDays,
   parseAiConnectionTestInput,
+  parseAttachmentInput,
+  parseInboxAiInput,
   parseRepositoryCreateInput,
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
@@ -60,6 +66,18 @@ import { importFlomoMemos } from './importers/flomoLogImport'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const pendingImports = new ImportTokenStore<unknown>(10 * 60 * 1000)
+
+type ReportStreamEvent =
+  | { request_id: string; type: 'stage'; stage: 'reading' | 'generating' }
+  | { request_id: string; type: 'chunk'; chunk: string }
+  | { request_id: string; type: 'done'; report: unknown }
+  | { request_id: string; type: 'error'; code: 'cancelled' | 'failed'; message: string }
+
+const reportStreams = new Map<string, { controller: AbortController; senderId: number; sender: Electron.WebContents }>()
+
+function sendReportStreamEvent(sender: Electron.WebContents, event: ReportStreamEvent): void {
+  if (!sender.isDestroyed()) sender.send('report:stream', event)
+}
 
 function services(): {
   projects: ProjectService
@@ -153,6 +171,40 @@ export function registerIpcHandlers(): void {
     return services().reports.generate(parseReportRequest(request))
   }))
 
+  ipcMain.handle('report:stream:start', guardedWithEvent(async (event, request: unknown) => {
+    const parsed = parseReportRequest(request)
+    const requestId = randomUUID()
+    const controller = new AbortController()
+    const sender = event.sender
+    reportStreams.set(requestId, { controller, senderId: sender.id, sender })
+    setTimeout(() => {
+      void services().reports.generate(parsed, {
+        signal: controller.signal,
+        onStage: (stage) => sendReportStreamEvent(sender, { request_id: requestId, type: 'stage', stage }),
+        onChunk: (chunk) => sendReportStreamEvent(sender, { request_id: requestId, type: 'chunk', chunk })
+      }).then((report) => {
+        sendReportStreamEvent(sender, { request_id: requestId, type: 'done', report })
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'AI report generation failed'
+        sendReportStreamEvent(sender, {
+          request_id: requestId,
+          type: 'error',
+          code: controller.signal.aborted ? 'cancelled' : 'failed',
+          message
+        })
+      }).finally(() => {
+        reportStreams.delete(requestId)
+      })
+    }, 0)
+    return requestId
+  }))
+
+  ipcMain.handle('report:stream:cancel', guardedWithEvent((event, requestId: unknown) => {
+    if (typeof requestId !== 'string') return
+    const stream = reportStreams.get(requestId)
+    if (stream && stream.senderId === event.sender.id) stream.controller.abort()
+  }))
+
   ipcMain.handle('report:preview', guarded((request: unknown) => {
     return services().reports.preview(parseReportRequest(request))
   }))
@@ -192,7 +244,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('project:update', guarded((publicId: unknown, input: unknown) => services().projects.update(id(publicId, 'project id'), parseProjectInput(input, true))))
   ipcMain.handle('project:archive', guarded((publicId: unknown) => services().projects.softDelete(id(publicId, 'project id'))))
 
-  ipcMain.handle('inbox:list', guarded((pagination?: unknown) => services().inbox.list(parsePagination(pagination))))
+  ipcMain.handle('inbox:list', guarded((pagination?: unknown) => services().inbox.list(parseInboxListInput(pagination))))
   ipcMain.handle('inbox:get', guarded((publicId: unknown) => services().inbox.get(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:create', guarded((input: unknown) => {
     const item = parseInboxInput(input)
@@ -203,6 +255,28 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('inbox:organize', guarded((publicId: unknown) => services().inbox.confirm(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:ignore', guarded((publicId: unknown) => services().inbox.ignore(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:archive', guarded((publicId: unknown) => services().inbox.archive(id(publicId, 'inbox id'))))
+  ipcMain.handle('inbox:ai-organize', guarded(async (input: unknown) => {
+    const request = parseInboxAiInput(input)
+    const domain = services()
+    const candidates = domain.inbox.listUnorganized(request.limit, request.public_ids)
+    const references = {
+      projects: domain.projects.list({ limit: 200, offset: 0 }).items.map((project) => ({ public_id: project.public_id, name: project.name })),
+      repositories: domain.repositories.list({ limit: 200, offset: 0 }).items.map((repository) => ({ public_id: repository.public_id, name: repository.name })),
+      tags: domain.tags.list({ limit: 200, offset: 0 }).items.map((tag) => tag.path)
+    }
+    const items = []
+    let failed = 0
+    for (const candidate of candidates) {
+      try {
+        const suggestion = await generateInboxSuggestion(candidate.content, references)
+        const updated = domain.inbox.update(candidate.public_id, { ai_suggestion: suggestion })
+        if (updated) items.push(updated)
+      } catch {
+        failed++
+      }
+    }
+    return { processed: candidates.length, updated: items.length, failed, items }
+  }))
 
   ipcMain.handle('tag:list', guarded((pagination?: unknown) => services().tags.list(parsePagination(pagination))))
   ipcMain.handle('tag:create', guarded((name: unknown) => {
@@ -285,6 +359,11 @@ export function registerIpcHandlers(): void {
   }))
 
   ipcMain.handle('database:clear', guarded(() => clearWorkspaceData()))
+
+  ipcMain.handle('attachment:save', guarded((input: unknown) => {
+    const value = parseAttachmentInput(input)
+    return saveAttachment(join(app.getPath('userData'), 'attachments'), value)
+  }))
 
   // --- Tasks ---
 
@@ -448,12 +527,15 @@ export function registerIpcHandlers(): void {
     if (ext === 'html') {
       const parsed = parseFlomoHtml(content)
       if (parsed.memos.length === 0) throw new Error('未找到有效的 Flomo HTML 笔记')
-      const summary = importFlomoMemos(parsed.memos, { addWorkLog, workLogExists })
+      const summary = importFlomoMemos(parsed.memos, { addWorkLog, workLogExists, listWorkLogs: getAllWorkLogs }, {
+        sourceRoot: dirname(filePath),
+        attachmentRoot: join(app.getPath('userData'), 'attachments'),
+        saveAttachment
+      })
       return {
         ...summary,
         filePath,
-        source: 'flomo' as const,
-        attachmentsSkipped: parsed.attachmentCount
+        source: 'flomo' as const
       }
     }
 
@@ -504,7 +586,7 @@ export function registerIpcHandlers(): void {
       }
     }
 
-    return { imported, skipped, filePath, source: 'file' as const, attachmentsSkipped: 0 }
+    return { imported, skipped, filePath, source: 'file' as const, attachmentsImported: 0, attachmentsSkipped: 0 }
   })
 
   // --- App ---

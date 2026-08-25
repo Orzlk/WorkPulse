@@ -15,6 +15,7 @@ interface ProjectStore {
   loadMore: () => Promise<void>
   select: (publicId: string | null) => void
   create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => Promise<Project>
+  update: (publicId: string, input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => Promise<Project>
   archive: (publicId: string) => Promise<void>
 }
 
@@ -49,6 +50,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   create: async (input) => {
     const item = await window.api.project.create(input)
     set({ items: [item, ...get().items], total: get().total + 1, status: 'success' })
+    return item
+  },
+  update: async (publicId, input) => {
+    const item = await window.api.project.update(publicId, input)
+    if (!item) throw new Error('Project not found')
+    set({ items: get().items.map((current) => current.public_id === publicId ? item : current), status: 'success' })
     return item
   },
   archive: async (publicId) => {

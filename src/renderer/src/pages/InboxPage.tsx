@@ -6,14 +6,19 @@ import { useInboxStore } from '../stores/inboxStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
 import { useI18n } from '../stores/languageStore'
+import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
+import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
+import { RecordsSidebar } from '../components/RecordsSidebar'
+import type { InboxFilter } from '../lib/workspaceTypes'
 
-function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
+function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpenRecords?: () => void }): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
   const [projectId, setProjectId] = useState('')
   const [repositoryId, setRepositoryId] = useState('')
   const [saving, setSaving] = useState(false)
-  const { items, total, status, error, selectedId, fetch, loadByPublicId, loadMore, select, create, organize, ignore } = useInboxStore()
+  const [aiOrganizing, setAiOrganizing] = useState(false)
+  const { items, total, status, error, selectedId, filter: inboxFilter, fetch, setFilter: setInboxFilter, loadByPublicId, loadMore, select, create, suggestAi, organize, ignore } = useInboxStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
   const repositories = useRepositoryStore((state) => state.items)
@@ -60,13 +65,49 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
     try { await ignore(publicId); toast.success(t('workspace.ignored')) } catch { toast.error(t('workspace.ignoreFailed')) }
   }
 
+  const handleAiOrganize = async (): Promise<void> => {
+    if (aiOrganizing || items.length === 0) return
+    setAiOrganizing(true)
+    try {
+      const result = await suggestAi({ limit: 20 })
+      toast.success(`${t('workspace.organized')}：${result.updated}`)
+    } catch {
+      toast.error(t('workspace.organizeFailed'))
+    } finally {
+      setAiOrganizing(false)
+    }
+  }
+
   return (
-    <div className="workspace-page inbox-page">
-      <header className="workspace-page-heading">
-        <p className="workspace-kicker">{t('workspace.inboxKicker')}</p>
-        <h2>{t('workspace.inboxTitle')}</h2>
-        <p>{t('workspace.inboxSubtitle')}</p>
-      </header>
+    <div className="records-layout">
+      <RecordsSidebar
+        mode="inbox"
+        notesLabel={t('workspace.notes')}
+        inboxLabel={t('nav.inbox')}
+        inboxFilter={inboxFilter}
+        inboxFilterLabels={{
+          all: t('workspace.allInbox'),
+          unorganized: t('workspace.inboxUnorganized'),
+          confirmed: t('workspace.inboxConfirmed'),
+          ignored: t('workspace.inboxIgnored'),
+          archived: t('workspace.inboxArchived')
+        }}
+        onInboxFilter={(nextFilter: InboxFilter) => { void setInboxFilter(nextFilter) }}
+      />
+      <main className="records-main workspace-page inbox-page">
+      <WorkspacePageHeader
+        ariaLabel={t('workspace.breadcrumbLabel')}
+        items={[{ label: t('nav.inbox'), current: true }]}
+        title={t('workspace.inboxTitle')}
+        description={t('workspace.inboxSubtitle')}
+      />
+      <WorkspaceSectionTabs
+        ariaLabel={t('workspace.sectionNavigation')}
+        items={[
+          { id: 'notes', label: t('workspace.notes'), onClick: onOpenRecords },
+          { id: 'inbox', label: t('nav.inbox'), active: true }
+        ]}
+      />
       <section className="inbox-capture" aria-label={t('workspace.quickCapture')}>
         <Inbox aria-hidden="true" />
         <input ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
@@ -81,7 +122,7 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
       </section>
       <div className="inbox-layout">
         <section className="inbox-list" aria-label={t('workspace.inboxList')}>
-          <div className="section-heading"><h3>{t('workspace.toOrganize')}</h3><span>{total}</span></div>
+          <div className="section-heading"><h3>{inboxFilter === 'unorganized' ? t('workspace.toOrganize') : t('workspace.inboxList')}</h3><div className="flex items-center gap-2"><span>{total}</span><button type="button" onClick={() => void handleAiOrganize()} disabled={aiOrganizing || items.length === 0 || inboxFilter !== 'unorganized'} className="inline-flex min-h-8 items-center gap-1 rounded-md border border-zinc-300 px-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{aiOrganizing ? t('workspace.saving') : t('workspace.aiSuggestion')}</button></div></div>
           {status === 'error' && <div className="inline-error" role="alert">{error ? t(error as Parameters<typeof t>[0]) : ''}<button onClick={() => void fetch()}>{t('common.retry')}</button></div>}
           {items.length === 0 && status !== 'running' ? <div className="empty-state"><Inbox aria-hidden="true" /><p>{t('workspace.emptyInbox')}</p><span>{t('workspace.emptyInboxHelp')}</span></div> : (
             <div className="inbox-items">
@@ -98,12 +139,22 @@ function InboxPage({ focusId }: { focusId?: string | null }): JSX.Element {
             <p className="workspace-kicker">{t('workspace.recordDetails')}</p><p className="drawer-content">{selected.content}</p>
             <div className="drawer-meta"><span>{t('workspace.project')}: {projects.find((item) => item.public_id === selected.project_id)?.name ?? t('workspace.unassigned')}</span><span>{t('workspace.repository')}: {repositories.find((item) => item.public_id === selected.repository_id)?.name ?? t('workspace.unassigned')}</span></div>
             {selected.ai_suggestion ? <section className="ai-suggestion"><div><Sparkles aria-hidden="true" /><h3>{t('workspace.aiSuggestion')}: {selected.ai_suggestion.target === 'task' ? t('workspace.sourceTask') : selected.ai_suggestion.target === 'work_log' ? t('workspace.sourceLog') : t('workspace.ignore')}</h3></div><p>{selected.ai_suggestion.summary}</p><p>{selected.ai_suggestion.tag_names.map((tag) => `#${tag}`).join(' ')}</p></section> : <p className="drawer-note">{t('workspace.noAiSuggestion')}</p>}
-            <div className="drawer-actions"><button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button><button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button></div>
+            {selected.state === 'unorganized' ? <div className="drawer-actions"><button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button><button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button></div> : <p className="drawer-note">{inboxFilterLabelsForState(selected.state, t)}</p>}
           </> : <div className="drawer-placeholder"><Sparkles aria-hidden="true" /><p>{t('workspace.selectRecord')}</p></div>}
         </aside>
       </div>
+      </main>
     </div>
   )
+}
+
+function inboxFilterLabelsForState(state: Exclude<InboxFilter, 'all'>, t: ReturnType<typeof useI18n>['t']): string {
+  switch (state) {
+    case 'confirmed': return t('workspace.inboxConfirmed')
+    case 'ignored': return t('workspace.inboxIgnored')
+    case 'archived': return t('workspace.inboxArchived')
+    case 'unorganized': return t('workspace.inboxUnorganized')
+  }
 }
 
 export default InboxPage

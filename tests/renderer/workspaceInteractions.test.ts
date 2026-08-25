@@ -9,7 +9,9 @@ import {
   highlightHashTags,
   mergePage,
   removeProjectMention,
+  resolveProjectReference,
   replaceProjectMention,
+  syncProjectReference,
   summarizeRepositoryScan
 } from '../../src/renderer/src/lib/workspaceInteractions'
 
@@ -69,6 +71,28 @@ describe('workspace interactions', () => {
       text: '处理 @三峡平台',
       cursor: 8
     })
+  })
+
+  it('resolves only a complete project mention and ignores email-like or longer names', () => {
+    const projects = [
+      { public_id: 'project-a', name: '三峡' },
+      { public_id: 'project-b', name: '三峡平台' }
+    ]
+
+    expect(resolveProjectReference('记录 @三峡平台 的部署结果', projects)).toBe('project-b')
+    expect(resolveProjectReference('记录 @三峡平台扩展 的部署结果', projects)).toBeNull()
+    expect(resolveProjectReference('mail@example.com', projects)).toBeNull()
+  })
+
+  it('replaces the known project mention without changing other正文 and can remove it', () => {
+    const projects = [
+      { public_id: 'project-old', name: '旧项目' },
+      { public_id: 'project-a', name: '三峡平台' }
+    ]
+
+    expect(syncProjectReference('记录 @旧项目\n继续处理', projects, 'project-a')).toBe('记录 @三峡平台\n继续处理')
+    expect(syncProjectReference('记录 @三峡平台\n继续处理', projects, null)).toBe('记录 \n继续处理')
+    expect(syncProjectReference('继续处理', projects, 'project-a')).toBe('@三峡平台\n继续处理')
   })
 
   it('prevents an older search request from becoming current', () => {

@@ -17,7 +17,7 @@ describe('work log project mentions', () => {
     expect(page).toContain('tagMention')
     expect(page).toContain('role="listbox"')
     expect(page).toContain('ArrowDown')
-    expect(page).toContain('project_id: projectId || null')
+    expect(page).toContain('project_id: resolveProjectReference(trimmed, projects)')
   })
 
   it('has a stable project mention menu surface', () => {

@@ -34,11 +34,13 @@ export interface ProviderRequest {
   messages: ProviderMessage[]
   signal?: AbortSignal
   fetchImpl?: typeof fetch
+  onChunk?: (chunk: string) => void
 }
 
 interface ProviderResponse {
   ok: boolean
   status: number
+  body?: ReadableStream<Uint8Array> | null
   json(): Promise<unknown>
   text(): Promise<string>
 }
@@ -84,6 +86,71 @@ function anthropicContent(data: unknown): string {
   return requireContent((first as { text?: unknown }).text)
 }
 
+export function extractAiStreamText(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const value = data as { choices?: unknown; type?: unknown; delta?: unknown }
+  if (Array.isArray(value.choices)) {
+    const choice = value.choices[0]
+    if (!choice || typeof choice !== 'object') return ''
+    const delta = (choice as { delta?: unknown }).delta
+    if (delta && typeof delta === 'object' && typeof (delta as { content?: unknown }).content === 'string') {
+      return (delta as { content: string }).content
+    }
+    const message = (choice as { message?: unknown }).message
+    if (message && typeof message === 'object' && typeof (message as { content?: unknown }).content === 'string') {
+      return (message as { content: string }).content
+    }
+  }
+  if (value.type === 'content_block_delta' && value.delta && typeof value.delta === 'object' && typeof (value.delta as { text?: unknown }).text === 'string') {
+    return (value.delta as { text: string }).text
+  }
+  return ''
+}
+
+async function readStreamingResponse(response: ProviderResponse, onChunk: (chunk: string) => void, parseFallback: (data: unknown) => string): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let raw = ''
+  let content = ''
+  const consumeLine = (line: string): void => {
+    if (!line.startsWith('data:')) return
+    const payload = line.slice(5).trim()
+    if (!payload || payload === '[DONE]') return
+    try {
+      const chunk = extractAiStreamText(JSON.parse(payload))
+      if (chunk) {
+        content += chunk
+        onChunk(chunk)
+      }
+    } catch {
+      // Ignore incomplete or provider-specific SSE metadata lines.
+    }
+  }
+
+  while (true) {
+    const result = await reader.read()
+    const decoded = decoder.decode(result.value, { stream: !result.done })
+    raw += decoded
+    buffer += decoded
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() ?? ''
+    lines.forEach(consumeLine)
+    if (result.done) break
+  }
+  consumeLine(buffer)
+  if (!content.trim() && raw.trim()) {
+    try {
+      content = parseFallback(JSON.parse(raw.trim()))
+    } catch {
+      // Keep the common invalid-response error below.
+    }
+  }
+  if (!content.trim()) throw responseError()
+  return content
+}
+
 async function request(
   input: ProviderRequest,
   url: string,
@@ -92,12 +159,20 @@ async function request(
   parse: (data: unknown) => string
 ): Promise<string> {
   const fetchImpl = input.fetchImpl ?? fetch
+  const requestBody = input.onChunk && body && typeof body === 'object'
+    ? { ...(body as Record<string, unknown>), stream: true }
+    : body
   const response = await fetchImpl(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
     signal: input.signal
   }) as unknown as ProviderResponse
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`AI provider request failed: ${response.status} - ${error}`)
+  }
+  if (input.onChunk && response.body) return readStreamingResponse(response, input.onChunk, parse)
   return parse(await readResponse(response))
 }
 

@@ -1,13 +1,24 @@
 import type { ReportPeriod, ReportType } from '../lib/period'
 import type { ReportSourceSnapshot } from './reportTypes'
+import {
+  DEFAULT_REPORT_TEMPLATE,
+  DEFAULT_SYSTEM_PROMPT,
+  replaceReportPromptVariables
+} from './reportDefaults'
 
 export interface PeriodReportProvider {
-  (input: { systemPrompt: string; userPrompt: string; signal: AbortSignal }): Promise<unknown>
+  (input: { systemPrompt: string; userPrompt: string; signal: AbortSignal; onChunk?: (chunk: string) => void }): Promise<unknown>
 }
 
 export interface PeriodReportOptions {
   provider: PeriodReportProvider
   timeoutMs?: number
+  signal?: AbortSignal
+  onChunk?: (chunk: string) => void
+  systemPrompt?: string
+  reportTemplate?: string
+  language?: string
+  style?: string
 }
 
 export async function generatePeriodReportContent(
@@ -22,13 +33,27 @@ export async function generatePeriodReportContent(
   if (!Array.isArray(snapshot.projects)) throw new Error('Invalid report snapshot')
   if (snapshot.projects.length === 0) return '# 工作报告\n\n暂无可汇总的工作记录。'
 
-  const followUp = reportType === 'weekly' ? '下周待跟进' : '下月建议'
-  const systemPrompt = `你是专业的工作报告助手。根据用户授权的 JSON 快照生成 Markdown 报告。\n\n要求：\n- 严格按项目分组，提炼核心功能、缺陷、重构/维护。\n- 标记快照中有证据支持的阻塞与${followUp}。\n- 无证据不推断；不要逐条复制 Git commit。\n- 周期：${period.label}。`
-  const userPrompt = JSON.stringify({ reportType, period, snapshot })
+  const [dateFrom, dateTo] = period.label.split(' 至 ')
+  const promptVariables = {
+    language: options.language ?? '中文',
+    style: options.style ?? '简洁专业',
+    dateFrom: dateFrom || period.startDate,
+    dateTo: dateTo || period.endDateExclusive
+  }
+  const systemPrompt = replaceReportPromptVariables(options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT, promptVariables)
+  const reportTemplate = replaceReportPromptVariables(options.reportTemplate ?? DEFAULT_REPORT_TEMPLATE, promptVariables)
+  const userPrompt = JSON.stringify({ reportType, period, reportTemplate, snapshot })
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 60_000)
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, options.timeoutMs ?? 60_000)
+  const abortExternal = (): void => controller.abort()
+  if (options.signal?.aborted) controller.abort()
+  else options.signal?.addEventListener('abort', abortExternal, { once: true })
   try {
-    const result = await options.provider({ systemPrompt, userPrompt, signal: controller.signal })
+    const result = await options.provider({ systemPrompt, userPrompt, signal: controller.signal, onChunk: options.onChunk })
     const content = typeof result === 'string'
       ? result
       : typeof result === 'object' && result !== null && 'content' in result && typeof result.content === 'string'
@@ -37,9 +62,11 @@ export async function generatePeriodReportContent(
     if (!content.trim()) throw new Error('AI response content is empty')
     return content.trim()
   } catch (error) {
-    if (controller.signal.aborted) throw new Error('AI request timed out')
+    if (timedOut) throw new Error('AI request timed out')
+    if (options.signal?.aborted) throw new Error('AI request cancelled')
     throw error instanceof Error ? error : new Error('AI report generation failed')
   } finally {
     clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abortExternal)
   }
 }

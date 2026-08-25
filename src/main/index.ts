@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, shell, Menu, Tray, nativeImage, globalShortcut, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, shell, Menu, Tray, nativeImage, globalShortcut, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
+import { pathToFileURL } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { getDatabase, getDefaultWorkspaceContext, initDatabase, getSetting, setSetting } from './db'
 import { registerIpcHandlers } from './ipc'
@@ -9,6 +10,12 @@ import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './upd
 import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
 import { buildWorkLogEditorQuery, shouldPromptWorkLogEditorClose } from './workLogEditorWindow'
 import { readMainWindowSize, saveMainWindowSize } from './windowState'
+import { resolveAttachmentPath } from './attachments/attachmentStorage'
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'workpulse-attachment',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+}])
 
 let tray: Tray | null = null
 let isQuitting = false
@@ -62,6 +69,13 @@ function startRepositoryScheduler(): void {
     intervalMinutes * 60 * 1000
   )
   repositoryScheduler.start()
+}
+
+function registerAttachmentProtocol(): void {
+  protocol.handle('workpulse-attachment', (request) => {
+    const filePath = resolveAttachmentPath(join(app.getPath('userData'), 'attachments'), request.url)
+    return filePath ? net.fetch(pathToFileURL(filePath).toString()) : new Response('Not found', { status: 404 })
+  })
 }
 
 export function reregisterGlobalShortcuts(
@@ -184,8 +198,8 @@ function buildTrayMenu(): Electron.Menu {
 function createTray(): void {
   // In dev: resources/ is at project root. In production: extraResources copies it to app.getPath('exe')/../
   const iconPath = is.dev
-    ? join(__dirname, '../../resources/tray-icon.png')
-    : join(process.resourcesPath, 'tray-icon.png')
+    ? join(__dirname, '../../resources/icon.png')
+    : join(process.resourcesPath, 'icon.png')
   let icon = nativeImage.createFromPath(iconPath)
   if (process.platform === 'darwin') {
     try {
@@ -226,8 +240,8 @@ function createTray(): void {
 
 function getAppIconPath(): string {
   return is.dev
-    ? join(__dirname, '../../resources/icon-hallmark-master.png')
-    : join(process.resourcesPath, 'icon-hallmark.png')
+    ? join(__dirname, '../../resources/icon.png')
+    : join(process.resourcesPath, 'icon.png')
 }
 
 function createWindow(): void {
@@ -434,6 +448,7 @@ if (!gotTheLock) {
     })
 
     await initDatabase()
+    registerAttachmentProtocol()
     startRepositoryScheduler()
     configureAutoUpdater()
     registerIpcHandlers()
