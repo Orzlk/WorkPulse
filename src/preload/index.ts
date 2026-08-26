@@ -45,9 +45,20 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  priority: 'low' | 'medium' | 'high'
+  checklist: Array<{ id: string; text: string; completed: boolean }>
   project_id: string | null
   repository_id: string | null
   tag_names: string[]
+}
+
+interface KanbanColumn {
+  public_id: string
+  column_key: string
+  name: string
+  status: 'todo' | 'in_progress' | 'done'
+  position: number
+  is_system: boolean
 }
 
 interface WorkItemAssociations {
@@ -239,19 +250,27 @@ const api = {
       ipcRenderer.invoke('worklog:restore', log)
   },
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) =>
-      ipcRenderer.invoke('task:add', title, description, status, createdAt, associations),
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) =>
+      ipcRenderer.invoke('task:add', title, description, status, createdAt, associations, priority),
     list: () => ipcRenderer.invoke('task:list'),
     get: (publicId: string) => ipcRenderer.invoke('task:get', publicId) as Promise<Task | null>,
-    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) =>
+    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) =>
       ipcRenderer.invoke('task:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('task:delete', id),
-    reorder: (taskIds: number[], status: string) =>
-      ipcRenderer.invoke('task:reorder', taskIds, status),
+    reorder: (taskIds: number[], boardColumn: string, status?: Task['status']) =>
+      ipcRenderer.invoke('task:reorder', taskIds, boardColumn, status),
     complete: (id: number, logContent: string) =>
       ipcRenderer.invoke('task:complete', id, logContent),
     completeOnly: (id: number) =>
       ipcRenderer.invoke('task:completeOnly', id) as Promise<Task | null>
+  },
+  kanban: {
+    columns: {
+      list: () => ipcRenderer.invoke('kanban:columns:list') as Promise<KanbanColumn[]>,
+      create: (name: string) => ipcRenderer.invoke('kanban:columns:create', name) as Promise<KanbanColumn>,
+      update: (publicId: string, name: string) => ipcRenderer.invoke('kanban:columns:update', publicId, name) as Promise<KanbanColumn | null>,
+      delete: (publicId: string) => ipcRenderer.invoke('kanban:columns:delete', publicId) as Promise<boolean>
+    }
   },
   stats: {
     get: (days?: number) => ipcRenderer.invoke('stats:get', days)

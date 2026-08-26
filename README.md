@@ -24,7 +24,7 @@ Built for individual contributors who want a frictionless way to remember what t
 
 **Languages** — English and Chinese UI with a system-default option. Menus, tray actions, settings, exports, and default AI report prompts follow the selected language.
 
-**Auto Updates** — Packaged builds check GitHub Releases for newer versions, download updates in the background, and install after restart. Settings also includes a manual update check.
+**Online Updates** — GitHub online update checks and installation are temporarily disabled in version `0.0.1`; the updater implementation remains in the codebase for a future release.
 
 ## Tech Stack
 
@@ -67,16 +67,16 @@ Then open the app normally.
 
 ## Release Builds
 
-GitHub Actions builds release artifacts for macOS, Windows, and Linux when a `v*` tag is pushed, or when the `Release` workflow is run manually.
+GitHub Actions builds release artifacts for macOS, Windows, and Linux when a `v*` tag is pushed, or when the `Release` workflow is run manually. The workflow runs the full test suite and typecheck before packaging.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.0.1
+git push origin v0.0.1
 ```
 
 The workflow uploads DMG/ZIP, NSIS/portable EXE, AppImage, and DEB artifacts to the GitHub Release. Builds are unsigned by default; add signing secrets later if you need notarized macOS or signed Windows installers.
 
-Packaged apps use the same GitHub Release metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`) for automatic update checks.
+Automatic GitHub update checks are temporarily disabled for `0.0.1`; release artifacts remain available for manual installation.
 
 ## Keyboard Shortcuts
 
@@ -92,7 +92,7 @@ Packaged apps use the same GitHub Release metadata (`latest.yml`, `latest-mac.ym
 
 ## Data & Security
 
-Stage 1 is local-first. The database is stored as `workpulse.db` in Electron's system `userData` directory, with migration backups in `userData/backups`. The current schema version is 11; app startup runs transactional migrations and verifies database integrity. Import/export uses a logical, versioned JSON package instead of replacing the SQLite file directly: imports are previewed, merged by `public_id`, and imported repository bindings are disabled until you manually confirm a local path.
+Stage 1 is local-first. The database is stored as `workpulse.db` in Electron's system `userData` directory, with migration backups in `userData/backups`. The current schema version is 1, representing the consolidated pre-release schema; older development databases are not upgraded by this build and should be backed up/exported, recreated, and re-imported before use. App startup runs transactional migrations and verifies database integrity. Import/export uses a logical, versioned JSON package instead of replacing the SQLite file directly: imports are previewed, merged by `public_id`, and imported repository bindings are disabled until you manually confirm a local path.
 
 Repository scanning invokes only read-only Git commands (`rev-parse` and `log`) against paths you select. It never runs checkout, fetch, reset, or other write commands. The exported package excludes settings, API keys, and local repository paths.
 

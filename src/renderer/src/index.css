@@ -1215,6 +1215,39 @@ body {
   margin: 0 0 8px;
 }
 
+.log-content-markdown h1,
+.log-content-markdown h2,
+.log-content-markdown h3,
+.log-content-markdown h4,
+.log-content-markdown h5,
+.log-content-markdown h6 {
+  margin: 18px 0 8px;
+  color: var(--ink);
+  font-weight: 750;
+  line-height: 1.28;
+  letter-spacing: -.02em;
+}
+
+.log-content-markdown h1 {
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 24px;
+}
+
+.log-content-markdown h2 {
+  font-size: 20px;
+}
+
+.log-content-markdown h3 {
+  font-size: 17px;
+}
+
+.log-content-markdown h4,
+.log-content-markdown h5,
+.log-content-markdown h6 {
+  font-size: 15px;
+}
+
 .log-content-markdown ol {
   margin: 6px 0 8px;
   padding-left: 24px;
@@ -2861,20 +2894,24 @@ body {
   content: '';
 }
 
-.settings-brand-card-mark {
+.settings-brand-card-logo {
   position: relative;
   z-index: 1;
-  width: 86px;
-  height: 86px;
+  width: 188px;
+  height: 116px;
   flex: none;
-  border-radius: 24px;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, .18);
+  overflow: hidden;
+  border: 1px solid rgba(37, 99, 235, .12);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, .14);
 }
 
-.settings-brand-card-mark img {
+.settings-brand-card-logo img {
   display: block;
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .settings-brand-card-copy {
@@ -3311,10 +3348,10 @@ body {
     padding: 18px;
   }
 
-  .settings-brand-card-mark {
-    width: 64px;
-    height: 64px;
-    border-radius: 18px;
+  .settings-brand-card-logo {
+    width: 154px;
+    height: 98px;
+    border-radius: 16px;
   }
 
   .settings-about-grid {
@@ -3415,6 +3452,43 @@ body {
   color: var(--selection-accent-strong);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--selection-accent) 30%, transparent);
   font-weight: 650;
+}
+
+.markdown-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.markdown-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.markdown-toolbar button:hover {
+  background: color-mix(in srgb, var(--workspace-accent) 10%, transparent);
+  color: var(--workspace-accent);
+}
+
+.markdown-toolbar svg {
+  width: 17px;
+  height: 17px;
+}
+
+.worklog-editor-markdown-toolbar {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper-raised);
 }
 
 @media (max-width: 720px) {

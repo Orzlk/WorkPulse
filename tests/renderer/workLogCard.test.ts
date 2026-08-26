@@ -32,7 +32,7 @@ describe('work log card layout', () => {
     expect(associationBlock).toBe(-1)
     expect(page).not.toContain('className="log-project-badge')
     expect(page).not.toContain('className="log-tag-badge')
-    expect(page).toContain('resolveProjectReference')
+    expect(page).toContain('resolveOrCreateProjectReference')
     expect(page).toContain('extractHashTags(trimmed)')
     expect(footer).toBeGreaterThan(cardStart)
     expect(styles).toMatch(/\.quick-entry\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s)
@@ -56,6 +56,13 @@ describe('work log card layout', () => {
     expect(styles).toContain('list-style: decimal;')
     expect(styles).toContain('.log-content-markdown ul {')
     expect(styles).toContain('list-style: disc;')
+  })
+
+  it('keeps Markdown heading levels visually distinct', () => {
+    expect(styles).toContain('.log-content-markdown h1')
+    expect(styles).toContain('.log-content-markdown h2')
+    expect(styles).toContain('font-size: 24px;')
+    expect(styles).toContain('font-size: 20px;')
   })
 
   it('renders interactive references inside the Markdown body', () => {

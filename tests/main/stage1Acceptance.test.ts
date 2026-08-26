@@ -69,7 +69,7 @@ describe('stage 1 acceptance', () => {
     const context = getContext(database)
     const gitDirectory = createTemporaryGitRepository()
 
-    expect(getDatabaseVersion(database)).toBe(12)
+    expect(getDatabaseVersion(database)).toBe(1)
 
     const projects = new ProjectService(database, context)
     const project = projects.create({ name: '阶段一项目', description: '临时验收数据', color: '#64748b' })

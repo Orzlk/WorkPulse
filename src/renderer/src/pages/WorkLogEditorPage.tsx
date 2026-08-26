@@ -3,11 +3,13 @@ import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, DragEvent as R
 import { Check, Image, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { TagHighlightTextarea } from '../components/TagHighlightTextarea'
+import { MarkdownToolbar } from '../components/MarkdownToolbar'
 import { useI18n, useLanguageStore } from '../stores/languageStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
-import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, resolveProjectReference, syncProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, syncProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { resolveOrCreateProjectReference } from '../lib/projectMentions'
 import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
 import type { Tag } from '../lib/workspaceTypes'
 
@@ -64,6 +66,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
   const initLanguage = useLanguageStore((state) => state.init)
   const fetchProjects = useProjectStore((state) => state.fetch)
   const projects = useProjectStore((state) => state.items)
+  const createProject = useProjectStore((state) => state.create)
   const fetchRepositories = useRepositoryStore((state) => state.fetch)
   const repositories = useRepositoryStore((state) => state.items)
   const toast = useToast()
@@ -293,13 +296,14 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
     setSaving(true)
     setError('')
     try {
+      const mentionedProjectId = await resolveOrCreateProjectReference(trimmedContent, projects, createProject)
       const updated = await window.api.worklog.update(
         log.id,
         trimmedContent,
           category.trim(),
           date ? `${date}${log.created_at.slice(10)}` : undefined,
           {
-          project_id: resolveProjectReference(trimmedContent, projects) ?? (projectId || null),
+          project_id: mentionedProjectId ?? (projectId || null),
           repository_id: repositoryId || null,
           tag_names: extractHashTags(trimmedContent).tags
           }
@@ -473,14 +477,24 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
           )}
         </div>
 
+        <MarkdownToolbar
+          textareaRef={inputRef}
+          value={content}
+          className="worklog-editor-markdown-toolbar"
+          onChange={(next, cursor) => {
+            setContent(next)
+            syncEditorMention(next, cursor)
+          }}
+        />
+
         {error && <p className="worklog-editor-error" role="alert">{error}</p>}
       </main>
 
       <footer className="worklog-editor-footer">
         <span className="worklog-editor-hint">{t('worklog.editorShortcut')}</span>
         <div className="worklog-editor-actions">
-          <button type="button" onClick={() => attachmentInputRef.current?.click()} className="worklog-editor-secondary-button" disabled={saving || attachmentSaving} title={t('common.save')}>
-            <Image aria-hidden="true" />{t('common.save')}
+          <button type="button" onClick={() => attachmentInputRef.current?.click()} className="worklog-editor-secondary-button" disabled={saving || attachmentSaving} title={t('worklog.insertImage')}>
+            <Image aria-hidden="true" />{t('worklog.insertImage')}
           </button>
           <button type="button" onClick={handleCancel} className="worklog-editor-secondary-button" disabled={saving}>
             <X aria-hidden="true" />{t('worklog.editCancel')}

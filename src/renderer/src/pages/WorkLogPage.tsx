@@ -2,19 +2,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 import {
   AtSign,
   ClipboardEdit,
-  Download,
   Hash,
   Image,
-  List,
-  ListOrdered,
   MoreHorizontal,
   Pencil,
   Search,
   Send,
-  Type,
   Trash2,
   Undo2,
-  Upload,
   X
 } from 'lucide-react'
 import { useToast } from '../components/Toast'
@@ -22,8 +17,10 @@ import { useWorkLogStore } from '../stores/worklogStore'
 import { groupLogsByDate } from '../lib/dateUtils'
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
-import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, resolveProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, type ProjectMentionRange } from '../lib/workspaceInteractions'
+import { resolveOrCreateProjectReference } from '../lib/projectMentions'
 import { TagHighlightTextarea } from '../components/TagHighlightTextarea'
+import { MarkdownToolbar } from '../components/MarkdownToolbar'
 import { InteractiveMarkdown } from '../components/InteractiveMarkdown'
 import { RecordsSidebar } from '../components/RecordsSidebar'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
@@ -52,6 +49,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   const [mentionPositionTick, setMentionPositionTick] = useState(0)
   const [attachmentSaving, setAttachmentSaving] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const composerInputRef = useRef('')
   const autoTagPrefixRef = useRef('')
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
@@ -61,6 +59,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   const { t } = useI18n()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
+  const createProject = useProjectStore((state) => state.create)
   const projectSuggestions = useMemo(() => {
     if (!projectMention) return []
     const query = projectMention.query.trim().toLocaleLowerCase()
@@ -76,6 +75,12 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
       .filter((tag) => !query || tag.path.toLocaleLowerCase().includes(query))
       .slice(0, 8)
   }, [tagMention, tagOptions])
+
+  const setComposerInput = (value: string | ((current: string) => string)): void => {
+    const next = typeof value === 'function' ? value(composerInputRef.current) : value
+    composerInputRef.current = next
+    setInput(next)
+  }
 
   const refreshTagTree = (): Promise<void> =>
     window.api.tag.list({ limit: 200, offset: 0 })
@@ -97,11 +102,10 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   }, [])
 
   useEffect(() => {
-    setInput((current) => {
-      const next = applySelectedTagToComposer(current, tagFilter, autoTagPrefixRef.current)
-      autoTagPrefixRef.current = next.autoPrefix
-      return next.text
-    })
+    const current = composerInputRef.current
+    const next = applySelectedTagToComposer(current, tagFilter, autoTagPrefixRef.current)
+    autoTagPrefixRef.current = next.autoPrefix
+    if (next.text !== current) setComposerInput(next.text)
   }, [tagFilter])
 
   useEffect(() => {
@@ -159,10 +163,11 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
     }
 
     try {
-      await addLog(trimmed, '', { project_id: resolveProjectReference(trimmed, projects), repository_id: null, tag_names: extractHashTags(trimmed).tags })
+      const projectId = await resolveOrCreateProjectReference(trimmed, projects, createProject)
+      await addLog(trimmed, '', { project_id: projectId, repository_id: null, tag_names: extractHashTags(trimmed).tags })
       await refreshTagTree()
       autoTagPrefixRef.current = ''
-      setInput('')
+      setComposerInput('')
       setProjectMention(null)
       setTagMention(null)
     } catch {
@@ -189,7 +194,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
 
   const handleComposerChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     const value = event.target.value
-    setInput(value)
+    setComposerInput(value)
     syncComposerMention(value, event.target.selectionStart)
   }
 
@@ -198,7 +203,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
     const project = projects.find((item) => item.public_id === projectPublicId)
     if (!project) return
     const next = replaceProjectMention(input, projectMention, `@${project.name}`)
-    setInput(next.text)
+    setComposerInput(next.text)
     setProjectMention(null)
     setTagMention(null)
     requestAnimationFrame(() => {
@@ -212,7 +217,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   const selectTagMention = (tagPath: string): void => {
     if (!tagMention) return
     const next = replaceProjectMention(input, tagMention, `#${tagPath}`)
-    setInput(next.text)
+    setComposerInput(next.text)
     setTagMention(null)
     requestAnimationFrame(() => {
       const textarea = inputRef.current
@@ -251,13 +256,13 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   const insertComposerText = (text: string): void => {
     const textarea = inputRef.current
     if (!textarea) {
-      setInput((current) => current + text)
+      setComposerInput((current) => current + text)
       return
     }
     const start = textarea.selectionStart
     const end = textarea.selectionEnd
     const next = `${input.slice(0, start)}${text}${input.slice(end)}`
-    setInput(next)
+    setComposerInput(next)
     syncComposerMention(next, start + text.length)
     requestAnimationFrame(() => {
       textarea.focus()
@@ -492,19 +497,18 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
               <button type="button" onClick={() => insertComposerText('#')} aria-label={t('worklog.insertTag')} title={t('worklog.insertTag')}>
                 <Hash aria-hidden="true" />
               </button>
-              <button type="button" disabled={attachmentSaving} onClick={() => attachmentInputRef.current?.click()} aria-label={t('common.save')} title={t('common.save')}>
+              <button type="button" disabled={attachmentSaving} onClick={() => attachmentInputRef.current?.click()} aria-label={t('worklog.insertImage')} title={t('worklog.insertImage')}>
                 <Image aria-hidden="true" />
               </button>
               <span className="quick-entry-divider" aria-hidden="true" />
-              <button type="button" disabled aria-label={t('worklog.formatComingSoon')} title={t('worklog.formatComingSoon')}>
-                <Type aria-hidden="true" />
-              </button>
-              <button type="button" onClick={() => insertComposerText('- ')} aria-label={t('worklog.insertBulletList')} title={t('worklog.insertBulletList')}>
-                <List aria-hidden="true" />
-              </button>
-              <button type="button" onClick={() => insertComposerText('1. ')} aria-label={t('worklog.insertNumberedList')} title={t('worklog.insertNumberedList')}>
-                <ListOrdered aria-hidden="true" />
-              </button>
+              <MarkdownToolbar
+                textareaRef={inputRef}
+                value={input}
+                onChange={(next, cursor) => {
+                  setComposerInput(next)
+                  syncComposerMention(next, cursor)
+                }}
+              />
               <span className="quick-entry-divider" aria-hidden="true" />
               <button type="button" onClick={() => insertComposerText('@')} aria-label={t('worklog.chooseAssociation')} title={t('worklog.chooseAssociation')}>
                 <AtSign aria-hidden="true" />
@@ -521,7 +525,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
         </div>
       </div>
 
-      {/* Search + Export */}
+      {/* Search */}
       <div className="worklog-toolbar">
         <div className="worklog-search">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
@@ -540,71 +544,6 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
               <X className="w-4 h-4" />
             </button>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={async () => {
-              try {
-                const result = await window.api.import.logs()
-                if (result) {
-                  const message = result.source === 'flomo'
-                    ? result.skipped > 0
-                      ? t('worklog.importedFlomoSkipped', { imported: result.imported, skipped: result.skipped })
-                      : t('worklog.importedFlomo', { count: result.imported })
-                    : result.skipped > 0
-                      ? t('worklog.importedSkipped', { imported: result.imported, skipped: result.skipped })
-                      : t('worklog.imported', { count: result.imported })
-                  const attachmentMessages = result.source === 'flomo'
-                    ? [
-                        result.attachmentsImported > 0
-                          ? t('worklog.flomoAttachmentsImported', { count: result.attachmentsImported })
-                          : '',
-                        result.attachmentsSkipped > 0
-                          ? t('worklog.flomoAttachmentsSkipped', { count: result.attachmentsSkipped })
-                          : ''
-                      ].filter(Boolean)
-                    : []
-                  const attachmentMessage = attachmentMessages.length > 0 ? ` · ${attachmentMessages.join(' · ')}` : ''
-                  toast.success(`${message}${attachmentMessage}`)
-                  await fetchLogs()
-                  await refreshTagTree()
-                }
-              } catch {
-                toast.error(t('worklog.importFailed'))
-              }
-            }}
-            className="export-button btn-bounce"
-            title={t('worklog.import')}
-          >
-            <Upload />
-            {t('common.import')}
-          </button>
-          <div className="relative group export-menu">
-            <button className="export-button btn-bounce">
-              <Download />
-              {t('common.export')}
-            </button>
-            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-              <button
-                onClick={async () => {
-                  const path = await window.api.export.logs('csv')
-                  if (path) toast.success(t('worklog.exportedCsv'))
-                }}
-                className="block w-full px-4 py-2 text-sm text-left text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 rounded-t-lg whitespace-nowrap"
-              >
-                {t('worklog.exportCsv')}
-              </button>
-              <button
-                onClick={async () => {
-                  const path = await window.api.export.logs('markdown')
-                  if (path) toast.success(t('worklog.exportedMarkdown'))
-                }}
-                className="block w-full px-4 py-2 text-sm text-left text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 rounded-b-lg whitespace-nowrap"
-              >
-                {t('worklog.exportMarkdown')}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 

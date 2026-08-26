@@ -163,9 +163,20 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  priority: 'low' | 'medium' | 'high'
+  checklist: Array<{ id: string; text: string; completed: boolean }>
   project_id: string | null
   repository_id: string | null
   tag_names: string[]
+}
+
+interface KanbanColumn {
+  public_id: string
+  column_key: string
+  name: string
+  status: 'todo' | 'in_progress' | 'done'
+  position: number
+  is_system: boolean
 }
 
 interface WorkItemAssociations {
@@ -229,14 +240,22 @@ export interface API {
     reportStream: (cb: (event: ReportStreamEvent) => void) => () => void
   }
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) => Promise<Task>
     list: () => Promise<Task[]>
     get: (publicId: string) => Promise<Task | null>
-    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<Task | null>
+    update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) => Promise<Task | null>
     delete: (id: number) => Promise<boolean>
-    reorder: (taskIds: number[], status: string) => Promise<void>
+    reorder: (taskIds: number[], boardColumn: string, status?: Task['status']) => Promise<void>
     complete: (id: number, logContent: string) => Promise<Task | null>
     completeOnly: (id: number) => Promise<Task | null>
+  }
+  kanban: {
+    columns: {
+      list: () => Promise<KanbanColumn[]>
+      create: (name: string) => Promise<KanbanColumn>
+      update: (publicId: string, name: string) => Promise<KanbanColumn | null>
+      delete: (publicId: string) => Promise<boolean>
+    }
   }
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>

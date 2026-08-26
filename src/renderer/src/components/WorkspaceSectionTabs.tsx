@@ -20,7 +20,7 @@ export function WorkspaceSectionTabs({ ariaLabel, items }: WorkspaceSectionTabsP
         <button
           key={item.id}
           type="button"
-          className={`workspace-section-tab ${item.active ? 'is-active' : ''}`}
+          className={`workspace-section-tab ui-tab ${item.active ? 'is-active' : ''}`}
           aria-current={item.active ? 'page' : undefined}
           onClick={item.onClick}
         >

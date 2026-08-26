@@ -16,6 +16,7 @@ describe('report scope selection', () => {
   it('exposes all-project and all-repository controls', () => {
     expect(page).toContain('onSelectAll={() => { setProjectIds([]); onProjectChange(null) }}')
     expect(page).toContain('onSelectAll={() => setRepositoryIds([])}')
-    expect(page).toContain('aria-pressed={isReportScopeAll(ids)}')
+    expect(page).toContain('const allSelected = isReportScopeAll(ids)')
+    expect(page).toContain('ui-scope-option')
   })
 })

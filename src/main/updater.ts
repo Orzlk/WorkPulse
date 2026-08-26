@@ -38,6 +38,10 @@ const repo = 'WorkPulse'
 const latestReleaseApiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`
 const releasePageUrl = `https://github.com/${owner}/${repo}/releases/latest`
 
+// GitHub online updates are temporarily disabled. Keep the updater implementation
+// available so the feature can be restored without rebuilding its IPC contract.
+export const ONLINE_UPDATES_ENABLED = false
+
 let configured = false
 let updateState: AppUpdateState = {
   status: 'idle',
@@ -164,6 +168,7 @@ async function checkLatestReleaseVersion(): Promise<AppUpdateState> {
 }
 
 export function configureAutoUpdater(): void {
+  if (!ONLINE_UPDATES_ENABLED) return
   if (configured) return
   configured = true
 
@@ -207,6 +212,7 @@ export function configureAutoUpdater(): void {
 }
 
 export async function checkForUpdates(): Promise<AppUpdateState> {
+  if (!ONLINE_UPDATES_ENABLED) return updateState
   if (is.dev) {
     return checkLatestReleaseVersion()
   }
@@ -228,14 +234,14 @@ export function registerUpdateIpc(): void {
   ipcMain.handle('app:updates:get-state', () => updateState)
   ipcMain.handle('app:updates:check', () => checkForUpdates())
   ipcMain.handle('app:updates:install', () => {
-    if (updateState.status !== 'downloaded') return false
+    if (!ONLINE_UPDATES_ENABLED || updateState.status !== 'downloaded') return false
     autoUpdater.quitAndInstall(false, true)
     return true
   })
 }
 
 export function startUpdateCheck(): void {
-  if (is.dev) return
+  if (!ONLINE_UPDATES_ENABLED || is.dev) return
 
   setTimeout(() => {
     void checkForUpdates()

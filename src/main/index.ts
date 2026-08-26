@@ -450,7 +450,9 @@ if (!gotTheLock) {
     await initDatabase()
     registerAttachmentProtocol()
     startRepositoryScheduler()
-    configureAutoUpdater()
+    // GitHub online updates are temporarily disabled; keep these calls commented
+    // so the updater can be re-enabled deliberately in a future release.
+    // configureAutoUpdater()
     registerIpcHandlers()
     registerWorkLogEditorIpc()
     registerShortcutIpc()
@@ -458,7 +460,7 @@ if (!gotTheLock) {
     buildMenu()
     createTray()
     createWindow()
-    startUpdateCheck()
+    // startUpdateCheck()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 
 const settingsPage = readFileSync('src/renderer/src/pages/SettingsPage.tsx', 'utf8')
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
-const logoPath = 'src/renderer/src/assets/workpulse-mark.svg'
+const logoPath = 'src/renderer/src/assets/workpulse-mark.png'
+const wordmarkPath = 'src/renderer/src/assets/workpulse-logo.png'
+const rendererHtml = readFileSync('src/renderer/index.html', 'utf8')
 const databaseTransferCardPath = 'src/renderer/src/components/DatabaseTransferCard.tsx'
 const databaseTransferCard = existsSync(databaseTransferCardPath) ? readFileSync(databaseTransferCardPath, 'utf8') : ''
 const translations = readFileSync('src/renderer/src/lib/i18n.ts', 'utf8')
@@ -38,11 +40,29 @@ describe('设置页信息架构', () => {
 
   it('uses the WorkPulse mark and keeps updates and about in one branded section', () => {
     expect(existsSync(logoPath)).toBe(true)
-    expect(app).toContain("from './assets/workpulse-mark.svg'")
+    expect(app).toContain("from './assets/workpulse-mark.png'")
     expect(app).not.toContain("from './assets/brand-seal.png'")
     expect(settingsPage).toContain('settings-brand-card')
     expect(settingsPage).toContain('settings-update-card')
     expect(settingsPage).toContain('settings-about-grid')
     expect(translations).toContain("'settings.productTagline': '工作记录 · Git 改动 · AI 汇报'")
+  })
+
+  it('keeps the application version visible while GitHub online updates are disabled', () => {
+    expect(settingsPage).toContain('const onlineUpdatesEnabled = false')
+    expect(settingsPage).toContain('settings.onlineUpdatesDisabled')
+    expect(settingsPage).toContain('v{currentVersion}')
+    expect(translations).toContain("'settings.onlineUpdatesDisabled':")
+  })
+
+  it('uses the design asset for the settings brand card', () => {
+    expect(existsSync(wordmarkPath)).toBe(true)
+    expect(settingsPage).toContain("from '../assets/workpulse-logo.png'")
+    expect(settingsPage).toContain('settings-brand-card-logo')
+    expect(settingsPage).not.toContain("from '../assets/workpulse-mark.svg'")
+  })
+
+  it('uses the new WorkPulse mark for the renderer favicon', () => {
+    expect(rendererHtml).toContain('href="./src/assets/workpulse-mark.png"')
   })
 })

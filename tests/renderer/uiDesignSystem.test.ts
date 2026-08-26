@@ -1,0 +1,63 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+const systemPath = 'src/renderer/src/styles/ui-system.css'
+const mainPath = 'src/renderer/src/main.tsx'
+const appPath = 'src/renderer/src/App.tsx'
+const tabsPath = 'src/renderer/src/components/WorkspaceSectionTabs.tsx'
+const reportPath = 'src/renderer/src/pages/ReportPage.tsx'
+const settingsPath = 'src/renderer/src/pages/SettingsPage.tsx'
+
+const system = existsSync(systemPath) ? readFileSync(systemPath, 'utf8') : ''
+const main = readFileSync(mainPath, 'utf8')
+const app = readFileSync(appPath, 'utf8')
+const tabs = readFileSync(tabsPath, 'utf8')
+const report = readFileSync(reportPath, 'utf8')
+const settings = readFileSync(settingsPath, 'utf8')
+
+describe('WorkPulse UI design system', () => {
+  it('defines semantic light and dark theme tokens for surfaces, text, states and controls', () => {
+    expect(existsSync(systemPath)).toBe(true)
+    expect(system).toContain('--ui-color-canvas')
+    expect(system).toContain('--ui-color-surface')
+    expect(system).toContain('--ui-color-primary')
+    expect(system).toContain('--ui-color-selection')
+    expect(system).toContain('--ui-color-danger')
+    expect(system).toContain(':root.dark')
+  })
+
+  it('defines shared control primitives and accessible focus behavior', () => {
+    expect(system).toContain('.ui-button')
+    expect(system).toContain('.ui-icon-button')
+    expect(system).toContain('.ui-card')
+    expect(system).toContain('.ui-field')
+    expect(system).toContain('.ui-button:focus-visible')
+    expect(system).toContain('prefers-reduced-motion')
+  })
+
+  it('loads the design system after legacy styles so semantic tokens are authoritative', () => {
+    expect(main.indexOf("import './index.css'")).toBeGreaterThanOrEqual(0)
+    expect(main.indexOf("import './styles/ui-system.css'")).toBeGreaterThan(main.indexOf("import './index.css'"))
+  })
+
+  it('uses one visual active-state vocabulary for primary navigation and section tabs', () => {
+    expect(app).toContain('app-nav-button')
+    expect(app).toContain("is-active")
+    expect(tabs).toContain('workspace-section-tab')
+    expect(tabs).toContain('is-active')
+  })
+
+  it('uses semantic scope controls instead of dark legacy borders', () => {
+    expect(report).toContain('ui-scope-option')
+    expect(report).not.toContain('border-zinc-900')
+    expect(report).not.toContain('dark:border-zinc-100')
+    expect(system).toContain('.ui-scope-option.is-selected')
+  })
+
+  it('normalizes selected theme controls and keeps a legacy border fallback', () => {
+    expect(settings).toContain('ui-choice-option')
+    expect(settings).not.toContain('border-zinc-900')
+    expect(system).toContain('.ui-choice-option.is-selected')
+    expect(system).toContain('.hallmark-app .border-zinc-900')
+  })
+})

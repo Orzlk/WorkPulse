@@ -20,6 +20,9 @@ export function applySelectedTagToComposer(content: string, selectedPath: string
   }
 
   const nextPrefix = `#${normalizedPath} `
+  if (previousAutoPrefix && !content.startsWith(previousAutoPrefix) && /^#[^\s#]+\s*$/.test(content)) {
+    return { text: nextPrefix, autoPrefix: nextPrefix }
+  }
   if (previousAutoPrefix && content.startsWith(previousAutoPrefix)) {
     return { text: `${nextPrefix}${content.slice(previousAutoPrefix.length)}`, autoPrefix: nextPrefix }
   }

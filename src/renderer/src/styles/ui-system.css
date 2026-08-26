@@ -1,0 +1,732 @@
+/*
+ * WorkPulse UI system
+ *
+ * This file is intentionally loaded after the historical stylesheet. It is the
+ * single semantic layer for new UI work while the existing page-specific rules
+ * are migrated gradually. Business behavior and page-specific layout classes
+ * remain unchanged.
+ */
+
+:root {
+  --ui-color-canvas: #f7f8fa;
+  --ui-color-surface: #ffffff;
+  --ui-color-surface-subtle: #f1f2f4;
+  --ui-color-surface-muted: #e9ebee;
+  --ui-color-text: #303236;
+  --ui-color-text-muted: #70757e;
+  --ui-color-text-subtle: #8b8f96;
+  --ui-color-primary: #2ecf78;
+  --ui-color-primary-hover: #25b96a;
+  --ui-color-primary-soft: #e8f8ef;
+  --ui-color-tag: #5c87e8;
+  --ui-color-tag-soft: #eef4ff;
+  --ui-color-project: #2f9e68;
+  --ui-color-project-soft: #eaf8f1;
+  --ui-color-selection: #f59e0b;
+  --ui-color-selection-strong: #b45309;
+  --ui-color-selection-soft: #fff7ed;
+  --ui-color-info: #4d7cff;
+  --ui-color-info-soft: #eef2ff;
+  --ui-color-success: #168a55;
+  --ui-color-warning: #b76b00;
+  --ui-color-danger: #c94040;
+  --ui-color-danger-soft: #fff0f0;
+  --ui-color-border: #e2e5e9;
+  --ui-color-border-strong: #cfd4da;
+  --ui-color-focus: #238d58;
+  --ui-radius-sm: 8px;
+  --ui-radius-md: 12px;
+  --ui-radius-lg: 16px;
+  --ui-radius-xl: 20px;
+  --ui-radius-pill: 999px;
+  --ui-control-height-sm: 32px;
+  --ui-control-height: 36px;
+  --ui-control-height-lg: 40px;
+  --ui-shadow-sm: 0 1px 2px rgba(38, 43, 51, .04);
+  --ui-shadow-md: 0 6px 18px rgba(38, 43, 51, .07);
+  --ui-shadow-lg: 0 18px 48px rgba(38, 43, 51, .13);
+  --ui-motion-fast: 140ms;
+  --ui-motion-normal: 180ms;
+  --ui-ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* Compatibility aliases for the current page styles. */
+  --paper: var(--ui-color-canvas);
+  --paper-raised: var(--ui-color-surface);
+  --paper-soft: var(--ui-color-surface-subtle);
+  --ink: var(--ui-color-text);
+  --ink-muted: var(--ui-color-text-muted);
+  --forest: var(--ui-color-primary);
+  --forest-hover: var(--ui-color-primary-hover);
+  --oxblood: var(--ui-color-tag);
+  --gold: var(--ui-color-text-subtle);
+  --tag-accent: var(--ui-color-tag);
+  --project-accent: var(--ui-color-project);
+  --selection-accent: var(--ui-color-selection);
+  --selection-accent-strong: var(--ui-color-selection-strong);
+  --selection-surface: var(--ui-color-selection-soft);
+  --rule: var(--ui-color-border);
+  --rule-strong: var(--ui-color-border-strong);
+  --danger: var(--ui-color-danger);
+  --warm-shadow: var(--ui-shadow-md);
+  --control-shadow: var(--ui-shadow-sm);
+}
+
+:root.dark {
+  --ui-color-canvas: #17191d;
+  --ui-color-surface: #202328;
+  --ui-color-surface-subtle: #2a2e34;
+  --ui-color-surface-muted: #333840;
+  --ui-color-text: #f4f5f6;
+  --ui-color-text-muted: #b5bac2;
+  --ui-color-text-subtle: #969ca5;
+  --ui-color-primary: #48dc8a;
+  --ui-color-primary-hover: #37c878;
+  --ui-color-primary-soft: #173d2b;
+  --ui-color-tag: #9ab8ff;
+  --ui-color-tag-soft: #202d49;
+  --ui-color-project: #63d99b;
+  --ui-color-project-soft: #183d2c;
+  --ui-color-selection: #fbbf24;
+  --ui-color-selection-strong: #f59e0b;
+  --ui-color-selection-soft: #422006;
+  --ui-color-info: #9eb6ff;
+  --ui-color-info-soft: #252c48;
+  --ui-color-success: #65d99b;
+  --ui-color-warning: #f4b85b;
+  --ui-color-danger: #f08b8b;
+  --ui-color-danger-soft: #432326;
+  --ui-color-border: #363b42;
+  --ui-color-border-strong: #4a515a;
+  --ui-color-focus: #63d99b;
+  --ui-shadow-sm: 0 1px 2px rgba(0, 0, 0, .18);
+  --ui-shadow-md: 0 8px 22px rgba(0, 0, 0, .22);
+  --ui-shadow-lg: 0 20px 56px rgba(0, 0, 0, .34);
+}
+
+.hallmark-app,
+.hallmark-app button,
+.hallmark-app input,
+.hallmark-app textarea,
+.hallmark-app select {
+  font-family: inherit;
+}
+
+.hallmark-app {
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text);
+}
+
+.hallmark-app :where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: 2px;
+}
+
+.ui-button:focus-visible,
+.ui-icon-button:focus-visible {
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: 2px;
+}
+
+.hallmark-app :where(button, input, textarea, select):disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+/* Shared control primitives. Existing semantic classes are aliases during migration. */
+.ui-button,
+.primary-action,
+.header-create-button,
+.inbox-capture > button,
+.quick-entry-submit button,
+.settings-primary-button,
+.settings-secondary-button,
+.settings-data-card-actions button,
+.settings-transfer-dialog-actions button,
+.repository-edit-actions button,
+.project-detail-actions button,
+.drawer-actions button,
+.project-actions button,
+.repository-controls button,
+.project-create > button,
+.repository-create > button,
+.load-more {
+  min-height: var(--ui-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  box-sizing: border-box;
+  padding: 0 13px;
+  border: 1px solid var(--ui-color-border-strong);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color var(--ui-motion-fast) var(--ui-ease), border-color var(--ui-motion-fast) var(--ui-ease), color var(--ui-motion-fast) var(--ui-ease), box-shadow var(--ui-motion-fast) var(--ui-ease);
+}
+
+.ui-button:hover:not(:disabled),
+.settings-secondary-button:hover:not(:disabled),
+.settings-data-card-actions button:hover:not(:disabled),
+.settings-transfer-dialog-actions button:hover:not(:disabled),
+.repository-edit-actions button:hover:not(:disabled),
+.project-detail-actions button:hover:not(:disabled),
+.drawer-actions button:hover:not(:disabled),
+.project-actions button:hover:not(:disabled),
+.repository-controls button:hover:not(:disabled) {
+  border-color: var(--ui-color-primary);
+  background: var(--ui-color-primary-soft);
+  color: var(--ui-color-focus);
+}
+
+.ui-button--primary,
+.primary-action,
+.header-create-button,
+.inbox-capture > button,
+.quick-entry-submit button,
+.settings-primary-button {
+  min-height: var(--ui-control-height-lg);
+  border-color: var(--ui-color-primary);
+  background: var(--ui-color-primary);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.ui-button--primary:hover:not(:disabled),
+.primary-action:hover:not(:disabled),
+.header-create-button:hover:not(:disabled),
+.inbox-capture > button:hover:not(:disabled),
+.quick-entry-submit button:hover:not(:disabled),
+.settings-primary-button:hover:not(:disabled) {
+  border-color: var(--ui-color-primary-hover);
+  background: var(--ui-color-primary-hover);
+  color: #ffffff;
+}
+
+.ui-button--danger,
+.danger-action {
+  border-color: var(--ui-color-danger);
+  background: var(--ui-color-danger);
+  color: #ffffff;
+}
+
+.ui-button--danger:hover:not(:disabled),
+.danger-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ui-color-danger) 82%, #000);
+  background: color-mix(in srgb, var(--ui-color-danger) 82%, #000);
+}
+
+.ui-scope-option,
+.ui-choice-option {
+  min-height: var(--ui-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--ui-color-border-strong);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color var(--ui-motion-fast) var(--ui-ease), border-color var(--ui-motion-fast) var(--ui-ease), color var(--ui-motion-fast) var(--ui-ease), box-shadow var(--ui-motion-fast) var(--ui-ease);
+}
+
+.ui-scope-option:hover:not(:disabled),
+.ui-choice-option:hover:not(:disabled) {
+  border-color: var(--ui-color-selection);
+  background: var(--ui-color-selection-soft);
+  color: var(--ui-color-selection-strong);
+}
+
+.ui-scope-option.is-selected,
+.ui-choice-option.is-selected {
+  border-color: color-mix(in srgb, var(--ui-color-selection) 58%, var(--ui-color-border-strong));
+  background: var(--ui-color-selection-soft);
+  color: var(--ui-color-selection-strong);
+  box-shadow: inset 0 -2px 0 var(--ui-color-selection);
+  font-weight: 700;
+}
+
+.ui-scope-option:focus-visible,
+.ui-choice-option:focus-visible {
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: 2px;
+}
+
+.ui-icon-button,
+.header-icon-button,
+.app-settings-button,
+.global-search-clear,
+.drawer-close,
+.project-detail-close,
+.log-menu-trigger,
+.repository-menu-trigger,
+.quick-create-header button {
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
+  min-width: var(--ui-control-height);
+  min-height: var(--ui-control-height);
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--ui-motion-fast) var(--ui-ease), color var(--ui-motion-fast) var(--ui-ease), border-color var(--ui-motion-fast) var(--ui-ease);
+}
+
+.ui-icon-button:hover,
+.header-icon-button:hover,
+.app-settings-button:hover,
+.global-search-clear:hover,
+.drawer-close:hover,
+.project-detail-close:hover,
+.log-menu-trigger:hover,
+.repository-menu-trigger:hover,
+.quick-create-header button:hover {
+  border-color: var(--ui-color-border);
+  background: var(--ui-color-surface-subtle);
+  color: var(--ui-color-text);
+  transform: none;
+}
+
+.ui-card,
+.log-row,
+.inbox-list,
+.inbox-drawer,
+.inbox-capture,
+.project-card,
+.project-create,
+.repository-card,
+.repository-row,
+.repository-create,
+.settings-brand-card,
+.settings-update-card,
+.settings-about-card,
+.settings-data-card,
+.quick-entry,
+.quick-create-panel,
+.repository-edit-dialog,
+.project-detail-drawer {
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.log-row:hover,
+.project-card:hover,
+.repository-card:hover,
+.repository-row:hover {
+  border-color: var(--ui-color-border-strong);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-md);
+  transform: none;
+}
+
+.ui-field,
+.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input),
+.hallmark-app textarea:not(.tag-composer-input),
+.hallmark-app select {
+  min-height: var(--ui-control-height);
+  box-sizing: border-box;
+  border: 1px solid var(--ui-color-border-strong) !important;
+  border-radius: var(--ui-radius-sm) !important;
+  background: var(--ui-color-surface) !important;
+  color: var(--ui-color-text) !important;
+  transition: border-color var(--ui-motion-fast) var(--ui-ease), box-shadow var(--ui-motion-fast) var(--ui-ease);
+}
+
+.ui-field:focus,
+.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input):focus,
+.hallmark-app textarea:not(.tag-composer-input):focus,
+.hallmark-app select:focus {
+  border-color: var(--ui-color-primary) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent) !important;
+}
+
+.ui-badge,
+.log-tag-badge,
+.log-project-badge,
+.repository-card-chip,
+.settings-brand-meta span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-color-surface-subtle);
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+}
+
+.log-tag-badge {
+  background: var(--ui-color-tag-soft);
+  color: var(--ui-color-tag);
+}
+
+.log-project-badge {
+  background: var(--ui-color-project-soft);
+  color: var(--ui-color-project);
+}
+
+.tag-tree-all.is-selected,
+.tag-tree-label.is-selected,
+.worklog-filter-chip.is-selected,
+.log-tag-badge.is-selected,
+.log-project-badge.is-selected {
+  border-color: color-mix(in srgb, var(--ui-color-selection) 48%, var(--ui-color-border));
+  background: var(--ui-color-selection-soft);
+  color: var(--ui-color-selection-strong);
+  box-shadow: inset 3px 0 0 var(--ui-color-selection);
+}
+
+/* App shell and navigation */
+.hallmark-app .app-header {
+  min-height: 64px;
+  border-bottom: 1px solid var(--ui-color-border);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.hallmark-app .app-brand h1 {
+  color: var(--ui-color-text);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.hallmark-app .app-nav-button {
+  min-height: 40px;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-color-text-muted);
+  transition: background-color var(--ui-motion-fast) var(--ui-ease), color var(--ui-motion-fast) var(--ui-ease);
+}
+
+.hallmark-app .app-nav-button:hover {
+  color: var(--ui-color-text);
+  background: var(--ui-color-surface-subtle);
+  transform: none;
+}
+
+.hallmark-app .app-nav-button.is-active {
+  color: var(--ui-color-focus);
+  background: var(--ui-color-primary-soft);
+  font-weight: 700;
+}
+
+.hallmark-app .app-nav-button::before {
+  display: none;
+}
+
+.hallmark-app .app-nav-button::after {
+  right: 18px;
+  left: 18px;
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-color-primary);
+}
+
+.hallmark-app .workspace-section-tabs {
+  min-height: 40px;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--ui-color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.hallmark-app .workspace-section-tab {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--ui-radius-sm) var(--ui-radius-sm) 0 0;
+  color: var(--ui-color-text-muted);
+}
+
+.hallmark-app .workspace-section-tab:hover {
+  background: var(--ui-color-surface-subtle);
+  color: var(--ui-color-text);
+}
+
+.hallmark-app .workspace-section-tab.is-active {
+  border-color: var(--ui-color-primary);
+  background: transparent;
+  color: var(--ui-color-focus);
+  box-shadow: none;
+}
+
+.hallmark-app .workspace-breadcrumb {
+  color: var(--ui-color-text-muted);
+}
+
+.hallmark-app .workspace-breadcrumb-home,
+.hallmark-app .workspace-breadcrumb-item {
+  border-radius: var(--ui-radius-sm);
+}
+
+.hallmark-app .workspace-page-heading h2 {
+  color: var(--ui-color-text);
+  font-size: clamp(24px, 3vw, 32px);
+  letter-spacing: -.035em;
+}
+
+/* Records and filters */
+.hallmark-app .records-sidebar {
+  border-color: var(--ui-color-border);
+}
+
+.hallmark-app .records-sidebar-filter,
+.hallmark-app .tag-tree-all,
+.hallmark-app .tag-tree-label,
+.hallmark-app .settings-sidebar-button {
+  min-height: var(--ui-control-height);
+  border-radius: var(--ui-radius-sm);
+}
+
+.hallmark-app .records-sidebar-filter:hover,
+.hallmark-app .records-sidebar-filter:focus-visible,
+.hallmark-app .settings-sidebar-button:hover,
+.hallmark-app .settings-sidebar-button:focus-visible {
+  background: var(--ui-color-surface-subtle);
+  color: var(--ui-color-text);
+}
+
+.hallmark-app .records-sidebar-filter.is-selected,
+.hallmark-app .settings-sidebar-button.is-selected {
+  background: var(--ui-color-selection-soft);
+  color: var(--ui-color-selection-strong);
+  box-shadow: inset 3px 0 0 var(--ui-color-selection);
+  font-weight: 700;
+}
+
+.hallmark-app .quick-entry {
+  border-color: var(--ui-color-border);
+  outline: 0;
+  box-shadow: var(--ui-shadow-md);
+  transition: border-color var(--ui-motion-normal) var(--ui-ease), box-shadow var(--ui-motion-normal) var(--ui-ease);
+}
+
+.hallmark-app .quick-entry:focus-within {
+  border-color: color-mix(in srgb, var(--ui-color-primary) 62%, var(--ui-color-border));
+  box-shadow: var(--ui-shadow-md), 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 13%, transparent);
+  transform: none;
+}
+
+.hallmark-app .quick-entry::before,
+.hallmark-app .quick-entry::after {
+  display: none;
+}
+
+.hallmark-app .quick-entry-footer,
+.hallmark-app .quick-entry .quick-entry-associations {
+  background: var(--ui-color-surface);
+}
+
+.hallmark-app .quick-entry .quick-entry-associations {
+  border-top-color: var(--ui-color-border);
+}
+
+.hallmark-app .inbox-capture,
+.hallmark-app .project-create,
+.hallmark-app .repository-create {
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.hallmark-app .worklog-search-input {
+  border-color: var(--ui-color-border) !important;
+  border-radius: var(--ui-radius-pill) !important;
+  background: var(--ui-color-surface-subtle) !important;
+  box-shadow: none !important;
+}
+
+.hallmark-app .log-row {
+  border-color: var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.hallmark-app .log-row:hover {
+  border-color: var(--ui-color-border-strong);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-md);
+}
+
+/* Settings stays in the same card/control language as the workspace. */
+.hallmark-app .settings-brand-card,
+.hallmark-app .settings-update-card,
+.hallmark-app .settings-about-card,
+.hallmark-app .settings-data-card {
+  border-color: var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.hallmark-app .settings-brand-card {
+  background: linear-gradient(135deg, var(--ui-color-info-soft), var(--ui-color-surface) 64%);
+}
+
+.hallmark-app .settings-brand-eyebrow,
+.hallmark-app .settings-brand-meta span,
+.hallmark-app .settings-update-progress-value {
+  color: var(--ui-color-tag);
+}
+
+.hallmark-app .settings-brand-meta span {
+  background: var(--ui-color-tag-soft);
+}
+
+.hallmark-app .settings-update-card-icon,
+.hallmark-app .settings-about-card-icon {
+  background: var(--ui-color-info-soft);
+  color: var(--ui-color-tag);
+}
+
+.hallmark-app .settings-update-disabled-note {
+  margin-top: 6px;
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+}
+
+.hallmark-app .settings-update-status-downloaded,
+.hallmark-app .settings-update-status-not_available,
+.hallmark-app .settings-about-points svg {
+  color: var(--ui-color-success);
+}
+
+.hallmark-app .settings-update-status-error {
+  color: var(--ui-color-danger);
+}
+
+.hallmark-app .settings-update-progress {
+  background: var(--ui-color-info-soft);
+}
+
+.hallmark-app .settings-update-progress span {
+  background: var(--ui-color-tag);
+}
+
+.hallmark-app .settings-switch.is-on {
+  border-color: var(--ui-color-primary);
+  background: var(--ui-color-primary);
+}
+
+.hallmark-app .text-zinc-900,
+.hallmark-app .text-zinc-800,
+.hallmark-app .text-zinc-700,
+.hallmark-app .dark\:text-zinc-100,
+.hallmark-app .dark\:text-zinc-200 {
+  color: var(--ui-color-text) !important;
+}
+
+.hallmark-app .text-zinc-600,
+.hallmark-app .text-zinc-500,
+.hallmark-app .text-zinc-400,
+.hallmark-app .dark\:text-zinc-300,
+.hallmark-app .dark\:text-zinc-400 {
+  color: var(--ui-color-text-muted) !important;
+}
+
+.hallmark-app .bg-white,
+.hallmark-app .dark\:bg-zinc-900,
+.hallmark-app .dark\:bg-zinc-800 {
+  background-color: var(--ui-color-surface) !important;
+}
+
+.hallmark-app .bg-zinc-50,
+.hallmark-app .bg-zinc-100,
+.hallmark-app .dark\:bg-zinc-950 {
+  background-color: var(--ui-color-canvas) !important;
+}
+
+.hallmark-app .border-zinc-200,
+.hallmark-app .border-zinc-300,
+.hallmark-app .dark\:border-zinc-700,
+.hallmark-app .dark\:border-zinc-800 {
+  border-color: var(--ui-color-border) !important;
+}
+
+/* Keep any not-yet-migrated selected Tailwind controls away from black. */
+.hallmark-app .border-zinc-900,
+.hallmark-app .dark\:border-zinc-100 {
+  border-color: var(--ui-color-primary) !important;
+}
+
+/* Menus, dialogs and empty states share one elevation scale. */
+.hallmark-app .global-search,
+.hallmark-app .quick-create-panel,
+.hallmark-app .repository-edit-dialog,
+.hallmark-app .project-detail-drawer,
+.hallmark-app .workspace-breadcrumb-menu,
+.hallmark-app .log-card-menu-popover,
+.hallmark-app .repository-card-menu-popover,
+.hallmark-app .project-mention-menu {
+  border-color: var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-lg);
+}
+
+.hallmark-app .quick-create-backdrop,
+.hallmark-app .repository-edit-overlay,
+.hallmark-app .project-detail-overlay,
+.hallmark-app .settings-transfer-backdrop {
+  background: rgba(30, 34, 39, .34);
+}
+
+.hallmark-app .empty-state {
+  border-color: var(--ui-color-border-strong);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+}
+
+.hallmark-app .inline-error {
+  border-left-color: var(--ui-color-danger);
+  background: var(--ui-color-danger-soft);
+  color: var(--ui-color-danger);
+}
+
+.hallmark-app .quick-entry-error,
+.hallmark-app .repository-error {
+  color: var(--ui-color-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hallmark-app *,
+  .hallmark-app *::before,
+  .hallmark-app *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .hallmark-app .workspace-section-tabs {
+    overflow-x: auto;
+  }
+
+  .hallmark-app .settings-page-shell {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}

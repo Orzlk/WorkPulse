@@ -9,6 +9,7 @@ import type { WorkspaceContext } from './repositories/contracts'
 import { normalizeTagName } from './repositories/localTagRepository'
 import { assertStatsDays, DEFAULT_STATS_DAYS } from './lib/stats'
 import { buildFtsQuery } from './search/ftsQuery'
+import { isTaskPriority, normalizeChecklist, parseChecklist, type TaskChecklistItem, type TaskPriority } from './kanban/kanbanTypes'
 
 let db: Database.Database
 
@@ -621,12 +622,14 @@ export interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  priority: TaskPriority
+  checklist: TaskChecklistItem[]
   project_id: string | null
   repository_id: string | null
   tag_names: string[]
 }
 
-export function addTask(title: string, description = '', status: 'todo' | 'draft' = 'todo', createdAt?: string, associations: WorkItemAssociations = {}): Task {
+export function addTask(title: string, description = '', status: 'todo' | 'draft' = 'todo', createdAt?: string, associations: WorkItemAssociations = {}, priority: TaskPriority = 'medium'): Task {
   const metadata = getWriteMetadata(createdAt)
   const create = db.transaction(() => {
     const maxPos = db.prepare(
@@ -635,11 +638,12 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
 
     const projectId = resolveAssociationId('projects', associations.projectId, metadata.workspaceId)
     const repositoryId = resolveAssociationId('repositories', associations.repositoryId, metadata.workspaceId)
+    const normalizedPriority = isTaskPriority(priority) ? priority : 'medium'
     const result = db.prepare(
       `INSERT INTO tasks (
         title, description, status, board_column, position, project_id, repository_id, created_at, updated_at,
-        public_id, workspace_id, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        public_id, workspace_id, created_by, updated_by, priority, checklist
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       title,
       description,
@@ -653,7 +657,9 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
       metadata.publicId,
       metadata.workspaceId,
       metadata.userId,
-      metadata.userId
+      metadata.userId,
+      normalizedPriority,
+      '[]'
     )
     setEntityTags('task_tags', 'task_id', Number(result.lastInsertRowid), metadata.publicId, associations.tagNames, metadata.workspaceId, metadata.userId, metadata.timestamp)
     enqueueEntitySync('task', metadata.publicId, associationPatch(associations), metadata.workspaceId, metadata.timestamp)
@@ -674,6 +680,7 @@ function getTaskRow(workspaceId: number, identityCondition: string, identityValu
   const row = db.prepare(`
     SELECT tasks.id, tasks.public_id, tasks.title, tasks.description, tasks.status, tasks.board_column,
       tasks.position, tasks.created_at, tasks.updated_at, tasks.completed_at, tasks.due_date,
+      tasks.priority, tasks.checklist,
       projects.public_id AS project_public_id, repositories.public_id AS repository_public_id
     FROM tasks
     LEFT JOIN projects ON projects.id = tasks.project_id AND projects.workspace_id = tasks.workspace_id AND projects.deleted_at IS NULL
@@ -695,12 +702,14 @@ interface TaskRow {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  priority: string | null
+  checklist: string | null
   project_public_id: string | null
   repository_public_id: string | null
 }
 
 function toTask(row: TaskRow): Task {
-  return { id: row.id, public_id: row.public_id, title: row.title, description: row.description, status: row.status, board_column: row.board_column, position: row.position, created_at: row.created_at, updated_at: row.updated_at, completed_at: row.completed_at, due_date: row.due_date, project_id: row.project_public_id, repository_id: row.repository_public_id, tag_names: tagNames('task_tags', 'task_id', row.id) }
+  return { id: row.id, public_id: row.public_id, title: row.title, description: row.description, status: row.status, board_column: row.board_column, position: row.position, created_at: row.created_at, updated_at: row.updated_at, completed_at: row.completed_at, due_date: row.due_date, priority: isTaskPriority(row.priority) ? row.priority : 'medium', checklist: parseChecklist(row.checklist), project_id: row.project_public_id, repository_id: row.repository_public_id, tag_names: tagNames('task_tags', 'task_id', row.id) }
 }
 
 export function getTasks(): Task[] {
@@ -711,7 +720,7 @@ export function getTasks(): Task[] {
 
 export function updateTask(
   id: number,
-  updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date' | 'project_id' | 'repository_id' | 'tag_names'>>
+  updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'repository_id' | 'tag_names'>>
 ): Task | null {
   const metadata = getWriteMetadata()
   const update = db.transaction(() => {
@@ -722,14 +731,25 @@ export function updateTask(
 
     if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title) }
     if (updates.description !== undefined) { fields.push('description = ?'); values.push(updates.description) }
+    if (updates.board_column !== undefined) { fields.push('board_column = ?'); values.push(updates.board_column) }
     if (updates.status !== undefined) {
-      fields.push('status = ?', 'board_column = ?')
-      values.push(updates.status, updates.status)
+      if (updates.board_column === undefined) { fields.push('board_column = ?'); values.push(updates.status) }
+      fields.push('status = ?')
+      values.push(updates.status)
       if (updates.status === 'done') { fields.push('completed_at = ?'); values.push(metadata.timestamp) }
       else fields.push('completed_at = NULL')
     }
     if (updates.position !== undefined) { fields.push('position = ?'); values.push(updates.position) }
     if (updates.due_date !== undefined) { fields.push('due_date = ?'); values.push(updates.due_date) }
+    if (updates.priority !== undefined) {
+      if (!isTaskPriority(updates.priority)) throw new Error('Task priority is invalid')
+      fields.push('priority = ?')
+      values.push(updates.priority)
+    }
+    if (updates.checklist !== undefined) {
+      fields.push('checklist = ?')
+      values.push(JSON.stringify(normalizeChecklist(updates.checklist)))
+    }
     if (updates.project_id !== undefined) { fields.push('project_id = ?'); values.push(projectId ?? null) }
     if (updates.repository_id !== undefined) { fields.push('repository_id = ?'); values.push(repositoryId ?? null) }
 
@@ -740,7 +760,7 @@ export function updateTask(
     if (!row) return null
     setEntityTags('task_tags', 'task_id', id, row.public_id, updates.tag_names, metadata.workspaceId, metadata.userId, metadata.timestamp)
     const patch: Record<string, unknown> = {}
-    for (const key of ['title', 'description', 'status', 'position', 'due_date'] as const) {
+    for (const key of ['title', 'description', 'status', 'board_column', 'position', 'due_date', 'priority', 'checklist'] as const) {
       if (updates[key] !== undefined) patch[key] = updates[key]
     }
     if (updates.project_id !== undefined) patch.project_id = updates.project_id
@@ -764,7 +784,7 @@ export function deleteTask(id: number): boolean {
   })()
 }
 
-export function reorderTasks(taskIds: number[], status: string): void {
+export function reorderTasks(taskIds: number[], boardColumn: string, status: Task['status'] = boardColumn as Task['status']): void {
   const metadata = getWriteMetadata()
   const stmt = db.prepare(`
     UPDATE tasks
@@ -785,7 +805,7 @@ export function reorderTasks(taskIds: number[], status: string): void {
     ids.forEach((id, index) => {
       stmt.run(
         index,
-        status,
+        boardColumn,
         status,
         metadata.timestamp,
         metadata.userId,
@@ -798,6 +818,57 @@ export function reorderTasks(taskIds: number[], status: string): void {
     })
   })
   tx(taskIds)
+}
+
+export interface KanbanColumn {
+  public_id: string
+  column_key: string
+  name: string
+  status: Exclude<Task['status'], 'draft'>
+  position: number
+  is_system: boolean
+}
+
+export function getKanbanColumns(): KanbanColumn[] {
+  const workspaceId = getDefaultWorkspaceContext().workspace_id
+  const rows = db.prepare(`
+    SELECT public_id, column_key, name, status, position, is_system
+    FROM kanban_columns
+    WHERE workspace_id = ?
+    ORDER BY position ASC, id ASC
+  `).all(workspaceId) as Array<Omit<KanbanColumn, 'is_system'> & { is_system: number }>
+  return rows.map((row) => ({ ...row, is_system: row.is_system === 1 }))
+}
+
+export function createKanbanColumn(name: string): KanbanColumn {
+  const normalizedName = name.trim()
+  if (!normalizedName) throw new Error('Kanban column name is required')
+  const metadata = getWriteMetadata()
+  const columnKey = `custom_${randomUUID()}`
+  const position = (db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM kanban_columns WHERE workspace_id = ?').get(metadata.workspaceId) as { next: number }).next
+  db.prepare(`
+    INSERT INTO kanban_columns (public_id, workspace_id, column_key, name, status, position, is_system, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'in_progress', ?, 0, ?, ?)
+  `).run(randomUUID(), metadata.workspaceId, columnKey, normalizedName, position, metadata.timestamp, metadata.timestamp)
+  return getKanbanColumns().find((column) => column.column_key === columnKey)!
+}
+
+export function updateKanbanColumn(publicId: string, name: string): KanbanColumn | null {
+  const normalizedName = name.trim()
+  if (!normalizedName) throw new Error('Kanban column name is required')
+  const metadata = getWriteMetadata()
+  db.prepare('UPDATE kanban_columns SET name = ?, updated_at = ? WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(normalizedName, metadata.timestamp, publicId, metadata.workspaceId)
+  return getKanbanColumns().find((column) => column.public_id === publicId) ?? null
+}
+
+export function deleteKanbanColumn(publicId: string): boolean {
+  const metadata = getWriteMetadata()
+  return db.transaction(() => {
+    const column = db.prepare('SELECT column_key, is_system FROM kanban_columns WHERE public_id = ? AND workspace_id = ?').get(publicId, metadata.workspaceId) as { column_key: string; is_system: number } | undefined
+    if (!column || column.is_system === 1) return false
+    db.prepare("UPDATE tasks SET board_column = 'todo', status = 'todo', updated_at = ?, updated_by = ? WHERE workspace_id = ? AND board_column = ? AND deleted_at IS NULL").run(metadata.timestamp, metadata.userId, metadata.workspaceId, column.column_key)
+    return db.prepare('DELETE FROM kanban_columns WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(publicId, metadata.workspaceId).changes > 0
+  })()
 }
 
 // --- Settings CRUD ---

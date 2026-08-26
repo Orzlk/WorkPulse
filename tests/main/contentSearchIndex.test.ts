@@ -58,7 +58,7 @@ describe('content search index', () => {
   it('backfills and maintains FTS documents for all searchable entities', () => {
     const database = createDatabaseWithFixtures()
 
-    expect(getDatabaseVersion(database)).toBeGreaterThanOrEqual(12)
+    expect(getDatabaseVersion(database)).toBe(1)
     expect(searchIndexedTypes(database)).toEqual(['git_commit', 'inbox_item', 'report', 'task', 'work_log'])
 
     database.prepare('UPDATE work_logs SET content = ? WHERE public_id = ?').run('updated phrase', 'log-1')

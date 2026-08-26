@@ -1,5 +1,5 @@
 import { Children, cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import { findInlineReferences, type InlineReference } from '../lib/workspaceInteractions'
 
 interface InteractiveMarkdownProps {
@@ -19,6 +19,11 @@ interface InlineRenderContext {
   selectedTagPath?: string
   onProjectClick: (projectId: string) => void
   onTagClick: (tagPath: string) => void
+}
+
+function transformMarkdownUrl(url: string): string {
+  if (url.startsWith('workpulse-attachment://')) return url
+  return defaultUrlTransform(url)
 }
 
 function renderInlineText(text: string, context: InlineRenderContext): ReactNode {
@@ -110,5 +115,5 @@ export function InteractiveMarkdown({
     th: createBlockRenderer('th', context)
   }
 
-  return <ReactMarkdown components={components}>{content}</ReactMarkdown>
+  return <ReactMarkdown components={components} urlTransform={transformMarkdownUrl}>{content}</ReactMarkdown>
 }

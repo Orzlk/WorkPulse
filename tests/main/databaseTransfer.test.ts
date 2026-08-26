@@ -127,11 +127,15 @@ describe('database transfer package', () => {
     database.prepare(`INSERT INTO projects (public_id, workspace_id, name, description, color, created_by, updated_by, created_at, updated_at)
       VALUES ('project-1', ?, '项目', '', '#111111', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
       .run(workspace_id, user_id, user_id)
+    database.prepare(`INSERT INTO kanban_columns (public_id, workspace_id, column_key, name, status, position, is_system, created_at, updated_at)
+      VALUES ('column-1', ?, 'custom_review', '待审核', 'in_progress', 3, 0, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(workspace_id)
 
     const exported = createDatabaseExport(database, context(database))
 
-    expect(exported.schema_version).toBe(12)
+    expect(exported.schema_version).toBe(1)
     expect(exported.tables.projects).toHaveLength(1)
+    expect(exported.tables.kanban_columns).toHaveLength(1)
     expect(JSON.stringify(exported)).not.toContain('secret-value')
     expect(exported.tables.settings).toBeUndefined()
     expect(exported.tables.projects?.[0]).not.toHaveProperty('future_secret')
@@ -153,7 +157,7 @@ describe('database transfer package', () => {
       future_secret: 'do-not-ignore'
     }]
     expect(() => previewDatabaseImport(packageWithSecret)).toThrow('IMPORT_INVALID')
-    expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 12 })).toThrow('IMPORT_INVALID')
+    expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 2 })).toThrow('IMPORT_INVALID')
 
     database.prepare(`INSERT INTO work_logs (public_id, workspace_id, content, created_at, updated_at)
       VALUES ('large-log', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)

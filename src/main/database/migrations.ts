@@ -7,7 +7,7 @@ import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-export const CURRENT_SCHEMA_VERSION = 12
+export const CURRENT_SCHEMA_VERSION = 1
 
 function tableExists(database: Database.Database, tableName: string): boolean {
   return Boolean(
@@ -300,7 +300,39 @@ function rebuildContentSearchIndex(database: Database.Database): void {
   }
 }
 
-const migrations: SchemaMigration[] = [
+function ensureKanbanColumnsSchema(database: Database.Database, context: MigrationContext): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS kanban_columns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      column_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'in_progress' CHECK(status IN ('todo', 'in_progress', 'done')),
+      position INTEGER NOT NULL DEFAULT 0,
+      is_system INTEGER NOT NULL DEFAULT 0 CHECK(is_system IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(workspace_id, column_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_kanban_columns_workspace ON kanban_columns(workspace_id, position);
+  `)
+
+  const workspaces = database.prepare('SELECT id FROM workspaces').all() as Array<{ id: number }>
+  const insertColumn = database.prepare(`
+    INSERT OR IGNORE INTO kanban_columns (
+      public_id, workspace_id, column_key, name, status, position, is_system, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `)
+  const now = context.now().toISOString()
+  for (const workspace of workspaces) {
+    insertColumn.run(randomUUID(), workspace.id, 'todo', '待办', 'todo', 0, now, now)
+    insertColumn.run(randomUUID(), workspace.id, 'in_progress', '进行中', 'in_progress', 1, now, now)
+    insertColumn.run(randomUUID(), workspace.id, 'done', '已完成', 'done', 2, now, now)
+  }
+}
+
+const initialSchemaSteps: SchemaMigration[] = [
   {
     version: 1,
     name: '001_core_schema',
@@ -697,11 +729,41 @@ const migrations: SchemaMigration[] = [
     }
   },
   {
-    version: CURRENT_SCHEMA_VERSION,
+    version: 12,
     name: '012_content_search_completion',
     up: (database) => {
       createContentSearchTriggers(database)
       rebuildContentSearchIndex(database)
+    }
+  },
+  {
+    version: 13,
+    name: '013_kanban_advanced',
+    up: (database, context) => {
+      addColumnIfMissing(database, 'tasks', 'priority', "TEXT NOT NULL DEFAULT 'medium'")
+      addColumnIfMissing(database, 'tasks', 'checklist', "TEXT NOT NULL DEFAULT '[]'")
+      ensureKanbanColumnsSchema(database, context)
+    }
+  },
+  {
+    version: 14,
+    name: '014_kanban_schema_repair',
+    up: (database, context) => {
+      addColumnIfMissing(database, 'tasks', 'priority', "TEXT NOT NULL DEFAULT 'medium'")
+      addColumnIfMissing(database, 'tasks', 'checklist', "TEXT NOT NULL DEFAULT '[]'")
+      ensureKanbanColumnsSchema(database, context)
+    }
+  }
+]
+
+const migrations: SchemaMigration[] = [
+  {
+    version: 1,
+    name: '001_initial_schema',
+    up: (database, context) => {
+      for (const migration of initialSchemaSteps) {
+        migration.up(database, context)
+      }
     }
   }
 ]

@@ -25,8 +25,13 @@ import {
   updateTask,
   deleteTask,
   reorderTasks,
+  getKanbanColumns,
+  createKanbanColumn,
+  updateKanbanColumn,
+  deleteKanbanColumn,
   workLogExists,
-  type Task
+  type Task,
+  type KanbanColumn
 } from './db'
 import { deleteStoredApiKey, getStoredApiKey, setStoredApiKey } from './secureSettings'
 import { tMain } from './i18n'
@@ -367,8 +372,8 @@ export function registerIpcHandlers(): void {
 
   // --- Tasks ---
 
-  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown) => {
-    return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations))
+  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown, priority?: Task['priority']) => {
+    return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations), priority)
   })
 
   ipcMain.handle('task:list', () => {
@@ -382,7 +387,7 @@ export function registerIpcHandlers(): void {
     (
       _event,
       id: number,
-      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date' | 'project_id' | 'repository_id' | 'tag_names'>>
+      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'repository_id' | 'tag_names'>>
     ) => {
       return updateTask(id, { ...updates, ...parseWorkItemAssociations({ project_id: updates.project_id, repository_id: updates.repository_id, tag_names: updates.tag_names }) })
     }
@@ -392,9 +397,14 @@ export function registerIpcHandlers(): void {
     return deleteTask(id)
   })
 
-  ipcMain.handle('task:reorder', (_event, taskIds: number[], status: string) => {
-    reorderTasks(taskIds, status)
+  ipcMain.handle('task:reorder', (_event, taskIds: number[], boardColumn: string, status?: Task['status']) => {
+    reorderTasks(taskIds, boardColumn, status)
   })
+
+  ipcMain.handle('kanban:columns:list', (): KanbanColumn[] => getKanbanColumns())
+  ipcMain.handle('kanban:columns:create', (_event, name: string): KanbanColumn => createKanbanColumn(name))
+  ipcMain.handle('kanban:columns:update', (_event, publicId: string, name: string): KanbanColumn | null => updateKanbanColumn(publicId, name))
+  ipcMain.handle('kanban:columns:delete', (_event, publicId: string): boolean => deleteKanbanColumn(publicId))
 
   // Complete task + auto create work log
   ipcMain.handle(

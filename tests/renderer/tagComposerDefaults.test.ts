@@ -29,4 +29,10 @@ describe('tag composer defaults', () => {
       autoPrefix: ''
     })
   })
+
+  it('keeps a tag switch idempotent when the state transition is evaluated twice', () => {
+    const first = applySelectedTagToComposer('', '工作/旧')
+    const switched = applySelectedTagToComposer(first.text, '工作/新', first.autoPrefix)
+    expect(applySelectedTagToComposer(first.text, '工作/新', switched.autoPrefix)).toEqual(switched)
+  })
 })

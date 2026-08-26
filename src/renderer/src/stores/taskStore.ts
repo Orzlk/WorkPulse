@@ -12,6 +12,8 @@ interface Task {
   updated_at: string
   completed_at: string | null
   due_date: string | null
+  priority: 'low' | 'medium' | 'high'
+  checklist: Array<{ id: string; text: string; completed: boolean }>
   public_id: string
   project_id: string | null
   repository_id: string | null
@@ -23,12 +25,12 @@ interface TaskStore {
   loading: boolean
   fetchTasks: () => Promise<void>
   loadByPublicId: (publicId: string) => Promise<Task | null>
-  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations) => Promise<Task>
-  updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'position' | 'due_date'>> & WorkItemAssociations) => Promise<void>
+  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) => Promise<Task>
+  updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) => Promise<void>
   deleteTask: (id: number) => Promise<void>
   completeTask: (id: number, logContent: string) => Promise<void>
   completeTaskOnly: (id: number) => Promise<void>
-  reorderTasks: (taskIds: number[], status: string) => Promise<void>
+  reorderTasks: (taskIds: number[], boardColumn: string, status?: Task['status']) => Promise<void>
   getByStatus: (status: Task['status']) => Task[]
 }
 
@@ -53,8 +55,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     return task
   },
 
-  addTask: async (title, description, status, createdAt?, associations?) => {
-    const task = await window.api.task.add(title, description, status, createdAt, associations)
+  addTask: async (title, description, status, createdAt?, associations?, priority?) => {
+    const task = await window.api.task.add(title, description, status, createdAt, associations, priority)
     set({ tasks: [...get().tasks, task] })
     return task
   },
@@ -85,8 +87,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  reorderTasks: async (taskIds, status) => {
-    await window.api.task.reorder(taskIds, status)
+  reorderTasks: async (taskIds, boardColumn, status?) => {
+    await window.api.task.reorder(taskIds, boardColumn, status)
     // Refetch to get updated positions
     await get().fetchTasks()
   },

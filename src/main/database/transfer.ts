@@ -28,12 +28,12 @@ export interface DatabaseImportResult {
 
 type ExportTable =
   | 'workspaces' | 'users' | 'projects' | 'repositories' | 'repository_bindings'
-  | 'work_logs' | 'tasks' | 'inbox_items' | 'tags' | 'work_log_tags' | 'task_tags'
+  | 'work_logs' | 'tasks' | 'kanban_columns' | 'inbox_items' | 'tags' | 'work_log_tags' | 'task_tags'
   | 'inbox_tags' | 'git_commits' | 'git_commit_tags' | 'reports' | 'report_projects'
   | 'report_repositories' | 'report_tags' | 'sync_operations'
 
 const EXPORT_TABLES: readonly ExportTable[] = [
-  'workspaces', 'users', 'projects', 'repositories', 'repository_bindings', 'work_logs', 'tasks',
+  'workspaces', 'users', 'projects', 'repositories', 'repository_bindings', 'work_logs', 'tasks', 'kanban_columns',
   'inbox_items', 'tags', 'work_log_tags', 'task_tags', 'inbox_tags', 'git_commits', 'git_commit_tags',
   'reports', 'report_projects', 'report_repositories', 'report_tags', 'sync_operations'
 ]
@@ -44,7 +44,8 @@ const EXPORT_COLUMNS: Record<ExportTable, readonly string[]> = {
   repositories: ['id', 'public_id', 'name', 'remote_url', 'project_id', 'enabled', 'scan_interval_minutes', 'last_scanned_at', 'last_failed_at', 'last_scan_error', 'created_at', 'updated_at', 'deleted_at'],
   repository_bindings: ['id', 'public_id', 'repository_id', 'branch', 'is_valid', 'created_at', 'updated_at', 'deleted_at'],
   work_logs: ['id', 'public_id', 'project_id', 'repository_id', 'task_id', 'content', 'category', 'created_at', 'updated_at', 'deleted_at'],
-  tasks: ['id', 'public_id', 'project_id', 'repository_id', 'title', 'description', 'status', 'board_column', 'position', 'created_at', 'updated_at', 'completed_at', 'due_date', 'deleted_at'],
+  tasks: ['id', 'public_id', 'project_id', 'repository_id', 'title', 'description', 'status', 'board_column', 'position', 'created_at', 'updated_at', 'completed_at', 'due_date', 'priority', 'checklist', 'deleted_at'],
+  kanban_columns: ['id', 'public_id', 'column_key', 'name', 'status', 'position', 'is_system', 'created_at', 'updated_at'],
   inbox_items: ['id', 'public_id', 'project_id', 'repository_id', 'content', 'status', 'state', 'include_in_reports', 'ai_suggestion', 'created_at', 'updated_at', 'deleted_at'],
   tags: ['id', 'public_id', 'name', 'path', 'parent_id', 'created_at', 'updated_at', 'deleted_at'],
   work_log_tags: ['work_log_id', 'tag_id'],
@@ -67,6 +68,7 @@ const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
   repository_bindings: [...EXPORT_COLUMNS.repository_bindings, 'workspace_id', 'created_by', 'updated_by', 'local_path'],
   work_logs: [...EXPORT_COLUMNS.work_logs, 'workspace_id', 'created_by', 'updated_by'],
   tasks: [...EXPORT_COLUMNS.tasks, 'workspace_id', 'created_by', 'updated_by'],
+  kanban_columns: [...EXPORT_COLUMNS.kanban_columns, 'workspace_id', 'created_by', 'updated_by'],
   inbox_items: [...EXPORT_COLUMNS.inbox_items, 'workspace_id', 'created_by', 'updated_by'],
   tags: [...EXPORT_COLUMNS.tags, 'workspace_id'],
   git_commits: [...EXPORT_COLUMNS.git_commits, 'workspace_id', 'created_by', 'updated_by'],
@@ -81,7 +83,7 @@ const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
   report_tags: EXPORT_COLUMNS.report_tags
 }
 const IMPORT_ORDER: readonly ExportTable[] = [
-  'workspaces', 'users', 'projects', 'tags', 'repositories', 'repository_bindings', 'tasks', 'work_logs', 'inbox_items',
+  'workspaces', 'users', 'projects', 'tags', 'repositories', 'repository_bindings', 'kanban_columns', 'tasks', 'work_logs', 'inbox_items',
   'git_commits', 'reports', 'sync_operations', 'work_log_tags', 'task_tags', 'inbox_tags',
   'git_commit_tags', 'report_projects', 'report_repositories', 'report_tags'
 ]
@@ -105,6 +107,7 @@ const EXPORT_SCOPES: Record<ExportTable, ExportScope> = {
   },
   work_logs: { from: 'work_logs', where: 'WHERE workspace_id = ?', parameterCount: 1 },
   tasks: { from: 'tasks', where: 'WHERE workspace_id = ?', parameterCount: 1 },
+  kanban_columns: { from: 'kanban_columns', where: 'WHERE workspace_id = ? AND is_system = 0', parameterCount: 1 },
   inbox_items: { from: 'inbox_items', where: 'WHERE workspace_id = ?', parameterCount: 1 },
   tags: { from: 'tags', where: 'WHERE workspace_id = ?', parameterCount: 1 },
   work_log_tags: {

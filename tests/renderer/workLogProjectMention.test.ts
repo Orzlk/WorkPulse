@@ -17,7 +17,8 @@ describe('work log project mentions', () => {
     expect(page).toContain('tagMention')
     expect(page).toContain('role="listbox"')
     expect(page).toContain('ArrowDown')
-    expect(page).toContain('project_id: resolveProjectReference(trimmed, projects)')
+    expect(page).toContain('resolveOrCreateProjectReference')
+    expect(page).toContain('project_id: projectId')
   })
 
   it('has a stable project mention menu surface', () => {
@@ -32,5 +33,6 @@ describe('work log project mentions', () => {
     expect(editorPage).toContain('getTextareaCaretPosition')
     expect(editorPage).toContain('getMentionMenuPosition')
     expect(styles).toContain('.worklog-mention-menu')
+    expect(editorPage).toContain('resolveOrCreateProjectReference')
   })
 })

@@ -18,7 +18,7 @@ describe('work log editor mentions', () => {
     expect(page).toContain('worklog-tag-mention-list')
     expect(page).toContain('window.api.tag.list')
     expect(page).toContain('syncProjectReference')
-    expect(page).toContain('resolveProjectReference')
+    expect(page).toContain('resolveOrCreateProjectReference')
   })
 
   it('stretches the highlighted editor content area instead of collapsing to one line', () => {

@@ -25,7 +25,8 @@ import type { AppLanguage, ResolvedLanguage } from '../lib/i18n'
 import { isClearDataConfirmationValid } from '../lib/clearDataConfirmation'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { DatabaseTransferCard } from '../components/DatabaseTransferCard'
-import workpulseMark from '../assets/workpulse-mark.svg'
+import { WorkLogTransferCard } from '../components/WorkLogTransferCard'
+import workpulseLogo from '../assets/workpulse-logo.png'
 
 // Convert a KeyboardEvent to an Electron-style accelerator string
 function eventToAccelerator(e: KeyboardEvent): string | null {
@@ -666,6 +667,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   }
 
   const currentVersion = appVersion || updateState.currentVersion || '-'
+  const onlineUpdatesEnabled = false
   const isCheckingUpdate = updateState.status === 'checking' || updateState.status === 'downloading'
   const settingsSections: Array<{ id: SettingsSectionId; label: string }> = [
     { id: 'ai', label: t('settings.aiAndReports') },
@@ -1029,11 +1031,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 <button
                   key={value}
                   onClick={() => setTheme(value)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border transition-colors ${
-                    theme === value
-                      ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
-                      : 'border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                  }`}
+                  className={`ui-choice-option${theme === value ? ' is-selected' : ''}`}
                 >
                   <Icon className="w-4 h-4" />
                   {label}
@@ -1046,6 +1044,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
           <section id="settings-data" className="settings-section">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">{t('settings.dataManagement')}</h2>
             <div className="h-px bg-zinc-200 dark:bg-zinc-700 mb-4" />
+            <WorkLogTransferCard />
             <DatabaseTransferCard />
             <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-900/60 dark:bg-red-950/20">
               <div className="flex items-start gap-3">
@@ -1073,8 +1072,8 @@ function SettingsPage({ onBack }: Props): JSX.Element {
           {/* Updates & About */}
           <section id="settings-updates" className="settings-section">
             <div className="settings-brand-card">
-              <div className="settings-brand-card-mark">
-                <img src={workpulseMark} alt="" />
+              <div className="settings-brand-card-logo">
+                <img src={workpulseLogo} alt="WorkPulse" />
               </div>
               <div className="settings-brand-card-copy">
                 <p className="settings-brand-eyebrow">WORKPULSE</p>
@@ -1093,6 +1092,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 <div>
                   <h2>{t('settings.updateTitle')}</h2>
                   <p>{t('settings.updateHelp')}</p>
+                  {!onlineUpdatesEnabled && <p className="settings-update-disabled-note">{t('settings.onlineUpdatesDisabled')}</p>}
                 </div>
               </div>
               <div className="settings-update-status-row">
@@ -1118,24 +1118,26 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                   <span style={{ width: `${Math.max(0, Math.min(100, updateState.progress ?? 0))}%` }} />
                 </div>
               )}
-              <div className="settings-update-actions">
-                <button type="button" onClick={handleCheckUpdates} disabled={isCheckingUpdate} className="settings-secondary-button">
-                  <RefreshCw className={isCheckingUpdate ? 'is-spinning' : ''} aria-hidden="true" />
-                  {isCheckingUpdate ? t('settings.checkingUpdates') : t('settings.checkUpdates')}
-                </button>
-                {updateState.status === 'downloaded' && (
-                  <button type="button" onClick={handleInstallUpdate} className="settings-primary-button">
-                    <Download aria-hidden="true" />
-                    {t('settings.restartInstall')}
+              {onlineUpdatesEnabled && (
+                <div className="settings-update-actions">
+                  <button type="button" onClick={handleCheckUpdates} disabled={isCheckingUpdate} className="settings-secondary-button">
+                    <RefreshCw className={isCheckingUpdate ? 'is-spinning' : ''} aria-hidden="true" />
+                    {isCheckingUpdate ? t('settings.checkingUpdates') : t('settings.checkUpdates')}
                   </button>
-                )}
-                {updateState.releaseUrl && (
-                  <button type="button" onClick={() => window.open(updateState.releaseUrl, '_blank')} className="settings-secondary-button">
-                    <ExternalLink aria-hidden="true" />
-                    {t('settings.openRelease')}
-                  </button>
-                )}
-              </div>
+                  {updateState.status === 'downloaded' && (
+                    <button type="button" onClick={handleInstallUpdate} className="settings-primary-button">
+                      <Download aria-hidden="true" />
+                      {t('settings.restartInstall')}
+                    </button>
+                  )}
+                  {updateState.releaseUrl && (
+                    <button type="button" onClick={() => window.open(updateState.releaseUrl, '_blank')} className="settings-secondary-button">
+                      <ExternalLink aria-hidden="true" />
+                      {t('settings.openRelease')}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="settings-about-grid">
