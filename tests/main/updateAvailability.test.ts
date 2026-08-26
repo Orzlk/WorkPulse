@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 vi.mock('electron-updater', () => ({ autoUpdater: autoUpdaterMock }))
 
-import { checkForUpdates, configureAutoUpdater, ONLINE_UPDATES_ENABLED, startUpdateCheck } from '../../src/main/updater'
+import { checkForUpdates, configureAutoUpdater, GITHUB_UPDATE_TARGET, ONLINE_UPDATES_ENABLED, startUpdateCheck } from '../../src/main/updater'
 
 describe('online update availability', () => {
   beforeEach(() => {
@@ -37,6 +37,10 @@ describe('online update availability', () => {
     expect(state.status).toBe('idle')
     expect(autoUpdaterMock.setFeedURL).not.toHaveBeenCalled()
     expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it('points future GitHub updates at the current project repository', () => {
+    expect(GITHUB_UPDATE_TARGET).toEqual({ owner: 'Orzlk', repo: 'WorkPulse' })
   })
 
   it('does not schedule an automatic online update check while disabled', () => {

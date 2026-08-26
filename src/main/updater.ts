@@ -33,8 +33,12 @@ interface GitHubRelease {
   assets: { browser_download_url: string; name: string }[]
 }
 
-const owner = 'dobest1024'
-const repo = 'WorkPulse'
+export const GITHUB_UPDATE_TARGET = {
+  owner: 'Orzlk',
+  repo: 'WorkPulse'
+} as const
+
+const { owner, repo } = GITHUB_UPDATE_TARGET
 const latestReleaseApiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`
 const releasePageUrl = `https://github.com/${owner}/${repo}/releases/latest`
 

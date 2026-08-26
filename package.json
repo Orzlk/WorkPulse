@@ -2,11 +2,11 @@
   "name": "workpulse",
   "version": "0.0.1",
   "description": "Work log + AI report generator desktop app",
-  "author": "dobest1024 <dobest1024@users.noreply.github.com>",
+  "author": "Orzlk",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dobest1024/WorkPulse.git"
+    "url": "https://github.com/Orzlk/WorkPulse.git"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -31,7 +31,7 @@
   "build": {
     "appId": "com.workpulse.app",
     "productName": "WorkPulse",
-    "copyright": "Copyright © 2026",
+    "copyright": "Copyright © 2026 Orzlk",
     "directories": {
       "buildResources": "resources",
       "output": "dist"
@@ -39,7 +39,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "dobest1024",
+        "owner": "Orzlk",
         "repo": "WorkPulse"
       }
     ],
