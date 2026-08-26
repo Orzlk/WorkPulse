@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Work log + AI report generator desktop app",
   "author": "dobest1024 <dobest1024@users.noreply.github.com>",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/dobest1024/WorkPulse.git"

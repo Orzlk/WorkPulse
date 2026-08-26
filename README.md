@@ -1,105 +1,98 @@
-# WorkPulse (拾光)
+# 拾光 (WorkPulse)
 
-[English](./README.md) | [中文](./README.zh-CN.md)
+一款轻量桌面应用，几秒钟记录你的每日工作——写下做了什么、用看板管理任务、用 AI 生成工作报告。
 
-A lightweight desktop app that captures your daily work in seconds — log what you did, track tasks on a kanban board, and generate AI-powered reports.
+为每一个想轻松回顾"今天干了啥"的打工人而生。
 
-Built for individual contributors who want a frictionless way to remember what they accomplished each day.
+## 截图
 
-## Features
+| 工作日志 | 看板 |
+|---------|------|
+| ![工作日志](docs/screenshots/workpulse-worklog.png) | ![看板](docs/screenshots/workpulse-kanban.png) |
 
-**Work Log** — Type what you just did, press Enter. That's it. Supports `#tag` for auto-categorization, full-text search, undo delete, and CSV/Markdown export with categories. You can also import Flomo HTML notes while keeping their original timestamps, tags, Markdown formatting, and image attachments. Images are copied into WorkPulse's attachment directory; audio, video, missing, and unsupported attachments are not copied and are reported in the import result.
+| AI 报告 | 统计 |
+|---------|------|
+| ![AI 报告](docs/screenshots/workpulse-report.png) | ![统计](docs/screenshots/workpulse-stats.png) |
 
-**Kanban Board** — Drag tasks between Todo → In Progress → Done. Includes a draft box for "maybe later" ideas, due date tracking, and inline editing. Completing a task auto-generates a work log entry.
+## 功能
 
-**AI Reports** — Select a date range, get a structured summary of your work. Reports use both work logs and task context, support OpenAI/Anthropic-compatible providers, and can be previewed, edited, saved to history, copied, or exported.
+**工作日志** — 输入你刚做了什么，按回车，完成。支持 `#标签` 自动分类、全文搜索、撤销删除，以及带分类信息的 CSV/Markdown 导出；也可以直接导入 Flomo HTML 笔记，保留原始时间、标签、Markdown 格式和图片附件。图片会复制到 WorkPulse 附件目录；音频、视频、缺失或不支持格式的附件不会复制，并在导入结果中提示。
 
-**Projects, Inbox, and Git Activity** — Capture fragments in an inbox, organize them into logs or tasks, assign projects/repositories/multiple `#tags`, and scan selected local Git repositories with read-only commands. Git activity is grouped into project reports without uploading repository paths.
+**看板任务** — 在待办 → 进行中 → 已完成之间拖拽任务卡片。有草稿箱存放"以后再说"的想法，支持截止日期和内联编辑。完成任务时自动生成一条工作日志。
 
-**Statistics** — 14-day activity bar chart, GitHub-style heat map, streak counter, and task completion metrics.
+**AI 报告** — 选择时间范围，一键生成结构化工作总结。报告会结合工作日志和任务上下文，支持 OpenAI/Anthropic 兼容服务，可预览、编辑、保存到历史、复制或导出。
 
-**Quick Capture** — Configurable global shortcuts (`Ctrl+Shift+L` for logs, `Ctrl+Shift+T` for tasks by default) let you record without switching windows. Quick logs also support `#tag` parsing and are accessible from the menu bar tray icon.
+**项目、收件箱与 Git 活动** — 零散想法可先记录到收件箱，再整理为日志或任务；支持项目、仓库和多个 `#标签` 归属。可扫描用户选择的本地 Git 仓库，只读取提交摘要，并按项目汇总到报告中。
 
-**Dark Mode** — System, light, or dark theme with full UI coverage.
+**数据统计** — 14 天活动柱状图、GitHub 风格热力图、连续记录天数、任务完成统计。
 
-**Languages** — English and Chinese UI with a system-default option. Menus, tray actions, settings, exports, and default AI report prompts follow the selected language.
+**快速记录** — 可配置全局快捷键（默认 `Ctrl+Shift+L` 记日志、`Ctrl+Shift+T` 加任务）让你无需切换窗口即可记录。快速日志同样支持 `#标签` 解析，也可从菜单栏托盘图标操作。
 
-**Online Updates** — GitHub online update checks and installation are temporarily disabled in version `0.0.1`; the updater implementation remains in the codebase for a future release.
+**深色模式** — 跟随系统、浅色、深色三种主题，全界面覆盖。
 
-## Tech Stack
+**在线更新** — `0.0.1` 暂时关闭 GitHub 在线检查和安装，请使用新版本安装包手动更新；相关实现保留，便于后续恢复。
+
+## 技术栈
 
 - **Electron** + **React** + **TypeScript**
-- **Vite** via electron-vite for fast builds
-- **SQLite** (better-sqlite3) for local-first data storage
-- **Zustand** for state management
-- **@dnd-kit** for drag-and-drop
-- **Tailwind CSS** for styling
+- **Vite** (electron-vite) 快速构建
+- **SQLite** (better-sqlite3) 本地数据存储
+- **Zustand** 状态管理
+- **@dnd-kit** 拖拽排序
+- **Tailwind CSS** 样式
 
-## Getting Started
+## 快速开始
 
 ```bash
-# Install dependencies
+# 安装依赖
 npm install
 
-# Run in development
+# 开发模式运行
 npm run dev
 
-# Build for production
+# 生产构建
 npm run build
 
-# Package for distribution
+# 打包分发
 npm run dist:mac    # macOS (DMG + ZIP, x64 + arm64)
-npm run dist:win    # Windows (NSIS installer)
+npm run dist:win    # Windows (NSIS 安装包)
 npm run dist:linux  # Linux (AppImage)
 ```
 
-## Installation
+## 安装说明
 
 ### macOS
 
-Because the build is unsigned, macOS Gatekeeper will mark the app as "damaged" on first launch. After dragging `WorkPulse.app` to `/Applications`, run this once in Terminal to clear the quarantine attribute:
+由于安装包未签名，macOS 在首次打开时会提示"已损坏"。把 `WorkPulse.app` 拖到 `/Applications` 之后，在终端执行一次以下命令以清除隔离属性：
 
 ```bash
 xattr -cr /Applications/WorkPulse.app
 ```
 
-Then open the app normally.
+然后正常打开应用即可。
 
-## Release Builds
+## 快捷键
 
-GitHub Actions builds release artifacts for macOS, Windows, and Linux when a `v*` tag is pushed, or when the `Release` workflow is run manually. The workflow runs the full test suite and typecheck before packaging.
+| 快捷键 | 功能 |
+|--------|------|
+| `⌘1` / `Ctrl+1` | 切换到工作日志 |
+| `⌘2` / `Ctrl+2` | 切换到看板 |
+| `⌘3` / `Ctrl+3` | 切换到报告 |
+| `⌘4` / `Ctrl+4` | 切换到统计 |
+| `⌘,` / `Ctrl+,` | 设置 |
+| `Ctrl+Shift+L` | 全局快速记录日志 |
+| `Ctrl+Shift+T` | 全局快速添加任务 |
 
-```bash
-git tag v0.0.1
-git push origin v0.0.1
-```
+## 数据与安全
 
-The workflow uploads DMG/ZIP, NSIS/portable EXE, AppImage, and DEB artifacts to the GitHub Release. Builds are unsigned by default; add signing secrets later if you need notarized macOS or signed Windows installers.
+阶段一采用本地优先设计。数据库位于 Electron 系统 `userData` 目录的 `workpulse.db`，迁移前备份位于 `userData/backups`。当前数据库版本为 1，代表合并后的预发布数据库结构；旧开发版本数据库不会由此版本自动升级，使用前应先备份/导出、重新创建数据库，再重新导入数据。应用启动时以事务执行迁移并校验完整性。导入导出使用带版本的逻辑 JSON 数据包，而非直接覆盖 SQLite 文件：导入先预览，再按 `public_id` 合并；导入的仓库绑定默认不可用，需用户手动确认本地路径。
 
-Automatic GitHub update checks are temporarily disabled for `0.0.1`; release artifacts remain available for manual installation.
+Git 扫描只会对用户选择的路径执行只读 `rev-parse` 与 `log` 命令，绝不执行 checkout、fetch、reset 等写操作。导出包不包含设置、API Key 或本地仓库路径。
 
-## Keyboard Shortcuts
+AI 周报/月报只会接收所选时间范围内经授权的日志文本、任务必要字段、已确认且允许纳入报告的收件箱记录、Git 提交摘要、项目/仓库范围和标签名称。未整理草稿、API Key、设置和本地仓库路径不会发送给 AI 服务商。周报按自然周（周一至周日）生成，月报按自然月生成；二者使用选定时区展示，并以 UTC 左闭右开区间存储和查询。
 
-| Shortcut | Action |
-|----------|--------|
-| `⌘1` / `Ctrl+1` | Switch to Work Log |
-| `⌘2` / `Ctrl+2` | Switch to Kanban |
-| `⌘3` / `Ctrl+3` | Switch to Reports |
-| `⌘4` / `Ctrl+4` | Switch to Stats |
-| `⌘,` / `Ctrl+,` | Settings |
-| `Ctrl+Shift+L` | Quick log (global) |
-| `Ctrl+Shift+T` | Quick task (global) |
+阶段一不包含登录、云端同步、在线工作区或多人/团队协作。数据仅保留在当前设备；只有用户主动导出，或主动对已确认的报告范围发起 AI 生成时，数据才会离开本地。
 
-## Data & Security
+## 许可证
 
-Stage 1 is local-first. The database is stored as `workpulse.db` in Electron's system `userData` directory, with migration backups in `userData/backups`. The current schema version is 1, representing the consolidated pre-release schema; older development databases are not upgraded by this build and should be backed up/exported, recreated, and re-imported before use. App startup runs transactional migrations and verifies database integrity. Import/export uses a logical, versioned JSON package instead of replacing the SQLite file directly: imports are previewed, merged by `public_id`, and imported repository bindings are disabled until you manually confirm a local path.
-
-Repository scanning invokes only read-only Git commands (`rev-parse` and `log`) against paths you select. It never runs checkout, fetch, reset, or other write commands. The exported package excludes settings, API keys, and local repository paths.
-
-AI reports receive only the selected period's authorized work-log text, task fields, confirmed reportable inbox items, Git commit summaries, project/repository scope, and tag names. Unorganized inbox drafts, API keys, settings, and repository paths are never sent to the report provider. Weekly reports use the natural Monday–Sunday week; monthly reports use the natural calendar month. Both use the selected time zone and UTC half-open storage boundaries.
-
-There is no login, cloud synchronization, online workspace, or team collaboration in Stage 1. Data remains on this device unless you explicitly export it or send an approved report snapshot to your configured AI provider.
-
-## License
-
-MIT
+本项目基于 [dobest1024 的 WorkPulse](https://github.com/dobest1024/WorkPulse) 进行改进。原作者的 MIT 版权声明已保留在 [LICENSE](./LICENSE) 中，本仓库的修改由 Orzlk 完成。
