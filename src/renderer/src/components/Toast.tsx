@@ -5,11 +5,13 @@ interface Toast {
   id: number
   message: string
   type: 'success' | 'error'
+  action?: { label: string; onClick: () => void }
   exiting?: boolean
 }
 
 interface ToastContextValue {
   success: (message: string) => void
+  successWithAction: (message: string, actionLabel: string, onAction: () => void) => void
   error: (message: string) => void
 }
 
@@ -29,14 +31,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
     }, 250)
   }, [])
 
-  const add = useCallback((message: string, type: 'success' | 'error') => {
+  const add = useCallback((message: string, type: 'success' | 'error', action?: Toast['action']) => {
     const id = nextId++
-    setToasts((prev) => [...prev, { id, message, type }])
-    setTimeout(() => remove(id), 2500)
+    setToasts((prev) => [...prev, { id, message, type, action }])
+    setTimeout(() => remove(id), action ? 5000 : 2500)
   }, [remove])
 
   const value: ToastContextValue = {
     success: useCallback((msg: string) => add(msg, 'success'), [add]),
+    successWithAction: useCallback((msg: string, actionLabel: string, onAction: () => void) => add(msg, 'success', { label: actionLabel, onClick: onAction }), [add]),
     error: useCallback((msg: string) => add(msg, 'error'), [add])
   }
 
@@ -62,7 +65,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
               <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
             )}
             <span>{toast.message}</span>
+            {toast.action && (
+              <button
+                type="button"
+                onClick={() => { toast.action?.onClick(); remove(toast.id) }}
+                className="font-medium text-green-700 underline underline-offset-2 hover:text-green-900 dark:text-green-300 dark:hover:text-green-100"
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => remove(toast.id)}
               className="ml-2 p-0.5 text-zinc-400 hover:text-zinc-600"
             >

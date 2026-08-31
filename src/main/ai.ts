@@ -133,7 +133,7 @@ export async function generateInboxSuggestion(content: string, references: Inbox
   const messages: Message[] = [
     {
       role: 'system',
-      content: '你是 WorkPulse 收件箱整理助手。只输出合法 JSON，不要 Markdown 代码围栏。只能使用给定的项目、仓库和标签。不要自动执行整理。'
+      content: '你是 WorkPulse 收件箱整理助手。只输出合法 JSON，不要 Markdown 代码围栏。只能使用给定的项目和标签。不要自动执行整理。'
     },
     { role: 'user', content: buildInboxSuggestionPrompt(content, references) }
   ]
@@ -144,8 +144,7 @@ export async function generateInboxSuggestion(content: string, references: Inbox
       ? await callDeepSeek(request)
       : await callOpenAI(request)
   return parseInboxSuggestion(raw, {
-    projectIds: references.projects.map((project) => project.public_id),
-    repositoryIds: references.repositories.map((repository) => repository.public_id)
+    projectIds: references.projects.map((project) => project.public_id)
   })
 }
 

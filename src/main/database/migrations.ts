@@ -420,7 +420,6 @@ const initialSchemaSteps: SchemaMigration[] = [
           public_id TEXT NOT NULL UNIQUE,
           workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
           project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
-          repository_id INTEGER REFERENCES repositories(id) ON DELETE SET NULL,
           content TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'inbox' CHECK(status IN ('inbox', 'organized', 'archived')),
           created_by INTEGER REFERENCES users(id),
@@ -449,9 +448,7 @@ const initialSchemaSteps: SchemaMigration[] = [
         );
       `)
       addColumnIfMissing(database, 'work_logs', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
-      addColumnIfMissing(database, 'work_logs', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
       addColumnIfMissing(database, 'tasks', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
-      addColumnIfMissing(database, 'tasks', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
     }
   },
   {
@@ -707,9 +704,7 @@ const initialSchemaSteps: SchemaMigration[] = [
     name: '011_work_item_associations',
     up: (database) => {
       addColumnIfMissing(database, 'work_logs', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
-      addColumnIfMissing(database, 'work_logs', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
       addColumnIfMissing(database, 'tasks', 'project_id', 'INTEGER REFERENCES projects(id) ON DELETE SET NULL')
-      addColumnIfMissing(database, 'tasks', 'repository_id', 'INTEGER REFERENCES repositories(id) ON DELETE SET NULL')
       database.exec(`
         CREATE TABLE IF NOT EXISTS work_log_tags (
           work_log_id INTEGER NOT NULL REFERENCES work_logs(id) ON DELETE CASCADE,

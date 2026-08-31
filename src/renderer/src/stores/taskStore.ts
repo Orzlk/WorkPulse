@@ -16,27 +16,30 @@ interface Task {
   checklist: Array<{ id: string; text: string; completed: boolean }>
   public_id: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
 interface TaskStore {
   tasks: Task[]
   loading: boolean
+  lastDeleted: Task | null
   fetchTasks: () => Promise<void>
   loadByPublicId: (publicId: string) => Promise<Task | null>
-  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) => Promise<Task>
+  addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority'], dueDate?: string | null) => Promise<Task>
   updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) => Promise<void>
   deleteTask: (id: number) => Promise<void>
+  undoDelete: () => Promise<void>
+  dismissUndo: () => void
   completeTask: (id: number, logContent: string) => Promise<void>
   completeTaskOnly: (id: number) => Promise<void>
-  reorderTasks: (taskIds: number[], boardColumn: string, status?: Task['status']) => Promise<void>
+  reorderTasks: (taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) => Promise<void>
   getByStatus: (status: Task['status']) => Task[]
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: [],
   loading: false,
+  lastDeleted: null,
 
   fetchTasks: async () => {
     set({ loading: true })
@@ -55,8 +58,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     return task
   },
 
-  addTask: async (title, description, status, createdAt?, associations?, priority?) => {
-    const task = await window.api.task.add(title, description, status, createdAt, associations, priority)
+  addTask: async (title, description, status, createdAt?, associations?, priority?, dueDate?) => {
+    const task = await window.api.task.add(title, description, status, createdAt, associations, priority, dueDate)
     set({ tasks: [...get().tasks, task] })
     return task
   },
@@ -69,8 +72,23 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   deleteTask: async (id) => {
+    const deleted = get().tasks.find((task) => task.id === id) ?? null
     await window.api.task.delete(id)
-    set({ tasks: get().tasks.filter((t) => t.id !== id) })
+    set({ tasks: get().tasks.filter((t) => t.id !== id), lastDeleted: deleted })
+  },
+
+  undoDelete: async () => {
+    const deleted = get().lastDeleted
+    if (!deleted) return
+    const restored = await window.api.task.restore(deleted.id)
+    if (restored) {
+      set({ lastDeleted: null })
+      await get().fetchTasks()
+    }
+  },
+
+  dismissUndo: () => {
+    set({ lastDeleted: null })
   },
 
   completeTask: async (id, logContent) => {
@@ -87,8 +105,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  reorderTasks: async (taskIds, boardColumn, status?) => {
-    await window.api.task.reorder(taskIds, boardColumn, status)
+  reorderTasks: async (taskIds, boardColumn, status?, sourceBoardColumn?, sourceTaskIds?, sourceStatus?) => {
+    await window.api.task.reorder(taskIds, boardColumn, status, sourceBoardColumn, sourceTaskIds, sourceStatus)
     // Refetch to get updated positions
     await get().fetchTasks()
   },

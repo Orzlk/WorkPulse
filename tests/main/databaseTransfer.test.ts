@@ -69,19 +69,19 @@ function addWorkspaceGraph(
     VALUES (?, ?, ?, ?, 'main', 1, ?, ?, ?, ?)
   `).run(`binding-${suffix}`, repositoryId, workspaceId, `Z:/${suffix}`, userId, userId, timestamp, timestamp)
   const task = database.prepare(`
-    INSERT INTO tasks (public_id, workspace_id, project_id, repository_id, title, description, status, board_column, position, created_by, updated_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, '', 'todo', 'todo', 0, ?, ?, ?, ?)
-  `).run(`task-${suffix}`, workspaceId, projectId, repositoryId, `任务-${suffix}`, userId, userId, timestamp, timestamp)
+    INSERT INTO tasks (public_id, workspace_id, project_id, title, description, status, board_column, position, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, '', 'todo', 'todo', 0, ?, ?, ?, ?)
+  `).run(`task-${suffix}`, workspaceId, projectId, `任务-${suffix}`, userId, userId, timestamp, timestamp)
   const taskId = Number(task.lastInsertRowid)
   const workLog = database.prepare(`
-    INSERT INTO work_logs (public_id, workspace_id, project_id, repository_id, task_id, content, category, created_by, updated_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
-  `).run(`work-log-${suffix}`, workspaceId, projectId, repositoryId, taskId, `日志-${suffix}`, userId, userId, timestamp, timestamp)
+    INSERT INTO work_logs (public_id, workspace_id, project_id, task_id, content, category, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?)
+  `).run(`work-log-${suffix}`, workspaceId, projectId, taskId, `日志-${suffix}`, userId, userId, timestamp, timestamp)
   const workLogId = Number(workLog.lastInsertRowid)
   const inboxItem = database.prepare(`
-    INSERT INTO inbox_items (public_id, workspace_id, project_id, repository_id, content, status, state, include_in_reports, created_by, updated_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'inbox', 'unorganized', 1, ?, ?, ?, ?)
-  `).run(`inbox-${suffix}`, workspaceId, projectId, repositoryId, `收件箱-${suffix}`, userId, userId, timestamp, timestamp)
+    INSERT INTO inbox_items (public_id, workspace_id, project_id, content, status, state, include_in_reports, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'inbox', 'unorganized', 1, ?, ?, ?, ?)
+  `).run(`inbox-${suffix}`, workspaceId, projectId, `收件箱-${suffix}`, userId, userId, timestamp, timestamp)
   const inboxItemId = Number(inboxItem.lastInsertRowid)
   const tag = database.prepare(`
     INSERT INTO tags (public_id, workspace_id, name, path, created_at, updated_at)
@@ -158,6 +158,16 @@ describe('database transfer package', () => {
     }]
     expect(() => previewDatabaseImport(packageWithSecret)).toThrow('IMPORT_INVALID')
     expect(() => previewDatabaseImport({ ...packageWithSecret, schema_version: 2 })).toThrow('IMPORT_INVALID')
+
+    const packageWithLegacyOwnership = createDatabaseExport(database, context(database)) as DatabaseTransferPackage
+    packageWithLegacyOwnership.tables.tasks = [{
+      id: 1,
+      public_id: 'legacy-task',
+      repository_id: 1,
+      created_at: '2026-08-23T00:00:00.000Z',
+      updated_at: '2026-08-23T00:00:00.000Z'
+    }]
+    expect(() => previewDatabaseImport(packageWithLegacyOwnership)).toThrow('IMPORT_INVALID')
 
     database.prepare(`INSERT INTO work_logs (public_id, workspace_id, content, created_at, updated_at)
       VALUES ('large-log', ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)

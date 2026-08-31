@@ -48,11 +48,12 @@ describe('设置页信息架构', () => {
     expect(translations).toContain("'settings.productTagline': '工作记录 · Git 改动 · AI 汇报'")
   })
 
-  it('keeps the application version visible while GitHub online updates are disabled', () => {
-    expect(settingsPage).toContain('const onlineUpdatesEnabled = false')
-    expect(settingsPage).toContain('settings.onlineUpdatesDisabled')
+  it('keeps the application version visible and exposes GitHub online updates', () => {
+    expect(settingsPage).toContain('const onlineUpdatesEnabled = true')
+    expect(settingsPage).not.toContain('settings.onlineUpdatesDisabled')
+    expect(settingsPage).toContain("settings.checkUpdates")
+    expect(settingsPage).toContain("settings.openRelease")
     expect(settingsPage).toContain('v{currentVersion}')
-    expect(translations).toContain("'settings.onlineUpdatesDisabled':")
   })
 
   it('uses the design asset for the settings brand card', () => {

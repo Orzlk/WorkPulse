@@ -7,7 +7,6 @@ import { MarkdownToolbar } from '../components/MarkdownToolbar'
 import { useI18n, useLanguageStore } from '../stores/languageStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useProjectStore } from '../stores/projectStore'
-import { useRepositoryStore } from '../stores/repositoryStore'
 import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, syncProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
 import { resolveOrCreateProjectReference } from '../lib/projectMentions'
 import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
@@ -20,7 +19,6 @@ interface WorkLog {
   category: string
   created_at: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
@@ -33,7 +31,6 @@ interface EditorValues {
   category: string
   date: string
   projectId: string
-  repositoryId: string
 }
 
 function serializeEditorValues(values: EditorValues): string {
@@ -46,7 +43,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
   const [category, setCategory] = useState('')
   const [date, setDate] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [repositoryId, setRepositoryId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -67,8 +63,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
   const fetchProjects = useProjectStore((state) => state.fetch)
   const projects = useProjectStore((state) => state.items)
   const createProject = useProjectStore((state) => state.create)
-  const fetchRepositories = useRepositoryStore((state) => state.fetch)
-  const repositories = useRepositoryStore((state) => state.items)
   const toast = useToast()
   const { t } = useI18n()
 
@@ -88,16 +82,15 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       .slice(0, 8)
   }, [tagMention, tagOptions])
 
-  const values: EditorValues = { content, category, date, projectId, repositoryId }
+  const values: EditorValues = { content, category, date, projectId }
   const isDirty = Boolean(log && initialValuesRef.current && serializeEditorValues(values) !== initialValuesRef.current)
 
   useEffect(() => {
     void initTheme()
     void initLanguage()
     void fetchProjects()
-    void fetchRepositories()
     void window.api.tag.list({ limit: 200, offset: 0 }).then((page) => setTagOptions(page.items)).catch(() => setTagOptions([]))
-  }, [fetchProjects, fetchRepositories, initLanguage, initTheme])
+  }, [fetchProjects, initLanguage, initTheme])
 
   useEffect(() => {
     let active = true
@@ -114,8 +107,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
         content: loadedLog.content,
         category: loadedLog.category,
         date: loadedLog.created_at.slice(0, 10),
-        projectId: loadedLog.project_id ?? '',
-        repositoryId: loadedLog.repository_id ?? ''
+        projectId: loadedLog.project_id ?? ''
       }
       initialValuesRef.current = serializeEditorValues(nextValues)
       setLog(loadedLog)
@@ -123,7 +115,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       setCategory(nextValues.category)
       setDate(nextValues.date)
       setProjectId(nextValues.projectId)
-      setRepositoryId(nextValues.repositoryId)
       setLoading(false)
     }).catch(() => {
       if (!active) return
@@ -304,7 +295,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
           date ? `${date}${log.created_at.slice(10)}` : undefined,
           {
           project_id: mentionedProjectId ?? (projectId || null),
-          repository_id: repositoryId || null,
           tag_names: extractHashTags(trimmedContent).tags
           }
       )
@@ -383,13 +373,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
             <select value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
               <option value="">{t('workspace.unassigned')}</option>
               {projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>{t('workspace.repository')}</span>
-            <select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
-              <option value="">{t('workspace.unassigned')}</option>
-              {repositories.map((repository) => <option key={repository.public_id} value={repository.public_id}>{repository.name}</option>)}
             </select>
           </label>
           <div className="worklog-editor-property-tags">

@@ -29,7 +29,6 @@ interface WorkLog {
   created_at: string
   task_id: number | null
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
@@ -48,7 +47,6 @@ interface Task {
   priority: 'low' | 'medium' | 'high'
   checklist: Array<{ id: string; text: string; completed: boolean }>
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
@@ -63,7 +61,6 @@ interface KanbanColumn {
 
 interface WorkItemAssociations {
   project_id?: string | null
-  repository_id?: string | null
   tag_names?: string[]
 }
 
@@ -86,6 +83,25 @@ interface Project {
   summary: { work_logs: number; tasks: number; git_commits: number; reports: number }
 }
 
+interface ProjectActivityItem {
+  public_id: string
+  type: 'task' | 'work_log' | 'inbox' | 'git_commit' | 'report'
+  title: string
+  content: string
+  occurred_at: string
+  status: string | null
+  category: string | null
+  repository_name: string | null
+  author_name: string | null
+  author_email: string | null
+  commit_hash: string | null
+  branch: string | null
+  files_changed: number | null
+  additions: number | null
+  deletions: number | null
+  due_date: string | null
+}
+
 interface SearchResult {
   source: 'inbox' | 'work_log' | 'task' | 'git_commit' | 'report'
   public_id: string
@@ -104,7 +120,6 @@ interface InboxSuggestion {
   title: string
   summary: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
   include_in_reports: boolean
 }
@@ -113,7 +128,6 @@ interface InboxItem {
   public_id: string
   content: string
   project_id: string | null
-  repository_id: string | null
   state: 'unorganized' | 'confirmed' | 'ignored' | 'archived'
   include_in_reports: boolean
   ai_suggestion: InboxSuggestion | null
@@ -231,6 +245,15 @@ const api = {
       ipcRenderer.send('worklog-editor:close')
     }
   },
+  taskCreateWindow: {
+    open: () => ipcRenderer.invoke('task-create:open') as Promise<boolean>,
+    notifyChanged: (publicId: string) => {
+      ipcRenderer.send('task-create:changed', publicId)
+    },
+    close: () => {
+      ipcRenderer.send('task-create:close')
+    }
+  },
   worklog: {
     add: (content: string, category?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('worklog:add', content, category, associations),
@@ -246,19 +269,20 @@ const api = {
     update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) =>
       ipcRenderer.invoke('worklog:update', id, content, category, created_at, associations),
     delete: (id: number) => ipcRenderer.invoke('worklog:delete', id),
-    restore: (log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; repository_id: string | null; tag_names: string[] }) =>
+    restore: (log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; tag_names: string[] }) =>
       ipcRenderer.invoke('worklog:restore', log)
   },
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) =>
-      ipcRenderer.invoke('task:add', title, description, status, createdAt, associations, priority),
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority'], dueDate?: string | null, checklist?: Task['checklist']) =>
+      ipcRenderer.invoke('task:add', title, description, status, createdAt, associations, priority, dueDate, checklist),
     list: () => ipcRenderer.invoke('task:list'),
     get: (publicId: string) => ipcRenderer.invoke('task:get', publicId) as Promise<Task | null>,
     update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) =>
       ipcRenderer.invoke('task:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('task:delete', id),
-    reorder: (taskIds: number[], boardColumn: string, status?: Task['status']) =>
-      ipcRenderer.invoke('task:reorder', taskIds, boardColumn, status),
+    restore: (id: number) => ipcRenderer.invoke('task:restore', id) as Promise<Task | null>,
+    reorder: (taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) =>
+      ipcRenderer.invoke('task:reorder', taskIds, boardColumn, status, sourceBoardColumn, sourceTaskIds, sourceStatus),
     complete: (id: number, logContent: string) =>
       ipcRenderer.invoke('task:complete', id, logContent),
     completeOnly: (id: number) =>
@@ -295,6 +319,7 @@ const api = {
   },
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('project:list', pagination) as Promise<Page<Project>>,
+    activity: (publicId: string) => ipcRenderer.invoke('project:activity', publicId) as Promise<ProjectActivityItem[]>,
     create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => ipcRenderer.invoke('project:create', input) as Promise<Project>,
     update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at' | 'summary'>>) => ipcRenderer.invoke('project:update', publicId, input) as Promise<Project | null>,
     archive: (publicId: string) => ipcRenderer.invoke('project:archive', publicId) as Promise<Project | null>
@@ -308,7 +333,8 @@ const api = {
     aiOrganize: (input?: { public_ids?: string[]; limit?: number }) =>
       ipcRenderer.invoke('inbox:ai-organize', input) as Promise<{ processed: number; updated: number; failed: number; items: InboxItem[] }>,
     ignore: (publicId: string) => ipcRenderer.invoke('inbox:ignore', publicId) as Promise<InboxItem | null>,
-    archive: (publicId: string) => ipcRenderer.invoke('inbox:archive', publicId) as Promise<InboxItem | null>
+    archive: (publicId: string) => ipcRenderer.invoke('inbox:archive', publicId) as Promise<InboxItem | null>,
+    delete: (publicId: string) => ipcRenderer.invoke('inbox:delete', publicId) as Promise<InboxItem | null>
   },
   tag: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('tag:list', pagination) as Promise<Page<Tag>>,
@@ -405,6 +431,15 @@ const api = {
       ipcRenderer.on('worklog-editor:changed', handler)
       return () => {
         ipcRenderer.removeListener('worklog-editor:changed', handler)
+      }
+    },
+    taskCreateChanged: (cb: (publicId: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, publicId: unknown): void => {
+        if (typeof publicId === 'string') cb(publicId)
+      }
+      ipcRenderer.on('task-create:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('task-create:changed', handler)
       }
     },
     reportStream: (cb: (event: ReportStreamEvent) => void) => {

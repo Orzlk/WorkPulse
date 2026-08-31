@@ -43,10 +43,28 @@ export class LocalProjectRepository implements ProjectRepository {
           INNER JOIN repositories ON repositories.id = git_commits.repository_id
           WHERE repositories.project_id = projects.id AND repositories.workspace_id = projects.workspace_id
             AND repositories.deleted_at IS NULL AND git_commits.deleted_at IS NULL) AS git_commit_count,
-        (SELECT COUNT(DISTINCT reports.id) FROM report_projects
-          INNER JOIN reports ON reports.id = report_projects.report_id
-          WHERE report_projects.project_id = projects.id AND reports.workspace_id = projects.workspace_id
-            AND reports.deleted_at IS NULL) AS report_count
+        (SELECT COUNT(DISTINCT reports.id) FROM reports
+          WHERE reports.workspace_id = projects.workspace_id AND reports.deleted_at IS NULL
+            AND (
+              EXISTS (
+                SELECT 1 FROM json_each(
+                  CASE WHEN json_valid(reports.project_scope) THEN reports.project_scope ELSE '[]' END
+                ) WHERE json_each.value = projects.public_id
+              )
+              OR EXISTS (
+                SELECT 1 FROM report_projects
+                WHERE report_projects.report_id = reports.id AND report_projects.project_id = projects.id
+              )
+              OR EXISTS (
+                SELECT 1 FROM json_each(
+                  CASE
+                    WHEN json_valid(reports.source_snapshot)
+                    THEN COALESCE(json_extract(reports.source_snapshot, '$.projects'), '[]')
+                    ELSE '[]'
+                  END
+                ) WHERE json_extract(json_each.value, '$.public_id') = projects.public_id
+              )
+            )) AS report_count
       FROM projects
       WHERE workspace_id = ? AND deleted_at IS NULL
       ORDER BY updated_at DESC, id DESC

@@ -24,6 +24,7 @@ import {
   getTaskByPublicId,
   updateTask,
   deleteTask,
+  restoreTask,
   reorderTasks,
   getKanbanColumns,
   createKanbanColumn,
@@ -163,7 +164,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'worklog:restore',
-    (_event, log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; repository_id: string | null; tag_names: string[] }) => {
+    (_event, log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; tag_names: string[] }) => {
       return restoreWorkLog(log)
     }
   )
@@ -242,6 +243,7 @@ export function registerIpcHandlers(): void {
   // --- Project / inbox / tag / search / repository domain APIs ---
 
   ipcMain.handle('project:list', guarded((pagination?: unknown) => services().projects.list(parsePagination(pagination))))
+  ipcMain.handle('project:activity', guarded((publicId: unknown) => services().projects.activity(id(publicId, 'project id'))))
   ipcMain.handle('project:create', guarded((input: unknown) => {
     const project = parseProjectInput(input)
     return services().projects.create({ name: project.name!, description: project.description ?? '', color: project.color ?? '#64748b' })
@@ -260,13 +262,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('inbox:organize', guarded((publicId: unknown) => services().inbox.confirm(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:ignore', guarded((publicId: unknown) => services().inbox.ignore(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:archive', guarded((publicId: unknown) => services().inbox.archive(id(publicId, 'inbox id'))))
+  ipcMain.handle('inbox:delete', guarded((publicId: unknown) => services().inbox.softDelete(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:ai-organize', guarded(async (input: unknown) => {
     const request = parseInboxAiInput(input)
     const domain = services()
     const candidates = domain.inbox.listUnorganized(request.limit, request.public_ids)
     const references = {
       projects: domain.projects.list({ limit: 200, offset: 0 }).items.map((project) => ({ public_id: project.public_id, name: project.name })),
-      repositories: domain.repositories.list({ limit: 200, offset: 0 }).items.map((repository) => ({ public_id: repository.public_id, name: repository.name })),
       tags: domain.tags.list({ limit: 200, offset: 0 }).items.map((tag) => tag.path)
     }
     const items = []
@@ -372,8 +374,8 @@ export function registerIpcHandlers(): void {
 
   // --- Tasks ---
 
-  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown, priority?: Task['priority']) => {
-    return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations), priority)
+  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown, priority?: Task['priority'], dueDate?: string | null, checklist?: unknown) => {
+    return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations), priority, dueDate, Array.isArray(checklist) ? checklist as Task['checklist'] : [])
   })
 
   ipcMain.handle('task:list', () => {
@@ -387,9 +389,9 @@ export function registerIpcHandlers(): void {
     (
       _event,
       id: number,
-      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'repository_id' | 'tag_names'>>
+      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'tag_names'>>
     ) => {
-      return updateTask(id, { ...updates, ...parseWorkItemAssociations({ project_id: updates.project_id, repository_id: updates.repository_id, tag_names: updates.tag_names }) })
+      return updateTask(id, { ...updates, ...parseWorkItemAssociations({ project_id: updates.project_id, tag_names: updates.tag_names }) })
     }
   )
 
@@ -397,8 +399,12 @@ export function registerIpcHandlers(): void {
     return deleteTask(id)
   })
 
-  ipcMain.handle('task:reorder', (_event, taskIds: number[], boardColumn: string, status?: Task['status']) => {
-    reorderTasks(taskIds, boardColumn, status)
+  ipcMain.handle('task:restore', (_event, id: number) => {
+    return restoreTask(id)
+  })
+
+  ipcMain.handle('task:reorder', (_event, taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) => {
+    reorderTasks(taskIds, boardColumn, status, sourceBoardColumn, sourceTaskIds, sourceStatus)
   })
 
   ipcMain.handle('kanban:columns:list', (): KanbanColumn[] => getKanbanColumns())

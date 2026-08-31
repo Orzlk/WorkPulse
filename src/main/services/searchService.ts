@@ -10,7 +10,6 @@ export interface InboxSearchQuery extends Pagination {
   text?: string
   tag_names?: string[]
   project_id?: string | null
-  repository_id?: string | null
   state?: InboxItem['state']
 }
 
@@ -64,15 +63,6 @@ export class SearchService {
           AND projects.public_id = ? AND projects.deleted_at IS NULL
       )`)
       values.push(query.project_id)
-    }
-    if (query.repository_id !== undefined) {
-      conditions.push(`EXISTS (
-        SELECT 1 FROM repositories
-        WHERE repositories.id = inbox_items.repository_id
-          AND repositories.workspace_id = inbox_items.workspace_id
-          AND repositories.public_id = ? AND repositories.deleted_at IS NULL
-      )`)
-      values.push(query.repository_id)
     }
     if (query.state) {
       conditions.push('inbox_items.state = ?')
@@ -240,23 +230,24 @@ export class SearchService {
 
     const projectRelation = standardRelation('projects', 'project_id')
     const repositoryRelation = standardRelation('repositories', 'repository_id')
+    const workItemRepositoryRelation = { match: '? IS NULL', unassigned: '1 = 1' }
     const workLogFilters = filters({
       entityType: 'work_log',
       textFields: ['entity.content', 'entity.category'], tagTable: 'work_log_tags', tagColumn: 'work_log_id',
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
-      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+      repositoryMatch: workItemRepositoryRelation.match, repositoryUnassigned: workItemRepositoryRelation.unassigned
     })
     const taskFilters = filters({
       entityType: 'task',
       textFields: ['entity.title', 'entity.description'], tagTable: 'task_tags', tagColumn: 'task_id',
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
-      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+      repositoryMatch: workItemRepositoryRelation.match, repositoryUnassigned: workItemRepositoryRelation.unassigned
     })
     const inboxFilters = filters({
       entityType: 'inbox_item',
       textFields: ['entity.content'], tagTable: 'inbox_tags', tagColumn: 'inbox_item_id', inboxState: true,
       projectMatch: projectRelation.match, projectUnassigned: projectRelation.unassigned,
-      repositoryMatch: repositoryRelation.match, repositoryUnassigned: repositoryRelation.unassigned
+      repositoryMatch: workItemRepositoryRelation.match, repositoryUnassigned: workItemRepositoryRelation.unassigned
     })
     const gitRepositoryRelation = standardRelation('repositories', 'repository_id')
     const gitProjectRelation = {
@@ -296,11 +287,10 @@ export class SearchService {
       {
         sql: `SELECT 'work_log' AS source, entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
         projects.public_id AS project_id, projects.name AS project_name,
-        repositories.public_id AS repository_id, repositories.name AS repository_name,
+        NULL AS repository_id, NULL AS repository_name,
         ${tagSelect('work_log_tags', 'work_log_id')}
       FROM work_logs AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
-      LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE ${workLogFilters.where}
       `,
         params: workLogFilters.params
@@ -308,11 +298,10 @@ export class SearchService {
       {
         sql: `SELECT 'task' AS source, entity.public_id, entity.title, COALESCE(NULLIF(entity.description, ''), entity.title) AS excerpt,
         entity.created_at AS time, projects.public_id AS project_id, projects.name AS project_name,
-        repositories.public_id AS repository_id, repositories.name AS repository_name,
+        NULL AS repository_id, NULL AS repository_name,
         ${tagSelect('task_tags', 'task_id')}
       FROM tasks AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
-      LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE ${taskFilters.where}
       `,
         params: taskFilters.params
@@ -320,11 +309,10 @@ export class SearchService {
       {
         sql: `SELECT 'inbox' AS source, entity.public_id, entity.content AS title, entity.content AS excerpt, entity.created_at AS time,
         projects.public_id AS project_id, projects.name AS project_name,
-        repositories.public_id AS repository_id, repositories.name AS repository_name,
+        NULL AS repository_id, NULL AS repository_name,
         ${tagSelect('inbox_tags', 'inbox_item_id')}
       FROM inbox_items AS entity
       LEFT JOIN projects ON projects.id = entity.project_id AND projects.workspace_id = entity.workspace_id AND projects.deleted_at IS NULL
-      LEFT JOIN repositories ON repositories.id = entity.repository_id AND repositories.workspace_id = entity.workspace_id AND repositories.deleted_at IS NULL
       WHERE ${inboxFilters.where}
       `,
         params: inboxFilters.params

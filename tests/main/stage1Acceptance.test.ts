@@ -93,14 +93,12 @@ describe('stage 1 acceptance', () => {
     const organized = inbox.create({
       content: '已完成阶段一验收',
       project_id: project.public_id,
-      repository_id: repository.public_id,
       tag_names: ['验收/阶段一'],
       ai_suggestion: {
         target: 'work_log',
         title: '阶段一验收',
         summary: '记录验收结果',
         project_id: project.public_id,
-        repository_id: repository.public_id,
         tag_names: ['验收/阶段一'],
         include_in_reports: true
       }

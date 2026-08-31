@@ -10,7 +10,6 @@ import { LocalTagRepository, normalizeTagName } from '../repositories/localTagRe
 export interface CreateInboxInput {
   content: string
   project_id?: string | null
-  repository_id?: string | null
   tag_names?: string[]
   include_in_reports?: boolean
   ai_suggestion?: InboxSuggestion | null
@@ -37,7 +36,6 @@ export class InboxService {
     this.assertWorkspace()
     if (!input.content) throw new Error('Inbox content is required')
     this.assertProject(input.project_id ?? null)
-    this.assertRepository(input.repository_id ?? null)
     const suggestion = this.validateSuggestion(input.ai_suggestion ?? null)
     const create = this.database.transaction(() => {
       const now = new Date().toISOString()
@@ -45,7 +43,6 @@ export class InboxService {
         public_id: randomUUID(),
         content: input.content,
         project_id: input.project_id ?? null,
-        repository_id: input.repository_id ?? null,
         state: 'unorganized',
         include_in_reports: input.include_in_reports ?? true,
         ai_suggestion: suggestion,
@@ -84,12 +81,10 @@ export class InboxService {
   update(publicId: string, input: Omit<Partial<CreateInboxInput>, 'content' | 'tag_names'>): InboxItem | null {
     this.assertWorkspace()
     this.assertProject(input.project_id ?? null)
-    this.assertRepository(input.repository_id ?? null)
     const suggestion = input.ai_suggestion === undefined ? undefined : this.validateSuggestion(input.ai_suggestion)
     const update = this.database.transaction(() => {
       const item = this.inbox.update(this.context, publicId, {
         project_id: input.project_id,
-        repository_id: input.repository_id,
         include_in_reports: input.include_in_reports,
         ai_suggestion: suggestion
       })
@@ -105,6 +100,16 @@ export class InboxService {
 
   archive(publicId: string): InboxItem | null {
     return this.setState(publicId, 'archived')
+  }
+
+  softDelete(publicId: string): InboxItem | null {
+    this.assertWorkspace()
+    const remove = this.database.transaction(() => {
+      const item = this.inbox.softDelete(this.context, publicId)
+      if (item) this.enqueueSync('inbox_item', item.public_id, 'delete', item)
+      return item
+    })
+    return remove()
   }
 
   confirm(publicId: string): InboxConfirmation {
@@ -145,20 +150,17 @@ export class InboxService {
     const publicId = randomUUID()
     const row = this.database.prepare(`
       INSERT INTO work_logs (
-        content, category, task_id, project_id, repository_id,
+        content, category, task_id, project_id,
         created_at, updated_at, public_id, workspace_id, created_by, updated_by
       ) VALUES (
         ?, '', NULL,
         (SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL),
-        (SELECT id FROM repositories WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL),
         ?, ?, ?, ?, ?, ?
       ) RETURNING id, public_id
     `).get(
       item.content,
       this.context.workspace_id,
       suggestion.project_id,
-      this.context.workspace_id,
-      suggestion.repository_id,
       now,
       now,
       publicId,
@@ -175,8 +177,7 @@ export class InboxService {
     this.enqueueSync('work_log', row.public_id, 'create', {
       public_id: row.public_id,
       content: item.content,
-      project_id: suggestion.project_id,
-      repository_id: suggestion.repository_id
+      project_id: suggestion.project_id
     })
     return { target: 'work_log', target_public_id: row.public_id }
   }
@@ -201,12 +202,11 @@ export class InboxService {
     `).get(this.context.workspace_id) as { next: number }
     const row = this.database.prepare(`
       INSERT INTO tasks (
-        title, description, status, board_column, position, project_id, repository_id,
+        title, description, status, board_column, position, project_id,
         created_at, updated_at, public_id, workspace_id, created_by, updated_by
       ) VALUES (
         ?, ?, 'todo', 'todo', ?,
         (SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL),
-        (SELECT id FROM repositories WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL),
         ?, ?, ?, ?, ?, ?
       ) RETURNING id, public_id
     `).get(
@@ -215,8 +215,6 @@ export class InboxService {
       position.next,
       this.context.workspace_id,
       suggestion.project_id,
-      this.context.workspace_id,
-      suggestion.repository_id,
       now,
       now,
       publicId,
@@ -234,8 +232,7 @@ export class InboxService {
       public_id: row.public_id,
       title: suggestion.title || item.content,
       description: item.content,
-      project_id: suggestion.project_id,
-      repository_id: suggestion.repository_id
+      project_id: suggestion.project_id
     })
     return { target: 'task', target_public_id: row.public_id }
   }
@@ -295,7 +292,6 @@ export class InboxService {
       throw new Error('Inbox suggestion target is invalid')
     }
     this.assertProject(suggestion.project_id)
-    this.assertRepository(suggestion.repository_id)
     return {
       ...suggestion,
       title: suggestion.title,
@@ -323,15 +319,6 @@ export class InboxService {
       WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
     `).get(this.context.workspace_id, publicId)
     if (!row) throw new Error('Project not found')
-  }
-
-  private assertRepository(publicId: string | null): void {
-    if (!publicId) return
-    const row = this.database.prepare(`
-      SELECT 1 FROM repositories
-      WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
-    `).get(this.context.workspace_id, publicId)
-    if (!row) throw new Error('Repository not found')
   }
 
   private enqueueSync(

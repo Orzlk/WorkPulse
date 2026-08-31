@@ -10,7 +10,6 @@ interface WorkLog {
   task_id: number | null
   public_id: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 

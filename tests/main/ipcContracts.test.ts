@@ -10,7 +10,8 @@ import {
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
   parseInboxListInput,
-  parseTagNames
+  parseTagNames,
+  parseWorkItemAssociations
 } from '../../src/main/ipcContracts'
 
 describe('IPC contract validation', () => {
@@ -71,6 +72,12 @@ describe('IPC contract validation', () => {
     expect(() => parseTagNames(Array.from({ length: 51 }, () => 'tag'))).toThrow('INVALID_ARGUMENT')
     expect(() => parseTagNames(['x'.repeat(201)])).toThrow('INVALID_ARGUMENT')
     expect(() => parseSearchQueryInput({ tag_names: null })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('rejects repository ownership fields for work items', () => {
+    expect(parseWorkItemAssociations({ project_id: '11111111-1111-4111-8111-111111111111', tag_names: ['工作'] }))
+      .toEqual({ projectId: '11111111-1111-4111-8111-111111111111', tagNames: ['工作'] })
+    expect(() => parseWorkItemAssociations({ repository_id: 'repo-a' })).toThrow('INVALID_ARGUMENT')
   })
 
   it('rejects normalized dates that do not exist in the calendar', () => {

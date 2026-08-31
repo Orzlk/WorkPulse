@@ -121,6 +121,15 @@
   outline-offset: 2px;
 }
 
+.hallmark-app :where(input, textarea, select):focus,
+.hallmark-app :where(input, textarea, select):focus-visible {
+  outline: 0 !important;
+}
+
+.hallmark-app .tag-composer-input:focus-visible {
+  outline: 0;
+}
+
 .ui-button:focus-visible,
 .ui-icon-button:focus-visible {
   outline: 2px solid var(--ui-color-focus);
@@ -335,8 +344,8 @@
 }
 
 .ui-field,
-.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input),
-.hallmark-app textarea:not(.tag-composer-input),
+.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input):not(.global-search-input):not(.quick-create-input):not(.inbox-capture-input):not([type='checkbox']):not([type='radio']):not([type='color']),
+.hallmark-app textarea:not(.tag-composer-input):not(.inbox-capture-input),
 .hallmark-app select {
   min-height: var(--ui-control-height);
   box-sizing: border-box;
@@ -348,10 +357,10 @@
 }
 
 .ui-field:focus,
-.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input):focus,
-.hallmark-app textarea:not(.tag-composer-input):focus,
+.hallmark-app input:not(.quick-entry-input):not(.worklog-search-input):not(.global-search-input):not(.quick-create-input):not(.inbox-capture-input):not([type='checkbox']):not([type='radio']):not([type='color']):focus,
+.hallmark-app textarea:not(.tag-composer-input):not(.inbox-capture-input):focus,
 .hallmark-app select:focus {
-  border-color: var(--ui-color-primary) !important;
+  border-color: var(--ui-color-border-strong) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent) !important;
 }
 
@@ -557,6 +566,27 @@
   box-shadow: none !important;
 }
 
+.hallmark-app .global-search-input:focus,
+.hallmark-app .quick-create-input:focus {
+  border-color: var(--ui-color-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.hallmark-app .inbox-capture-input:focus {
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.hallmark-app .worklog-search-input:focus {
+  border-color: var(--ui-color-border) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent) !important;
+  outline: 0 !important;
+}
+
 .hallmark-app .log-row {
   border-color: var(--ui-color-border);
   border-radius: var(--ui-radius-lg);
@@ -598,12 +628,6 @@
 .hallmark-app .settings-about-card-icon {
   background: var(--ui-color-info-soft);
   color: var(--ui-color-tag);
-}
-
-.hallmark-app .settings-update-disabled-note {
-  margin-top: 6px;
-  color: var(--ui-color-text-muted);
-  font-size: 12px;
 }
 
 .hallmark-app .settings-update-status-downloaded,
@@ -683,6 +707,17 @@
   border-radius: var(--ui-radius-md);
   background: var(--ui-color-surface);
   box-shadow: var(--ui-shadow-lg);
+}
+
+.hallmark-app .global-search:focus-within,
+.hallmark-app .quick-create-panel:focus-within {
+  border-color: var(--ui-color-border);
+  box-shadow: var(--ui-shadow-lg), 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent);
+}
+
+.hallmark-app .inbox-capture:focus-within {
+  border-color: var(--ui-color-border);
+  box-shadow: var(--ui-shadow-sm), 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent);
 }
 
 .hallmark-app .quick-create-backdrop,

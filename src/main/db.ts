@@ -242,28 +242,25 @@ export interface WorkLog {
   created_at: string
   task_id: number | null
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
 export interface WorkItemAssociations {
   projectId?: string | null
-  repositoryId?: string | null
   tagNames?: string[]
 }
 
-function resolveAssociationId(table: 'projects' | 'repositories', publicId: string | null | undefined, workspaceId: number): number | null | undefined {
+function resolveProjectId(publicId: string | null | undefined, workspaceId: number): number | null | undefined {
   if (publicId === undefined) return undefined
   if (publicId === null) return null
-  const row = db.prepare(`SELECT id FROM ${table} WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL`).get(workspaceId, publicId) as { id: number } | undefined
-  if (!row) throw new Error(`${table === 'projects' ? 'Project' : 'Repository'} not found`)
+  const row = db.prepare('SELECT id FROM projects WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL').get(workspaceId, publicId) as { id: number } | undefined
+  if (!row) throw new Error('Project not found')
   return row.id
 }
 
 function associationPatch(associations: WorkItemAssociations): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   if (associations.projectId !== undefined) patch.project_id = associations.projectId
-  if (associations.repositoryId !== undefined) patch.repository_id = associations.repositoryId
   if (associations.tagNames !== undefined) patch.tag_names = associations.tagNames
   return patch
 }
@@ -356,6 +353,15 @@ function tagNames(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_
   return rows.map((row) => row.path)
 }
 
+function restoreEntityTags(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_log_id' | 'task_id', entityId: number, workspaceId: number, now: string): void {
+  const tags = db.prepare(`SELECT tags.id, tags.public_id, tags.path FROM ${linkTable} INNER JOIN tags ON tags.id = ${linkTable}.tag_id WHERE ${linkTable}.${entityColumn} = ? AND tags.workspace_id = ? AND tags.deleted_at IS NOT NULL`).all(entityId, workspaceId) as Array<{ id: number; public_id: string; path: string }>
+  const restore = db.prepare('UPDATE tags SET deleted_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?')
+  for (const tag of tags) {
+    restore.run(now, tag.id, workspaceId)
+    db.prepare('INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, \'tag\', ?, \'update\', ?, ?, ?)').run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path: tag.path, deleted_at: null }), now, now)
+  }
+}
+
 function enqueueEntitySync(entityType: 'work_log' | 'task', entityPublicId: string, payload: unknown, workspaceId: number, now: string): void {
   db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, ?, ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, entityType, entityPublicId, JSON.stringify(payload), now, now)
 }
@@ -376,19 +382,17 @@ export function addWorkLog(
   const metadata = getWriteMetadata(createdAt)
   const create = db.transaction(() => {
     const resolvedTaskId = resolveWorkLogTaskId(taskId, metadata.workspaceId)
-    const projectId = resolveAssociationId('projects', associations.projectId, metadata.workspaceId)
-    const repositoryId = resolveAssociationId('repositories', associations.repositoryId, metadata.workspaceId)
+    const projectId = resolveProjectId(associations.projectId, metadata.workspaceId)
     const result = db.prepare(
       `INSERT INTO work_logs (
-        content, category, task_id, project_id, repository_id, created_at, updated_at,
+        content, category, task_id, project_id, created_at, updated_at,
         public_id, workspace_id, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       content,
       category,
       resolvedTaskId,
       projectId ?? null,
-      repositoryId ?? null,
       metadata.timestamp,
       metadata.timestamp,
       metadata.publicId,
@@ -406,14 +410,13 @@ export function addWorkLog(
 function getWorkLogById(publicId: string, workspaceId: number): WorkLog | null {
   const row = db.prepare(`
     SELECT work_logs.id, work_logs.public_id, work_logs.content, work_logs.category, work_logs.created_at, work_logs.task_id,
-      projects.public_id AS project_public_id, repositories.public_id AS repository_public_id
+      projects.public_id AS project_public_id
     FROM work_logs
     LEFT JOIN projects ON projects.id = work_logs.project_id AND projects.workspace_id = work_logs.workspace_id AND projects.deleted_at IS NULL
-    LEFT JOIN repositories ON repositories.id = work_logs.repository_id AND repositories.workspace_id = work_logs.workspace_id AND repositories.deleted_at IS NULL
     WHERE work_logs.workspace_id = ? AND work_logs.public_id = ? AND work_logs.deleted_at IS NULL
-  `).get(workspaceId, publicId) as { id: number; public_id: string; content: string; category: string; created_at: string; task_id: number | null; project_public_id: string | null; repository_public_id: string | null } | undefined
+  `).get(workspaceId, publicId) as { id: number; public_id: string; content: string; category: string; created_at: string; task_id: number | null; project_public_id: string | null } | undefined
   if (!row) return null
-  return { id: row.id, public_id: row.public_id, content: row.content, category: row.category, created_at: row.created_at, task_id: row.task_id, project_id: row.project_public_id, repository_id: row.repository_public_id, tag_names: tagNames('work_log_tags', 'work_log_id', row.id) }
+  return { id: row.id, public_id: row.public_id, content: row.content, category: row.category, created_at: row.created_at, task_id: row.task_id, project_id: row.project_public_id, tag_names: tagNames('work_log_tags', 'work_log_id', row.id) }
 }
 
 export function getWorkLogByPublicId(publicId: string): WorkLog | null {
@@ -549,10 +552,9 @@ export function deleteWorkLog(id: number): boolean {
   })()
 }
 
-export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'repository_id' | 'tag_names'>): WorkLog {
+export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'>): WorkLog {
   return addWorkLog(log.content, log.category, log.task_id, log.created_at, {
     projectId: log.project_id,
-    repositoryId: log.repository_id,
     tagNames: log.tag_names
   })
 }
@@ -625,24 +627,22 @@ export interface Task {
   priority: TaskPriority
   checklist: TaskChecklistItem[]
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
-export function addTask(title: string, description = '', status: 'todo' | 'draft' = 'todo', createdAt?: string, associations: WorkItemAssociations = {}, priority: TaskPriority = 'medium'): Task {
+export function addTask(title: string, description = '', status: 'todo' | 'draft' = 'todo', createdAt?: string, associations: WorkItemAssociations = {}, priority: TaskPriority = 'medium', dueDate?: string | null, checklist: TaskChecklistItem[] = []): Task {
   const metadata = getWriteMetadata(createdAt)
   const create = db.transaction(() => {
     const maxPos = db.prepare(
       'SELECT COALESCE(MAX(position), -1) + 1 as next FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND status = ?'
     ).get(metadata.workspaceId, status) as { next: number }
 
-    const projectId = resolveAssociationId('projects', associations.projectId, metadata.workspaceId)
-    const repositoryId = resolveAssociationId('repositories', associations.repositoryId, metadata.workspaceId)
+    const projectId = resolveProjectId(associations.projectId, metadata.workspaceId)
     const normalizedPriority = isTaskPriority(priority) ? priority : 'medium'
     const result = db.prepare(
       `INSERT INTO tasks (
-        title, description, status, board_column, position, project_id, repository_id, created_at, updated_at,
-        public_id, workspace_id, created_by, updated_by, priority, checklist
+        title, description, status, board_column, position, project_id, created_at, updated_at,
+        public_id, workspace_id, created_by, updated_by, priority, checklist, due_date
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       title,
@@ -651,7 +651,6 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
       status,
       maxPos.next,
       projectId ?? null,
-      repositoryId ?? null,
       metadata.timestamp,
       metadata.timestamp,
       metadata.publicId,
@@ -659,10 +658,11 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
       metadata.userId,
       metadata.userId,
       normalizedPriority,
-      '[]'
+      JSON.stringify(normalizeChecklist(checklist)),
+      dueDate ?? null
     )
     setEntityTags('task_tags', 'task_id', Number(result.lastInsertRowid), metadata.publicId, associations.tagNames, metadata.workspaceId, metadata.userId, metadata.timestamp)
-    enqueueEntitySync('task', metadata.publicId, associationPatch(associations), metadata.workspaceId, metadata.timestamp)
+    enqueueEntitySync('task', metadata.publicId, { ...associationPatch(associations), due_date: dueDate ?? null, priority: normalizedPriority, checklist: normalizeChecklist(checklist) }, metadata.workspaceId, metadata.timestamp)
     return metadata.publicId
   })
   return getTaskByPublicId(create())!
@@ -681,10 +681,9 @@ function getTaskRow(workspaceId: number, identityCondition: string, identityValu
     SELECT tasks.id, tasks.public_id, tasks.title, tasks.description, tasks.status, tasks.board_column,
       tasks.position, tasks.created_at, tasks.updated_at, tasks.completed_at, tasks.due_date,
       tasks.priority, tasks.checklist,
-      projects.public_id AS project_public_id, repositories.public_id AS repository_public_id
+      projects.public_id AS project_public_id
     FROM tasks
     LEFT JOIN projects ON projects.id = tasks.project_id AND projects.workspace_id = tasks.workspace_id AND projects.deleted_at IS NULL
-    LEFT JOIN repositories ON repositories.id = tasks.repository_id AND repositories.workspace_id = tasks.workspace_id AND repositories.deleted_at IS NULL
     WHERE tasks.workspace_id = ? AND ${identityCondition} AND tasks.deleted_at IS NULL
   `).get(workspaceId, identityValue) as TaskRow | undefined
   return row ? toTask(row) : null
@@ -705,29 +704,27 @@ interface TaskRow {
   priority: string | null
   checklist: string | null
   project_public_id: string | null
-  repository_public_id: string | null
 }
 
 function toTask(row: TaskRow): Task {
-  return { id: row.id, public_id: row.public_id, title: row.title, description: row.description, status: row.status, board_column: row.board_column, position: row.position, created_at: row.created_at, updated_at: row.updated_at, completed_at: row.completed_at, due_date: row.due_date, priority: isTaskPriority(row.priority) ? row.priority : 'medium', checklist: parseChecklist(row.checklist), project_id: row.project_public_id, repository_id: row.repository_public_id, tag_names: tagNames('task_tags', 'task_id', row.id) }
+  return { id: row.id, public_id: row.public_id, title: row.title, description: row.description, status: row.status, board_column: row.board_column, position: row.position, created_at: row.created_at, updated_at: row.updated_at, completed_at: row.completed_at, due_date: row.due_date, priority: isTaskPriority(row.priority) ? row.priority : 'medium', checklist: parseChecklist(row.checklist), project_id: row.project_public_id, tag_names: tagNames('task_tags', 'task_id', row.id) }
 }
 
 export function getTasks(): Task[] {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const rows = db.prepare('SELECT id FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY position ASC').all(workspaceId) as Array<{ id: number }>
+  const rows = db.prepare('SELECT id FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY board_column ASC, position ASC, id ASC').all(workspaceId) as Array<{ id: number }>
   return rows.map((row) => getTaskById(workspaceId, row.id)).filter((row): row is Task => row !== null)
 }
 
 export function updateTask(
   id: number,
-  updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'repository_id' | 'tag_names'>>
+  updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'tag_names'>>
 ): Task | null {
   const metadata = getWriteMetadata()
   const update = db.transaction(() => {
     const fields: string[] = []
     const values: unknown[] = []
-    const projectId = resolveAssociationId('projects', updates.project_id, metadata.workspaceId)
-    const repositoryId = resolveAssociationId('repositories', updates.repository_id, metadata.workspaceId)
+    const projectId = resolveProjectId(updates.project_id, metadata.workspaceId)
 
     if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title) }
     if (updates.description !== undefined) { fields.push('description = ?'); values.push(updates.description) }
@@ -751,7 +748,6 @@ export function updateTask(
       values.push(JSON.stringify(normalizeChecklist(updates.checklist)))
     }
     if (updates.project_id !== undefined) { fields.push('project_id = ?'); values.push(projectId ?? null) }
-    if (updates.repository_id !== undefined) { fields.push('repository_id = ?'); values.push(repositoryId ?? null) }
 
     fields.push('updated_at = ?', 'updated_by = ?')
     values.push(metadata.timestamp, metadata.userId)
@@ -764,7 +760,6 @@ export function updateTask(
       if (updates[key] !== undefined) patch[key] = updates[key]
     }
     if (updates.project_id !== undefined) patch.project_id = updates.project_id
-    if (updates.repository_id !== undefined) patch.repository_id = updates.repository_id
     if (updates.tag_names !== undefined) patch.tag_names = updates.tag_names
     enqueueEntitySync('task', row.public_id, patch, metadata.workspaceId, metadata.timestamp)
     return row.public_id
@@ -774,17 +769,32 @@ export function updateTask(
 }
 
 export function deleteTask(id: number): boolean {
-  const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const now = new Date().toISOString()
+  const metadata = getWriteMetadata()
   return db.transaction(() => {
-    const result = db.prepare('DELETE FROM tasks WHERE id = ? AND workspace_id = ?')
-    const deleted = result.run(id, workspaceId).changes > 0
-    if (deleted) cleanupUnusedTags(workspaceId, now)
+    const deleted = db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').run(metadata.timestamp, metadata.timestamp, metadata.userId, id, metadata.workspaceId).changes > 0
+    if (deleted) cleanupUnusedTags(metadata.workspaceId, metadata.timestamp)
     return deleted
   })()
 }
 
-export function reorderTasks(taskIds: number[], boardColumn: string, status: Task['status'] = boardColumn as Task['status']): void {
+export function restoreTask(id: number): Task | null {
+  const metadata = getWriteMetadata()
+  const restored = db.transaction(() => {
+    const result = db.prepare('UPDATE tasks SET deleted_at = NULL, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL').run(metadata.timestamp, metadata.userId, id, metadata.workspaceId)
+    if (result.changes > 0) restoreEntityTags('task_tags', 'task_id', id, metadata.workspaceId, metadata.timestamp)
+    return result.changes > 0
+  })()
+  return restored ? getTaskById(metadata.workspaceId, id) : null
+}
+
+export function reorderTasks(
+  taskIds: number[],
+  boardColumn: string,
+  status: Task['status'] = boardColumn as Task['status'],
+  sourceBoardColumn?: string,
+  sourceTaskIds: number[] = [],
+  sourceStatus?: Task['status']
+): void {
   const metadata = getWriteMetadata()
   const stmt = db.prepare(`
     UPDATE tasks
@@ -794,30 +804,21 @@ export function reorderTasks(taskIds: number[], boardColumn: string, status: Tas
       status = ?,
       updated_at = ?,
       updated_by = ?,
-      completed_at = CASE
-        WHEN ? = 'done' AND completed_at IS NULL THEN ?
-        WHEN ? != 'done' THEN NULL
-        ELSE completed_at
-      END
+      completed_at = ?
     WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
   `)
-  const tx = db.transaction((ids: number[]) => {
-    ids.forEach((id, index) => {
-      stmt.run(
-        index,
-        boardColumn,
-        status,
-        metadata.timestamp,
-        metadata.userId,
-        status,
-        metadata.timestamp,
-        status,
-        id,
-        metadata.workspaceId
-      )
-    })
+  const tx = db.transaction((groups: Array<{ ids: number[]; column: string; taskStatus: Task['status'] }>) => {
+    groups.forEach(({ ids, column, taskStatus }) => ids.forEach((id, index) => {
+      const current = db.prepare('SELECT completed_at FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, metadata.workspaceId) as { completed_at: string | null } | undefined
+      const completedAt = taskStatus === 'done' ? current?.completed_at ?? metadata.timestamp : null
+      stmt.run(index, column, taskStatus, metadata.timestamp, metadata.userId, completedAt, id, metadata.workspaceId)
+    }))
   })
-  tx(taskIds)
+  const groups = [{ ids: taskIds, column: boardColumn, taskStatus: status }]
+  if (sourceBoardColumn && sourceBoardColumn !== boardColumn) {
+    groups.push({ ids: sourceTaskIds, column: sourceBoardColumn, taskStatus: sourceStatus ?? (sourceBoardColumn as Task['status']) })
+  }
+  tx(groups)
 }
 
 export interface KanbanColumn {
@@ -970,11 +971,7 @@ export function updateWorkLog(id: number, content: string, category: string, cre
     if (created_at) { fields.push('created_at = ?'); values.push(created_at) }
     if (associations.projectId !== undefined) {
       fields.push('project_id = ?')
-      values.push(resolveAssociationId('projects', associations.projectId, metadata.workspaceId) ?? null)
-    }
-    if (associations.repositoryId !== undefined) {
-      fields.push('repository_id = ?')
-      values.push(resolveAssociationId('repositories', associations.repositoryId, metadata.workspaceId) ?? null)
+      values.push(resolveProjectId(associations.projectId, metadata.workspaceId) ?? null)
     }
     fields.push('updated_at = ?', 'updated_by = ?')
     values.push(metadata.timestamp, metadata.userId)

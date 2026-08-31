@@ -19,6 +19,27 @@ export interface Project {
   }
 }
 
+export type ProjectActivityType = 'task' | 'work_log' | 'inbox' | 'git_commit' | 'report'
+
+export interface ProjectActivityItem {
+  public_id: string
+  type: ProjectActivityType
+  title: string
+  content: string
+  occurred_at: string
+  status: string | null
+  category: string | null
+  repository_name: string | null
+  author_name: string | null
+  author_email: string | null
+  commit_hash: string | null
+  branch: string | null
+  files_changed: number | null
+  additions: number | null
+  deletions: number | null
+  due_date: string | null
+}
+
 export interface Tag {
   public_id: string
   name: string
@@ -29,7 +50,6 @@ export interface Tag {
 
 export interface WorkItemAssociations {
   project_id?: string | null
-  repository_id?: string | null
   tag_names?: string[]
 }
 
@@ -65,7 +85,6 @@ export interface InboxSuggestion {
   title: string
   summary: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
   include_in_reports: boolean
 }
@@ -74,7 +93,6 @@ export interface InboxItem {
   public_id: string
   content: string
   project_id: string | null
-  repository_id: string | null
   state: 'unorganized' | 'confirmed' | 'ignored' | 'archived'
   include_in_reports: boolean
   ai_suggestion: InboxSuggestion | null

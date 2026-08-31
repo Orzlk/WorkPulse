@@ -8,7 +8,6 @@ interface WorkLog {
   created_at: string
   task_id: number | null
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
@@ -40,12 +39,30 @@ interface Project {
   summary: { work_logs: number; tasks: number; git_commits: number; reports: number }
 }
 
+interface ProjectActivityItem {
+  public_id: string
+  type: 'task' | 'work_log' | 'inbox' | 'git_commit' | 'report'
+  title: string
+  content: string
+  occurred_at: string
+  status: string | null
+  category: string | null
+  repository_name: string | null
+  author_name: string | null
+  author_email: string | null
+  commit_hash: string | null
+  branch: string | null
+  files_changed: number | null
+  additions: number | null
+  deletions: number | null
+  due_date: string | null
+}
+
 interface InboxSuggestion {
   target: 'work_log' | 'task' | 'ignore'
   title: string
   summary: string
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
   include_in_reports: boolean
 }
@@ -54,7 +71,6 @@ interface InboxItem {
   public_id: string
   content: string
   project_id: string | null
-  repository_id: string | null
   state: 'unorganized' | 'confirmed' | 'ignored' | 'archived'
   include_in_reports: boolean
   ai_suggestion: InboxSuggestion | null
@@ -166,7 +182,6 @@ interface Task {
   priority: 'low' | 'medium' | 'high'
   checklist: Array<{ id: string; text: string; completed: boolean }>
   project_id: string | null
-  repository_id: string | null
   tag_names: string[]
 }
 
@@ -181,7 +196,6 @@ interface KanbanColumn {
 
 interface WorkItemAssociations {
   project_id?: string | null
-  repository_id?: string | null
   tag_names?: string[]
 }
 
@@ -232,20 +246,27 @@ export interface API {
     notifyChanged: (publicId: string) => void
     close: () => void
   }
+  taskCreateWindow: {
+    open: () => Promise<boolean>
+    notifyChanged: (publicId: string) => void
+    close: () => void
+  }
   on: {
     quickCreate: (cb: (type: QuickCreateType) => void) => () => void
     navigate: (cb: (page: NavigatePage) => void) => () => void
     updateStatus: (cb: (state: AppUpdateState) => void) => () => void
     worklogEditorChanged: (cb: (publicId: string) => void) => () => void
+    taskCreateChanged: (cb: (publicId: string) => void) => () => void
     reportStream: (cb: (event: ReportStreamEvent) => void) => () => void
   }
   task: {
-    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority']) => Promise<Task>
+    add: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority'], dueDate?: string | null, checklist?: Task['checklist']) => Promise<Task>
     list: () => Promise<Task[]>
     get: (publicId: string) => Promise<Task | null>
     update: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) => Promise<Task | null>
     delete: (id: number) => Promise<boolean>
-    reorder: (taskIds: number[], boardColumn: string, status?: Task['status']) => Promise<void>
+    restore: (id: number) => Promise<Task | null>
+    reorder: (taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) => Promise<void>
     complete: (id: number, logContent: string) => Promise<Task | null>
     completeOnly: (id: number) => Promise<Task | null>
   }
@@ -267,7 +288,7 @@ export interface API {
     setCategory: (id: number, category: string) => Promise<void>
     update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<WorkLog | null>
     delete: (id: number) => Promise<boolean>
-    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'repository_id' | 'tag_names'>) => Promise<WorkLog>
+    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'>) => Promise<WorkLog>
   }
   stats: {
     get: (days?: number) => Promise<{
@@ -292,6 +313,7 @@ export interface API {
   }
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Project>>
+    activity: (publicId: string) => Promise<ProjectActivityItem[]>
     create: (input: Omit<Project, 'public_id' | 'archived_at' | 'summary'>) => Promise<Project>
     update: (publicId: string, input: Partial<Omit<Project, 'public_id' | 'archived_at' | 'summary'>>) => Promise<Project | null>
     archive: (publicId: string) => Promise<Project | null>
@@ -305,6 +327,7 @@ export interface API {
     aiOrganize: (input?: { public_ids?: string[]; limit?: number }) => Promise<{ processed: number; updated: number; failed: number; items: InboxItem[] }>
     ignore: (publicId: string) => Promise<InboxItem | null>
     archive: (publicId: string) => Promise<InboxItem | null>
+    delete: (publicId: string) => Promise<InboxItem | null>
   }
   tag: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Tag>>

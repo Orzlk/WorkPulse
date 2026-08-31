@@ -93,9 +93,26 @@ describe('SQLite migrations', () => {
       'created_by', 'updated_by', 'deleted_at'
     ]))
     expect((database.prepare('PRAGMA table_info(work_logs)').all() as Array<{ name: string }>).map((column) => column.name))
-      .toEqual(expect.arrayContaining(['project_id', 'repository_id']))
+      .toEqual(expect.arrayContaining(['project_id']))
+    expect((database.prepare('PRAGMA table_info(work_logs)').all() as Array<{ name: string }>).map((column) => column.name))
+      .not.toContain('repository_id')
     expect((database.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>).map((column) => column.name))
-      .toEqual(expect.arrayContaining(['project_id', 'repository_id']))
+      .toEqual(expect.arrayContaining(['project_id']))
+    expect((database.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>).map((column) => column.name))
+      .not.toContain('repository_id')
+    database.close()
+  })
+
+  it('does not create repository ownership columns for logs, tasks, or inbox items', () => {
+    const database = openMigratedDatabase()
+
+    for (const table of ['work_logs', 'tasks', 'inbox_items']) {
+      const columnNames = (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+        .map((column) => column.name)
+      expect(columnNames).not.toContain('repository_id')
+    }
+
+    expect(getDatabaseVersion(database)).toBe(1)
     database.close()
   })
 

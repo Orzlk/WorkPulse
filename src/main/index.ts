@@ -9,6 +9,7 @@ import { tMain, type AppLanguage } from './i18n'
 import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './updater'
 import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
 import { buildWorkLogEditorQuery, shouldPromptWorkLogEditorClose } from './workLogEditorWindow'
+import { buildTaskCreateQuery } from './taskCreateWindow'
 import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
 
@@ -24,6 +25,7 @@ let mainWindowRef: BrowserWindow | null = null
 let workLogEditorWindow: BrowserWindow | null = null
 let workLogEditorPublicId: string | null = null
 let workLogEditorDirty = false
+let taskCreateWindow: BrowserWindow | null = null
 
 // --- Helpers ---
 
@@ -363,6 +365,50 @@ function createWorkLogEditorWindow(publicId: string, parent: BrowserWindow | nul
   }
 }
 
+function createTaskCreateWindow(parent: BrowserWindow | null): void {
+  if (taskCreateWindow && !taskCreateWindow.isDestroyed()) {
+    if (taskCreateWindow.isMinimized()) taskCreateWindow.restore()
+    taskCreateWindow.focus()
+    return
+  }
+
+  const editorWindow = new BrowserWindow({
+    width: 980,
+    height: 760,
+    minWidth: 680,
+    minHeight: 560,
+    show: false,
+    title: '新建任务 - WorkPulse',
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    autoHideMenuBar: true,
+    icon: getAppIconPath(),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  taskCreateWindow = editorWindow
+
+  editorWindow.once('ready-to-show', () => {
+    if (!editorWindow.isDestroyed()) {
+      editorWindow.show()
+      editorWindow.focus()
+    }
+  })
+
+  editorWindow.on('closed', () => {
+    if (taskCreateWindow === editorWindow) taskCreateWindow = null
+  })
+
+  const query = buildTaskCreateQuery()
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    editorWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}${query}`)
+  } else {
+    editorWindow.loadFile(join(__dirname, '../renderer/index.html'), { search: query })
+  }
+}
+
 function registerWorkLogEditorIpc(): void {
   ipcMain.handle('worklog-editor:open', (event, publicId: string) => {
     if (typeof publicId !== 'string') return false
@@ -387,6 +433,25 @@ function registerWorkLogEditorIpc(): void {
     const editorWindow = BrowserWindow.fromWebContents(event.sender)
     if (!editorWindow || editorWindow !== workLogEditorWindow) return
     workLogEditorDirty = false
+    editorWindow.close()
+  })
+}
+
+function registerTaskCreateIpc(): void {
+  ipcMain.handle('task-create:open', (event) => {
+    createTaskCreateWindow(BrowserWindow.fromWebContents(event.sender))
+    return true
+  })
+
+  ipcMain.on('task-create:changed', (event, publicId: string) => {
+    if (BrowserWindow.fromWebContents(event.sender) !== taskCreateWindow) return
+    if (typeof publicId !== 'string' || !publicId.trim()) return
+    getMainWindow()?.webContents.send('task-create:changed', publicId)
+  })
+
+  ipcMain.on('task-create:close', (event) => {
+    const editorWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!editorWindow || editorWindow !== taskCreateWindow) return
     editorWindow.close()
   })
 }
@@ -450,17 +515,16 @@ if (!gotTheLock) {
     await initDatabase()
     registerAttachmentProtocol()
     startRepositoryScheduler()
-    // GitHub online updates are temporarily disabled; keep these calls commented
-    // so the updater can be re-enabled deliberately in a future release.
-    // configureAutoUpdater()
+    configureAutoUpdater()
     registerIpcHandlers()
     registerWorkLogEditorIpc()
+    registerTaskCreateIpc()
     registerShortcutIpc()
     registerUpdateIpc()
     buildMenu()
     createTray()
     createWindow()
-    // startUpdateCheck()
+    startUpdateCheck()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

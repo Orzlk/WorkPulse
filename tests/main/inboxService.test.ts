@@ -68,7 +68,6 @@ describe('项目、收件箱和标签服务', () => {
         title: '离线登录优化',
         summary: 'AI 仅提供归类建议',
         project_id: project.public_id,
-        repository_id: null,
         tag_names: ['#缺陷', '#技术/前端'],
         include_in_reports: true
       }
@@ -123,7 +122,6 @@ describe('项目、收件箱和标签服务', () => {
         title: '回滚验证',
         summary: '',
         project_id: null,
-        repository_id: null,
         tag_names: ['#技术/后端'],
         include_in_reports: true
       }
@@ -186,6 +184,31 @@ describe('项目、收件箱和标签服务', () => {
     expect(projects.get(project.public_id, { includeDeleted: true })).toMatchObject({
       public_id: project.public_id,
       archived_at: expect.stringMatching(/Z$/)
+    })
+    database.close()
+  })
+
+  it('通过服务软删除收件箱，并写入删除同步操作', () => {
+    const { database, context } = createDatabase()
+    const inboxService = new InboxService(database, context)
+    const inbox = inboxService.create({ content: '待删除的收件箱记录' })
+
+    const deleted = inboxService.softDelete(inbox.public_id)
+
+    expect(deleted).toMatchObject({ public_id: inbox.public_id, content: inbox.content })
+    expect(inboxService.get(inbox.public_id)).toBeNull()
+    expect(inboxService.list().items).toEqual([])
+    expect(database.prepare('SELECT deleted_at FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
+      .toEqual({ deleted_at: expect.stringMatching(/Z$/) })
+    expect(database.prepare(`
+      SELECT entity_type, entity_public_id, operation_type
+      FROM sync_operations
+      WHERE entity_type = 'inbox_item' AND entity_public_id = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(inbox.public_id)).toEqual({
+      entity_type: 'inbox_item',
+      entity_public_id: inbox.public_id,
+      operation_type: 'delete'
     })
     database.close()
   })

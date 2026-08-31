@@ -6,6 +6,8 @@ const migrations = readFileSync('src/main/database/migrations.ts', 'utf8')
 const db = readFileSync('src/main/db.ts', 'utf8')
 const preload = readFileSync('src/preload/index.ts', 'utf8')
 const kanbanPage = readFileSync('src/renderer/src/pages/KanbanPage.tsx', 'utf8')
+const kanbanCard = readFileSync('src/renderer/src/components/KanbanTaskCard.tsx', 'utf8')
+const taskDrawer = readFileSync('src/renderer/src/components/TaskDetailDrawer.tsx', 'utf8')
 
 describe('看板高级功能', () => {
   it('normalizes checklist items and validates priorities', () => {
@@ -25,8 +27,16 @@ describe('看板高级功能', () => {
     expect(db).toContain('getKanbanColumns')
     expect(db).toContain('createKanbanColumn')
     expect(preload).toContain('kanban:columns:list')
-    expect(kanbanPage).toContain('checklist')
-    expect(kanbanPage).toContain('priority')
+    expect(kanbanCard).toContain('priority')
+    expect(taskDrawer).toContain('checklist')
+    expect(kanbanPage).toContain('TaskDetailDrawer')
     expect(kanbanPage).toContain('window.api.kanban.columns.create')
+  })
+
+  it('keeps task ownership independent from repositories', () => {
+    expect(kanbanPage).not.toContain('useRepositoryStore')
+    expect(kanbanPage).not.toContain('newRepositoryId')
+    expect(taskDrawer).not.toContain('repositories:')
+    expect(taskDrawer).not.toContain('repositoryId')
   })
 })

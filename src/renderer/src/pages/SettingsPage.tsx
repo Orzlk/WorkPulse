@@ -667,7 +667,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   }
 
   const currentVersion = appVersion || updateState.currentVersion || '-'
-  const onlineUpdatesEnabled = false
+  const onlineUpdatesEnabled = true
   const isCheckingUpdate = updateState.status === 'checking' || updateState.status === 'downloading'
   const settingsSections: Array<{ id: SettingsSectionId; label: string }> = [
     { id: 'ai', label: t('settings.aiAndReports') },
@@ -1092,7 +1092,6 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 <div>
                   <h2>{t('settings.updateTitle')}</h2>
                   <p>{t('settings.updateHelp')}</p>
-                  {!onlineUpdatesEnabled && <p className="settings-update-disabled-note">{t('settings.onlineUpdatesDisabled')}</p>}
                 </div>
               </div>
               <div className="settings-update-status-row">

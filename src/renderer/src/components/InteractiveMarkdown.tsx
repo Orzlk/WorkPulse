@@ -8,8 +8,8 @@ interface InteractiveMarkdownProps {
   projectName?: string
   selectedProjectId?: string
   selectedTagPath?: string
-  onProjectClick: (projectId: string) => void
-  onTagClick: (tagPath: string) => void
+  onProjectClick?: (projectId: string) => void
+  onTagClick?: (tagPath: string) => void
 }
 
 interface InlineRenderContext {
@@ -17,8 +17,8 @@ interface InlineRenderContext {
   projectName?: string
   selectedProjectId?: string
   selectedTagPath?: string
-  onProjectClick: (projectId: string) => void
-  onTagClick: (tagPath: string) => void
+  onProjectClick?: (projectId: string) => void
+  onTagClick?: (tagPath: string) => void
 }
 
 function transformMarkdownUrl(url: string): string {
@@ -29,32 +29,34 @@ function transformMarkdownUrl(url: string): string {
 function renderInlineText(text: string, context: InlineRenderContext): ReactNode {
   const references = findInlineReferences(text, context.projectName)
   if (references.length === 0) return text
+  const onProjectClick = context.onProjectClick
+  const onTagClick = context.onTagClick
 
   const parts: ReactNode[] = []
   let cursor = 0
   references.forEach((reference, index) => {
     if (reference.start > cursor) parts.push(text.slice(cursor, reference.start))
     const token = text.slice(reference.start, reference.end)
-    if (reference.type === 'tag') {
+    if (reference.type === 'tag' && onTagClick) {
       parts.push(
         <button
           key={`${reference.start}-${index}`}
           type="button"
           className={`inline-reference inline-hash-reference ${context.selectedTagPath === reference.value ? 'is-selected' : ''}`}
           aria-label={`筛选标签 ${reference.value}`}
-          onClick={() => context.onTagClick(reference.value)}
+          onClick={() => onTagClick(reference.value)}
         >
           {token}
         </button>
       )
-    } else if (context.projectId) {
+    } else if (context.projectId && onProjectClick) {
       parts.push(
         <button
           key={`${reference.start}-${index}`}
           type="button"
           className={`inline-reference inline-project-reference ${context.selectedProjectId === context.projectId ? 'is-selected' : ''}`}
           aria-label={`筛选项目 ${reference.value}`}
-          onClick={() => context.onProjectClick(context.projectId as string)}
+          onClick={() => onProjectClick(context.projectId as string)}
         >
           {token}
         </button>

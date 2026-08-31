@@ -4,7 +4,7 @@ import type { AsyncStatus, InboxFilter, InboxItem } from '../lib/workspaceTypes'
 
 const PAGE_SIZE = 40
 let fetchPromise: Promise<void> | null = null
-type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'repository_id' | 'include_in_reports'> & {
+type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'include_in_reports'> & {
   tag_names: string[]
   ai_suggestion: InboxItem['ai_suggestion']
 }
@@ -25,6 +25,7 @@ interface InboxStore {
   suggestAi: (input?: { public_ids?: string[]; limit?: number }) => Promise<{ processed: number; updated: number; failed: number }>
   organize: (publicId: string) => Promise<void>
   ignore: (publicId: string) => Promise<void>
+  remove: (publicId: string) => Promise<void>
 }
 
 export const useInboxStore = create<InboxStore>((set, get) => ({
@@ -87,6 +88,11 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
   },
   ignore: async (publicId) => {
     await window.api.inbox.ignore(publicId)
+    await get().fetch()
+    set({ selectedId: null })
+  },
+  remove: async (publicId) => {
+    await window.api.inbox.delete(publicId)
     await get().fetch()
     set({ selectedId: null })
   }

@@ -54,21 +54,19 @@ describe('clearWorkspaceData', () => {
 
     const log = addWorkLog('需要清除的日志', '工作', null, undefined, {
       projectId: 'clear-project',
-      repositoryId: 'clear-repository',
       tagNames: ['清除/日志']
     })
     const task = addTask('需要清除的任务', '', 'todo', undefined, {
       projectId: 'clear-project',
-      repositoryId: 'clear-repository',
       tagNames: ['清除/任务']
     })
     const report = saveReport('weekly', '2026-08-17', '2026-08-23', '需要清除的报告')
     const tagId = database.prepare('SELECT id FROM tags WHERE path = ?').get('清除/日志') as { id: number }
 
     const inboxResult = database.prepare(`
-      INSERT INTO inbox_items (public_id, workspace_id, project_id, repository_id, content, status, created_by, updated_by, created_at, updated_at, state, include_in_reports)
-      VALUES ('clear-inbox', ?, ?, ?, '需要清除的收件箱', 'inbox', ?, ?, ?, ?, 'unorganized', 1)
-    `).run(context.workspace_id, projectResult.lastInsertRowid, repositoryResult.lastInsertRowid, context.user_id, context.user_id, now, now)
+      INSERT INTO inbox_items (public_id, workspace_id, project_id, content, status, created_by, updated_by, created_at, updated_at, state, include_in_reports)
+      VALUES ('clear-inbox', ?, ?, 'clear inbox', 'inbox', ?, ?, ?, ?, 'unorganized', 1)
+    `).run(context.workspace_id, projectResult.lastInsertRowid, context.user_id, context.user_id, now, now)
     const commitResult = database.prepare(`
       INSERT INTO git_commits (public_id, workspace_id, repository_id, commit_hash, author_name, author_email, committed_at, message, branch, files_changed, additions, deletions, created_at, updated_at, created_by, updated_by)
       VALUES ('clear-commit', ?, ?, 'clear-hash', 'User', 'user@example.com', ?, '需要清除的提交', 'main', 1, 1, 0, ?, ?, ?, ?)

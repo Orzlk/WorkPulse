@@ -35,6 +35,19 @@ describe('WorkPulse UI design system', () => {
     expect(system).toContain('prefers-reduced-motion')
   })
 
+  it('uses the rounded green glow as the only focus treatment for form controls', () => {
+    expect(system).toContain(':where(input, textarea, select):focus')
+    expect(system).toContain(':where(input, textarea, select):focus-visible')
+    expect(system).toContain('outline: 0 !important')
+    expect(system).toContain('.hallmark-app .global-search:focus-within')
+    expect(system).toContain('.hallmark-app .quick-create-panel:focus-within')
+    expect(system).toContain('.hallmark-app .inbox-capture:focus-within')
+    expect(system).toContain('.hallmark-app .worklog-search-input:focus')
+    expect(system).toContain(':not(.global-search-input)')
+    expect(system).toContain(':not(.quick-create-input)')
+    expect(system).toContain(':not(.inbox-capture-input)')
+  })
+
   it('loads the design system after legacy styles so semantic tokens are authoritative', () => {
     expect(main.indexOf("import './index.css'")).toBeGreaterThanOrEqual(0)
     expect(main.indexOf("import './styles/ui-system.css'")).toBeGreaterThan(main.indexOf("import './index.css'"))

@@ -28,27 +28,30 @@ describe('online update availability', () => {
     vi.clearAllMocks()
   })
 
-  it('keeps GitHub online updates disabled without configuring the updater', async () => {
-    expect(ONLINE_UPDATES_ENABLED).toBe(false)
+  it('enables GitHub online updates for the configured repository', async () => {
+    expect(ONLINE_UPDATES_ENABLED).toBe(true)
 
     configureAutoUpdater()
     const state = await checkForUpdates()
 
     expect(state.status).toBe('idle')
-    expect(autoUpdaterMock.setFeedURL).not.toHaveBeenCalled()
-    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+    expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith({ provider: 'github', owner: 'Orzlk', repo: 'WorkPulse' })
+    expect(autoUpdaterMock.autoDownload).toBe(true)
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true)
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
   })
 
   it('points future GitHub updates at the current project repository', () => {
     expect(GITHUB_UPDATE_TARGET).toEqual({ owner: 'Orzlk', repo: 'WorkPulse' })
   })
 
-  it('does not schedule an automatic online update check while disabled', () => {
-    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-
-    startUpdateCheck()
-
-    expect(timeoutSpy).not.toHaveBeenCalled()
-    timeoutSpy.mockRestore()
+  it('schedules an automatic online update check when enabled', () => {
+    vi.useFakeTimers()
+    try {
+      startUpdateCheck()
+      expect(vi.getTimerCount()).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

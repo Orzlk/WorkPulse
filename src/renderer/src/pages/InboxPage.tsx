@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Check, ChevronRight, Inbox, Sparkles, X } from 'lucide-react'
+import { Archive, Check, ChevronRight, Inbox, Sparkles, Trash2, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { extractHashTags } from '../lib/workspaceInteractions'
 import { useInboxStore } from '../stores/inboxStore'
 import { useProjectStore } from '../stores/projectStore'
-import { useRepositoryStore } from '../stores/repositoryStore'
 import { useI18n } from '../stores/languageStore'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
@@ -12,21 +11,18 @@ import { RecordsSidebar } from '../components/RecordsSidebar'
 import type { InboxFilter } from '../lib/workspaceTypes'
 
 function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpenRecords?: () => void }): JSX.Element {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [draft, setDraft] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [repositoryId, setRepositoryId] = useState('')
   const [saving, setSaving] = useState(false)
   const [aiOrganizing, setAiOrganizing] = useState(false)
-  const { items, total, status, error, selectedId, filter: inboxFilter, fetch, setFilter: setInboxFilter, loadByPublicId, loadMore, select, create, suggestAi, organize, ignore } = useInboxStore()
+  const { items, total, status, error, selectedId, filter: inboxFilter, fetch, setFilter: setInboxFilter, loadByPublicId, loadMore, select, create, suggestAi, organize, ignore, remove } = useInboxStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
-  const repositories = useRepositoryStore((state) => state.items)
-  const fetchRepositories = useRepositoryStore((state) => state.fetch)
   const toast = useToast()
   const { t } = useI18n()
 
-  useEffect(() => { void fetch(); void fetchProjects(); void fetchRepositories(); inputRef.current?.focus() }, [])
+  useEffect(() => { void fetch(); void fetchProjects(); inputRef.current?.focus() }, [])
   useEffect(() => {
     if (!focusId) return
     void loadByPublicId(focusId).then((item) => {
@@ -44,7 +40,7 @@ function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpen
     setSaving(true)
     try {
       await create({
-        content: draft.trim(), project_id: projectId || null, repository_id: repositoryId || null,
+        content: draft.trim(), project_id: projectId || null,
         tag_names: tags, include_in_reports: true, ai_suggestion: null
       })
       setDraft('')
@@ -63,6 +59,16 @@ function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpen
 
   const handleIgnore = async (publicId: string): Promise<void> => {
     try { await ignore(publicId); toast.success(t('workspace.ignored')) } catch { toast.error(t('workspace.ignoreFailed')) }
+  }
+
+  const handleDelete = async (publicId: string): Promise<void> => {
+    if (!window.confirm(t('workspace.deleteInboxConfirm'))) return
+    try {
+      await remove(publicId)
+      toast.success(t('workspace.inboxDeleted'))
+    } catch {
+      toast.error(t('workspace.deleteInboxFailed'))
+    }
   }
 
   const handleAiOrganize = async (): Promise<void> => {
@@ -110,13 +116,15 @@ function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpen
       />
       <section className="inbox-capture" aria-label={t('workspace.quickCapture')}>
         <Inbox aria-hidden="true" />
-        <input ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
-          if (event.key === 'Enter') void save()
+        <textarea className="inbox-capture-input" ref={inputRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault()
+            void save()
+          }
         }} placeholder={t('workspace.inboxPlaceholder')} aria-label={t('workspace.inboxInputAria')} />
         <button onClick={() => void save()} disabled={!draft.trim() || saving}>{saving ? t('workspace.saving') : t('common.save')}</button>
         <div className="capture-associations">
           <label>{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option value={project.public_id} key={project.public_id}>{project.name}</option>)}</select></label>
-          <label>{t('workspace.repository')}<select value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{repositories.map((repository) => <option value={repository.public_id} key={repository.public_id}>{repository.name}</option>)}</select></label>
           {tags.length > 0 && <span className="tag-preview">{tags.map((tag) => <span key={tag}>#{tag}</span>)}</span>}
         </div>
       </section>
@@ -137,9 +145,9 @@ function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpen
           {selected ? <>
             <button className="drawer-close" onClick={() => select(null)} aria-label={t('workspace.closeDetails')}><X aria-hidden="true" /></button>
             <p className="workspace-kicker">{t('workspace.recordDetails')}</p><p className="drawer-content">{selected.content}</p>
-            <div className="drawer-meta"><span>{t('workspace.project')}: {projects.find((item) => item.public_id === selected.project_id)?.name ?? t('workspace.unassigned')}</span><span>{t('workspace.repository')}: {repositories.find((item) => item.public_id === selected.repository_id)?.name ?? t('workspace.unassigned')}</span></div>
+            <div className="drawer-meta"><span>{t('workspace.project')}: {projects.find((item) => item.public_id === selected.project_id)?.name ?? t('workspace.unassigned')}</span></div>
             {selected.ai_suggestion ? <section className="ai-suggestion"><div><Sparkles aria-hidden="true" /><h3>{t('workspace.aiSuggestion')}: {selected.ai_suggestion.target === 'task' ? t('workspace.sourceTask') : selected.ai_suggestion.target === 'work_log' ? t('workspace.sourceLog') : t('workspace.ignore')}</h3></div><p>{selected.ai_suggestion.summary}</p><p>{selected.ai_suggestion.tag_names.map((tag) => `#${tag}`).join(' ')}</p></section> : <p className="drawer-note">{t('workspace.noAiSuggestion')}</p>}
-            {selected.state === 'unorganized' ? <div className="drawer-actions"><button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button><button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button></div> : <p className="drawer-note">{inboxFilterLabelsForState(selected.state, t)}</p>}
+            {selected.state === 'unorganized' ? <div className="drawer-actions"><button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button><button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div> : <div className="drawer-actions"><p className="drawer-note">{inboxFilterLabelsForState(selected.state, t)}</p><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div>}
           </> : <div className="drawer-placeholder"><Sparkles aria-hidden="true" /><p>{t('workspace.selectRecord')}</p></div>}
         </aside>
       </div>

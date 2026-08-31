@@ -10,6 +10,7 @@ import { useRepositoryStore } from './stores/repositoryStore'
 import { useI18n } from './stores/languageStore'
 import type { SearchResult } from './lib/workspaceTypes'
 import { parseWorkLogEditorRoute } from './lib/workLogEditorRoute'
+import { parseTaskCreateRoute } from './lib/taskCreateRoute'
 import workpulseMark from './assets/workpulse-mark.png'
 
 const WorkLogPage = lazy(() => import('./pages/WorkLogPage'))
@@ -21,9 +22,10 @@ const InboxPage = lazy(() => import('./pages/InboxPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
 const WorkLogEditorPage = lazy(() => import('./pages/WorkLogEditorPage'))
+const TaskCreatePage = lazy(() => import('./pages/TaskCreatePage'))
 
 type Page = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
-type QuickCreateMode = 'log' | 'task' | 'inbox' | null
+type QuickCreateMode = 'log' | 'inbox' | null
 
 const primaryNavigation: Array<{
   id: string
@@ -85,7 +87,13 @@ function MainApp(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentPage, quickCreate])
   useEffect(() => {
-    const unsubCreate = window.api.on.quickCreate((type) => setQuickCreate(type))
+    const unsubCreate = window.api.on.quickCreate((type) => {
+      if (type === 'task') {
+        void window.api.taskCreateWindow.open()
+        return
+      }
+      setQuickCreate(type)
+    })
     const unsubNav = window.api.on.navigate((page) => setCurrentPage(page))
     return () => { unsubCreate(); unsubNav() }
   }, [])
@@ -133,11 +141,21 @@ function MainApp(): JSX.Element {
 
 function App(): JSX.Element {
   const route = parseWorkLogEditorRoute(window.location.search)
+  const taskCreateRoute = parseTaskCreateRoute(window.location.search)
   if (route.isEditor && route.publicId) {
     return (
       <div className="hallmark-app workspace-shell h-screen">
         <Suspense fallback={<div className="page-loading" role="status">加载中...</div>}>
           <WorkLogEditorPage publicId={route.publicId} />
+        </Suspense>
+      </div>
+    )
+  }
+  if (taskCreateRoute.isTaskCreate) {
+    return (
+      <div className="hallmark-app workspace-shell h-screen">
+        <Suspense fallback={<div className="page-loading" role="status">加载中...</div>}>
+          <TaskCreatePage />
         </Suspense>
       </div>
     )

@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 describe('work item associations', () => {
-  it('persists project, repository, tags and audit outbox for logs and tasks', async () => {
+  it('persists project, tags and audit outbox without repository ownership', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'workpulse-associations-'))
     directories.push(directory)
     userDataPath = directory
@@ -30,22 +30,24 @@ describe('work item associations', () => {
       .run(now, now)
 
     const log = addWorkLog('日志内容', '工作', null, undefined, {
-      projectId: 'project-1', repositoryId: 'repo-1', tagNames: ['客户端/导出', '回归']
+      projectId: 'project-1', tagNames: ['客户端/导出', '回归']
     })
     const task = addTask('任务内容', '', 'todo', undefined, {
-      projectId: 'project-1', repositoryId: 'repo-1', tagNames: ['客户端/导出']
+      projectId: 'project-1', tagNames: ['客户端/导出']
     })
 
     const savedLog = getWorkLogs()[0]
     const savedTask = getTasks()[0]
-    expect(savedLog).toMatchObject({ public_id: log.public_id, project_id: 'project-1', repository_id: 'repo-1' })
+    expect(savedLog).toMatchObject({ public_id: log.public_id, project_id: 'project-1' })
+    expect(savedLog).not.toHaveProperty('repository_id')
     expect(savedLog.tag_names.slice().sort()).toEqual(['客户端/导出', '回归'].sort())
-    expect(savedTask).toMatchObject({ public_id: task.public_id, project_id: 'project-1', repository_id: 'repo-1', tag_names: ['客户端/导出'] })
+    expect(savedTask).toMatchObject({ public_id: task.public_id, project_id: 'project-1', tag_names: ['客户端/导出'] })
+    expect(savedTask).not.toHaveProperty('repository_id')
 
-    updateWorkLog(log.id, '更新日志', '工作', undefined, { projectId: null, repositoryId: null, tagNames: ['更新'] })
-    updateTask(task.id, { project_id: null, repository_id: null, tag_names: ['更新任务'] })
-    expect(getWorkLogs()[0]).toMatchObject({ project_id: null, repository_id: null, tag_names: ['更新'] })
-    expect(getTasks()[0]).toMatchObject({ project_id: null, repository_id: null, tag_names: ['更新任务'] })
+    updateWorkLog(log.id, '更新日志', '工作', undefined, { projectId: null, tagNames: ['更新'] })
+    updateTask(task.id, { project_id: null, tag_names: ['更新任务'] })
+    expect(getWorkLogs()[0]).toMatchObject({ project_id: null, tag_names: ['更新'] })
+    expect(getTasks()[0]).toMatchObject({ project_id: null, tag_names: ['更新任务'] })
     expect((database.prepare("SELECT COUNT(*) AS count FROM sync_operations WHERE entity_type IN ('work_log', 'task', 'work_log_tags', 'task_tags')").get() as { count: number }).count).toBeGreaterThanOrEqual(4)
   })
 
@@ -59,17 +61,18 @@ describe('work item associations', () => {
     database.prepare(`INSERT INTO projects (public_id, workspace_id, name, description, color, created_by, updated_by, created_at, updated_at) VALUES ('project-keep', 1, 'Project', '', '#64748b', 1, 1, ?, ?)`).run(now, now)
     database.prepare(`INSERT INTO repositories (public_id, workspace_id, project_id, name, enabled, created_by, updated_by, created_at, updated_at) VALUES ('repo-keep', 1, 1, 'Repository', 1, 1, 1, ?, ?)`).run(now, now)
 
-    const log = addWorkLog('Original log', 'work', null, undefined, { projectId: 'project-keep', repositoryId: 'repo-keep', tagNames: ['keep-log'] })
-    const task = addTask('Original task', '', 'todo', undefined, { projectId: 'project-keep', repositoryId: 'repo-keep', tagNames: ['keep-task'] })
+    const log = addWorkLog('Original log', 'work', null, undefined, { projectId: 'project-keep', tagNames: ['keep-log'] })
+    const task = addTask('Original task', '', 'todo', undefined, { projectId: 'project-keep', tagNames: ['keep-task'] })
 
     updateWorkLog(log.id, 'Updated log', 'work')
     updateTask(task.id, { title: 'Updated task' })
-    expect(getWorkLogs()[0]).toMatchObject({ project_id: 'project-keep', repository_id: 'repo-keep', tag_names: ['keep-log'] })
-    expect(getTasks()[0]).toMatchObject({ project_id: 'project-keep', repository_id: 'repo-keep', tag_names: ['keep-task'] })
+    expect(getWorkLogs()[0]).toMatchObject({ project_id: 'project-keep', tag_names: ['keep-log'] })
+    expect(getTasks()[0]).toMatchObject({ project_id: 'project-keep', tag_names: ['keep-task'] })
 
     const payloads = database.prepare(`SELECT payload FROM sync_operations WHERE entity_type IN ('work_log', 'task') ORDER BY id DESC LIMIT 2`).all() as Array<{ payload: string }>
     expect(payloads.every((row) => !Object.prototype.hasOwnProperty.call(JSON.parse(row.payload), 'project_id'))).toBe(true)
     expect(payloads.every((row) => !Object.prototype.hasOwnProperty.call(JSON.parse(row.payload), 'tag_names'))).toBe(true)
+    expect(payloads.every((row) => !Object.prototype.hasOwnProperty.call(JSON.parse(row.payload), 'repository_id'))).toBe(true)
   })
 
   it('rolls back body, tags, links, and outbox when association persistence fails', async () => {

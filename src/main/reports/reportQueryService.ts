@@ -98,22 +98,22 @@ export class ReportQueryService {
     const range = [this.context.workspace_id, period.fromUtc, period.toUtc]
 
     const logRows = this.database.prepare(`
-      SELECT entity.public_id, entity.project_id, entity.repository_id, entity.content, entity.created_at,
+      SELECT entity.public_id, entity.project_id, entity.content, entity.created_at,
         ${tagSql('work_log_tags', 'work_log_id')}
       FROM work_logs AS entity
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND entity.created_at >= ? AND entity.created_at < ?
       ORDER BY entity.created_at, entity.id
-    `).all(...range) as Array<ReportLogSnapshot & { project_id: number | null; repository_id: number | null; tags: string | null }>
+    `).all(...range) as Array<ReportLogSnapshot & { project_id: number | null; tags: string | null }>
     for (const row of logRows) {
-      if (!accepts(row.project_id, row.repository_id)) continue
+      if (!accepts(row.project_id, null)) continue
       groupFor(row.project_id).work_logs.push({
         public_id: row.public_id, content: row.content, created_at: row.created_at, tags: parseTags(row.tags)
       })
     }
 
     const taskRows = this.database.prepare(`
-      SELECT entity.public_id, entity.project_id, entity.repository_id, entity.title, entity.description,
+      SELECT entity.public_id, entity.project_id, entity.title, entity.description,
         entity.status, entity.created_at, entity.completed_at, ${tagSql('task_tags', 'task_id')}
       FROM tasks AS entity
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
@@ -122,11 +122,10 @@ export class ReportQueryService {
       ORDER BY COALESCE(entity.completed_at, entity.created_at), entity.id
     `).all(this.context.workspace_id, period.fromUtc, period.toUtc, period.fromUtc, period.toUtc) as Array<ReportTaskSnapshot & {
       project_id: number | null
-      repository_id: number | null
       tags: string | null
     }>
     for (const row of taskRows) {
-      if (!accepts(row.project_id, row.repository_id)) continue
+      if (!accepts(row.project_id, null)) continue
       groupFor(row.project_id).tasks.push({
         public_id: row.public_id,
         title: row.title,
@@ -139,16 +138,16 @@ export class ReportQueryService {
     }
 
     const inboxRows = this.database.prepare(`
-      SELECT entity.public_id, entity.project_id, entity.repository_id, entity.content, entity.created_at,
+      SELECT entity.public_id, entity.project_id, entity.content, entity.created_at,
         ${tagSql('inbox_tags', 'inbox_item_id')}
       FROM inbox_items AS entity
       WHERE entity.workspace_id = ? AND entity.deleted_at IS NULL
         AND entity.state = 'confirmed' AND entity.include_in_reports = 1
         AND entity.created_at >= ? AND entity.created_at < ?
       ORDER BY entity.created_at, entity.id
-    `).all(...range) as Array<ReportInboxSnapshot & { project_id: number | null; repository_id: number | null; tags: string | null }>
+    `).all(...range) as Array<ReportInboxSnapshot & { project_id: number | null; tags: string | null }>
     for (const row of inboxRows) {
-      if (!accepts(row.project_id, row.repository_id)) continue
+      if (!accepts(row.project_id, null)) continue
       groupFor(row.project_id).inbox_items.push({
         public_id: row.public_id, content: row.content, created_at: row.created_at, tags: parseTags(row.tags)
       })
@@ -205,8 +204,7 @@ export class ReportQueryService {
       values.push(...allowedProjectIds)
     }
     if (repositoryIds.length > 0) {
-      conditions.push(`entity.repository_id IN (${allowedRepositoryIds.map(() => '?').join(', ')})`)
-      values.push(...allowedRepositoryIds)
+      conditions.push('1 = 0')
     }
     const unorganized = this.database.prepare(`
       SELECT COUNT(*) AS count FROM inbox_items AS entity

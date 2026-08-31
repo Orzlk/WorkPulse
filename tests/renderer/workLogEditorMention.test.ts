@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(__dirname, '../..')
 const page = readFileSync(resolve(root, 'src/renderer/src/pages/WorkLogEditorPage.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/renderer/src/index.css'), 'utf8')
+const systemStyles = readFileSync(resolve(root, 'src/renderer/src/styles/ui-system.css'), 'utf8')
 
 describe('work log editor mentions', () => {
   it('provides the same # and @ completion surface as the composer', () => {
@@ -36,5 +37,12 @@ describe('work log editor mentions', () => {
     expect(styles).toMatch(/\.worklog-editor-composer\s*\{[^}]*max-height:/s)
     expect(styles).toMatch(/\.worklog-editor-composer \.tag-composer-input\s*\{[^}]*overflow-y:\s*auto;/s)
     expect(styles).toMatch(/\.worklog-editor-footer\s*\{[^}]*flex:\s*none;/s)
+  })
+
+  it('uses one rounded focus ring on the editor wrapper instead of two inner rectangles', () => {
+    expect(styles).toMatch(/\.worklog-editor-composer\s*\{[^}]*border:\s*1px solid var\(--rule-strong\);[^}]*border-radius:\s*10px;/s)
+    expect(styles).toMatch(/\.worklog-editor-composer:focus-within\s*\{[^}]*border-color:\s*var\(--forest\);[^}]*box-shadow:/s)
+    expect(styles).toMatch(/\.worklog-editor-composer \.tag-composer-highlight,\s*\.worklog-editor-composer \.tag-composer-input\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;/s)
+    expect(systemStyles).toMatch(/\.hallmark-app \.tag-composer-input:focus-visible\s*\{[^}]*outline:\s*0;/s)
   })
 })

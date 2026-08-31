@@ -42,9 +42,7 @@ const { owner, repo } = GITHUB_UPDATE_TARGET
 const latestReleaseApiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`
 const releasePageUrl = `https://github.com/${owner}/${repo}/releases/latest`
 
-// GitHub online updates are temporarily disabled. Keep the updater implementation
-// available so the feature can be restored without rebuilding its IPC contract.
-export const ONLINE_UPDATES_ENABLED = false
+export const ONLINE_UPDATES_ENABLED = true
 
 let configured = false
 let updateState: AppUpdateState = {

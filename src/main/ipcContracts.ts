@@ -120,16 +120,14 @@ export interface ParsedSearchQuery {
 
 export interface ParsedWorkItemAssociations {
   projectId?: string | null
-  repositoryId?: string | null
   tagNames?: string[]
 }
 
 export function parseWorkItemAssociations(value: unknown): ParsedWorkItemAssociations {
   if (value === undefined) return {}
-  const input = object(value, ['project_id', 'repository_id', 'tag_names'])
+  const input = object(value, ['project_id', 'tag_names'])
   return {
     projectId: nullableId(input.project_id, 'project_id'),
-    repositoryId: nullableId(input.repository_id, 'repository_id'),
     tagNames: input.tag_names === undefined ? undefined : parseTagNames(input.tag_names)
   }
 }
@@ -286,12 +284,11 @@ export function parseProjectInput(value: unknown, partial = false): { name?: str
 export function parseInboxInput(value: unknown): {
   content?: string
   project_id?: string | null
-  repository_id?: string | null
   tag_names?: string[]
   include_in_reports?: boolean
   ai_suggestion?: InboxSuggestion | null
 } {
-  const input = object(value, ['content', 'project_id', 'repository_id', 'tag_names', 'include_in_reports', 'ai_suggestion'])
+  const input = object(value, ['content', 'project_id', 'tag_names', 'include_in_reports', 'ai_suggestion'])
   const tags = input.tag_names === undefined ? undefined : input.tag_names
   if (tags !== undefined && (!Array.isArray(tags) || tags.length > 50 || tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 200))) {
     throw invalid('tag_names is invalid')
@@ -300,7 +297,6 @@ export function parseInboxInput(value: unknown): {
   return {
     content: input.content === undefined ? undefined : string(input.content, 'content', { max: 10000 }),
     project_id: nullableId(input.project_id, 'project_id'),
-    repository_id: nullableId(input.repository_id, 'repository_id'),
     tag_names: tags as string[] | undefined,
     include_in_reports: input.include_in_reports as boolean | undefined,
     ai_suggestion: parseSuggestion(input.ai_suggestion)
@@ -309,7 +305,7 @@ export function parseInboxInput(value: unknown): {
 
 function parseSuggestion(value: unknown): InboxSuggestion | null | undefined {
   if (value === undefined || value === null) return value
-  const input = object(value, ['target', 'title', 'summary', 'project_id', 'repository_id', 'tag_names', 'include_in_reports'])
+  const input = object(value, ['target', 'title', 'summary', 'project_id', 'tag_names', 'include_in_reports'])
   if (input.target !== 'work_log' && input.target !== 'task' && input.target !== 'ignore') throw invalid('suggestion target is invalid')
   if (!Array.isArray(input.tag_names) || input.tag_names.some((tag) => typeof tag !== 'string')) throw invalid('suggestion tags are invalid')
   if (typeof input.include_in_reports !== 'boolean') throw invalid('suggestion include_in_reports is invalid')
@@ -318,7 +314,6 @@ function parseSuggestion(value: unknown): InboxSuggestion | null | undefined {
     title: string(input.title, 'title', { allowEmpty: true, max: 500 }),
     summary: string(input.summary, 'summary', { allowEmpty: true, max: 4000 }),
     project_id: nullableId(input.project_id, 'suggestion.project_id') ?? null,
-    repository_id: nullableId(input.repository_id, 'suggestion.repository_id') ?? null,
     tag_names: input.tag_names.map((tag) => string(tag, 'tag', { max: 200 })),
     include_in_reports: input.include_in_reports
   }

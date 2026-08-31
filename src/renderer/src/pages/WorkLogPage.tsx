@@ -164,7 +164,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
 
     try {
       const projectId = await resolveOrCreateProjectReference(trimmed, projects, createProject)
-      await addLog(trimmed, '', { project_id: projectId, repository_id: null, tag_names: extractHashTags(trimmed).tags })
+      await addLog(trimmed, '', { project_id: projectId, tag_names: extractHashTags(trimmed).tags })
       await refreshTagTree()
       autoTagPrefixRef.current = ''
       setComposerInput('')
