@@ -20,4 +20,10 @@ describe('AI connection test settings UI', () => {
     expect(i18n).toContain("'settings.aiTestSuccess'")
     expect(i18n).toContain("'settings.aiTestFailed'")
   })
+
+  it('shows persistence feedback for settings that save on blur', () => {
+    expect(page).toContain('settings.saved')
+    expect(page).toContain('settings.saveFailed')
+    expect(page).toContain('settingsFieldStatus')
+  })
 })

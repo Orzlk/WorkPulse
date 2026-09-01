@@ -10,6 +10,8 @@ const card = readFileSync(resolve(root, 'src/renderer/src/components/KanbanTaskC
 const taskDrawer = readFileSync(resolve(root, 'src/renderer/src/components/TaskDetailDrawer.tsx'), 'utf8')
 const store = readFileSync(resolve(root, 'src/renderer/src/stores/projectStore.ts'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/renderer/src/index.css'), 'utf8')
+const uiSystemPath = resolve(root, 'src/renderer/src/styles/ui-system.css')
+const uiSystem = existsSync(uiSystemPath) ? readFileSync(uiSystemPath, 'utf8') : ''
 const translations = readFileSync(resolve(root, 'src/renderer/src/lib/i18n.ts'), 'utf8')
 const preload = readFileSync(resolve(root, 'src/preload/index.ts'), 'utf8')
 const palettePath = resolve(root, 'src/renderer/src/lib/projectColors.ts')
@@ -30,7 +32,18 @@ describe('project details', () => {
     expect(page).toContain('onKeyDown')
     expect(styles).toContain('.project-detail-overlay')
     expect(styles).toContain('.project-detail-drawer')
-    expect(styles).toContain('.project-detail-drawer:focus')
+    expect(styles).toContain('.project-detail-drawer:focus-visible')
+  })
+
+  it('renders the project detail as a full-height edge drawer consistent with the task detail', () => {
+    const overlay = styles.slice(styles.indexOf('.project-detail-overlay'), styles.indexOf('.task-detail-overlay'))
+    const drawer = styles.slice(styles.indexOf('.project-detail-drawer {'), styles.indexOf('.project-detail-drawer:focus'))
+    expect(overlay).not.toMatch(/padding:\s*\d+px/)
+    expect(drawer).toContain('height: 100%')
+    expect(drawer).toContain('border-left: 1px solid')
+    expect(drawer).not.toContain('border-radius')
+    expect(drawer).not.toContain('max-height')
+    expect(uiSystem).not.toContain('.project-detail-drawer')
   })
 
   it('loads a reverse chronological activity timeline when a project opens', () => {
@@ -63,6 +76,14 @@ describe('project details', () => {
     expect(taskDrawer).toContain('task-detail-overlay')
     expect(styles).toMatch(/\.task-detail-overlay\s*\{[^}]*z-index:\s*70;/s)
     expect(page).toContain('!activeTask')
+  })
+
+  it('creates projects through a dialog instead of a persistent inline form', () => {
+    expect(page).toContain("setCreateOpen(true)")
+    expect(page).toContain('project-create-title')
+    expect(page).toContain('ui-button ui-button--primary')
+    expect(page).not.toContain('className="project-create"')
+    expect(styles).not.toContain('.project-create')
   })
 
   it('offers a reusable, accessible preset project color palette in create and edit states', () => {
@@ -125,5 +146,11 @@ describe('project details', () => {
     expect(page).toContain("t('workspace.deleteProject')")
     expect(styles).toContain('.project-menu-panel')
     expect(translations).toContain("'workspace.projectMenu'")
+  })
+
+  it('protects project edit drafts when the detail drawer is closed accidentally', () => {
+    expect(page).toContain('const isProjectEditDirty =')
+    expect(page).toContain('requestCloseProject')
+    expect(page).toContain('projectEditDiscardConfirm')
   })
 })

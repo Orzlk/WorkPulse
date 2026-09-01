@@ -22,6 +22,7 @@ interface Task {
 interface TaskStore {
   tasks: Task[]
   loading: boolean
+  error: string | null
   lastDeleted: Task | null
   fetchTasks: () => Promise<void>
   loadByPublicId: (publicId: string) => Promise<Task | null>
@@ -39,13 +40,16 @@ interface TaskStore {
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: [],
   loading: false,
+  error: null,
   lastDeleted: null,
 
   fetchTasks: async () => {
     set({ loading: true })
     try {
       const tasks = await window.api.task.list()
-      set({ tasks })
+      set({ tasks, error: null })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : '加载任务失败' })
     } finally {
       set({ loading: false })
     }

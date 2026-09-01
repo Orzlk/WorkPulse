@@ -211,6 +211,39 @@ describe('ReportService and period AI generation', () => {
     database.close()
   })
 
+  it('recovers reports left in generating state after a crash', () => {
+    const database = createDatabase()
+    const { workspace_id, user_id } = context(database)
+    const publicId = randomUUID()
+    const now = '2026-08-24T00:00:00.000Z'
+    database.prepare(`
+      INSERT INTO reports (
+        public_id, workspace_id, type, period_type, date_from, date_to, period_start, period_end_exclusive,
+        time_zone, timezone, project_scope, repository_scope, source_snapshot, content, version, status,
+        created_by, updated_by, created_at, updated_at
+      ) VALUES (?, ?, 'weekly', 'weekly', '2026-08-17', '2026-08-24', ?, ?, 'Asia/Shanghai', 'Asia/Shanghai', '[]', '[]', '{}', '', 1, 'generating', ?, ?, ?, ?)
+    `).run(publicId, workspace_id, '2026-08-16T16:00:00.000Z', '2026-08-23T16:00:00.000Z', user_id, user_id, now, now)
+
+    const recovered = new ReportService(database, context(database)).recoverInterruptedGenerations()
+    expect(recovered).toBe(1)
+    expect(database.prepare('SELECT status, error_message, retry_count FROM reports WHERE public_id = ?').get(publicId)).toMatchObject({ status: 'error', retry_count: 1 })
+    database.close()
+  })
+
+  it('rejects duplicate generation while the same report is already running', async () => {
+    const database = createDatabase()
+    let release: (() => void) | undefined
+    const service = new ReportService(database, context(database), {
+      generateContent: async () => new Promise<string>((resolve) => { release = () => resolve('# 周报\n\n完成。') })
+    })
+    const first = service.generate(request())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await expect(service.generate(request())).rejects.toThrow('already in progress')
+    release?.()
+    await first
+    database.close()
+  })
+
   it('creates a new version when retrying an error without overwriting the failed history', async () => {
     const database = createDatabase()
     let attempts = 0

@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3'
 import type { InboxItem, InboxSuggestion, InboxTarget, Page } from '../domain/types'
 import type { InboxPagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
-import { LocalTagRepository, normalizeTagName } from '../repositories/localTagRepository'
+import { LocalTagRepository, displayTagName, normalizeTagName } from '../repositories/localTagRepository'
 
 export interface CreateInboxInput {
   content: string
@@ -296,7 +296,7 @@ export class InboxService {
       ...suggestion,
       title: suggestion.title,
       summary: suggestion.summary,
-      tag_names: Array.from(new Set(suggestion.tag_names.map(normalizeTagName))),
+      tag_names: Array.from(new Set(suggestion.tag_names.map(displayTagName))),
       include_in_reports: Boolean(suggestion.include_in_reports)
     }
   }

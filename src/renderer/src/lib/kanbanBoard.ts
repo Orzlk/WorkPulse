@@ -44,6 +44,13 @@ export interface ReopenTaskMove {
   sourceStatus: KanbanTaskStatus
 }
 
+export function formatLocalDateKey(date: Date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export function buildReopenTaskMove(move: CompletedTaskMove): ReopenTaskMove | null {
   if (!move.sourceColumn || !move.sourceStatus) return null
   return {
@@ -68,7 +75,7 @@ function dueState(dueDate: string | null, today: string): 'overdue' | 'soon' | '
 
 export function filterAndSortTasks<T extends KanbanTaskLike>(tasks: T[], filters: KanbanTaskFilters): T[] {
   const query = filters.query.trim().toLocaleLowerCase()
-  const today = filters.today ?? new Date().toISOString().slice(0, 10)
+  const today = filters.today ?? formatLocalDateKey()
   const filtered = tasks.filter((task) => {
     if (!filters.showDone && task.status === 'done') return false
     if (filters.projectId && task.project_id !== filters.projectId) return false

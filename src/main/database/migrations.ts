@@ -7,6 +7,8 @@ import type { MigrationContext, SchemaMigration } from './types'
 
 const CORE_TABLES = ['work_logs', 'tasks', 'reports', 'settings'] as const
 const UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+// 未发布阶段保持单一 v1 初始迁移（含 display_path 列）。旧的 14 步迁移链数据库不兼容，
+// 按既定重置策略：删除本地数据库文件后重启应用并重新导入数据。
 export const CURRENT_SCHEMA_VERSION = 1
 
 function tableExists(database: Database.Database, tableName: string): boolean {
@@ -462,6 +464,7 @@ const initialSchemaSteps: SchemaMigration[] = [
           workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
           name TEXT NOT NULL,
           path TEXT NOT NULL,
+          display_path TEXT,
           parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,

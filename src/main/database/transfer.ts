@@ -47,7 +47,7 @@ const EXPORT_COLUMNS: Record<ExportTable, readonly string[]> = {
   tasks: ['id', 'public_id', 'project_id', 'title', 'description', 'status', 'board_column', 'position', 'created_at', 'updated_at', 'completed_at', 'due_date', 'priority', 'checklist', 'deleted_at'],
   kanban_columns: ['id', 'public_id', 'column_key', 'name', 'status', 'position', 'is_system', 'created_at', 'updated_at'],
   inbox_items: ['id', 'public_id', 'project_id', 'content', 'status', 'state', 'include_in_reports', 'ai_suggestion', 'created_at', 'updated_at', 'deleted_at'],
-  tags: ['id', 'public_id', 'name', 'path', 'parent_id', 'created_at', 'updated_at', 'deleted_at'],
+  tags: ['id', 'public_id', 'name', 'path', 'display_path', 'parent_id', 'created_at', 'updated_at', 'deleted_at'],
   work_log_tags: ['work_log_id', 'tag_id'],
   task_tags: ['task_id', 'tag_id'],
   inbox_tags: ['inbox_item_id', 'tag_id'],
@@ -375,7 +375,9 @@ function mergeEntity(
   if (table === 'repository_bindings') {
     row.local_path = ''
     if (tableColumns.has('is_valid')) row.is_valid = 0
-    const binding = database.prepare('SELECT id FROM repository_bindings WHERE repository_id = ? AND local_path = ?').get(row.repository_id, '') as { id: number } | undefined
+    // A repository can already have a real local binding. Reusing it is safer
+    // than inserting an empty binding that wins the "latest binding" lookup.
+    const binding = database.prepare('SELECT id FROM repository_bindings WHERE repository_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1').get(row.repository_id) as { id: number } | undefined
     if (binding) {
       setIdMap(idMaps, table, incomingId, binding.id)
       result.conflicts += 1

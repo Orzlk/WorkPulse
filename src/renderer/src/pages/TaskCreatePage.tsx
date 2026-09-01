@@ -42,6 +42,22 @@ function TaskCreatePage(): JSX.Element {
     textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
   }, [description])
 
+  const isDirty = Boolean(
+    title.trim() ||
+    description.trim() ||
+    priority !== 'medium' ||
+    dueDate ||
+    projectId ||
+    tags.trim() ||
+    checklist.length > 0 ||
+    checklistDraft.trim()
+  )
+
+  useEffect(() => {
+    window.api.taskCreateWindow.setDirty(isDirty)
+    return () => window.api.taskCreateWindow.setDirty(false)
+  }, [isDirty])
+
   const handleSave = async (): Promise<void> => {
     const normalizedTitle = title.trim()
     if (!normalizedTitle || saving) return
@@ -59,8 +75,9 @@ function TaskCreatePage(): JSX.Element {
         dueDate || null,
         checklist
       )
+      window.api.taskCreateWindow.setDirty(false)
       window.api.taskCreateWindow.notifyChanged(task.public_id)
-      window.api.taskCreateWindow.close()
+      window.api.taskCreateWindow.close(true)
     } catch {
       setError(t('kanban.saveFailed'))
     } finally {
@@ -99,11 +116,7 @@ function TaskCreatePage(): JSX.Element {
       <header className="worklog-editor-header">
         <div>
           <h1>{t('kanban.newTaskTitle')}</h1>
-          <p>{t('kanban.newTaskSubtitle')}</p>
         </div>
-        <button type="button" onClick={() => window.api.taskCreateWindow.close()} className="task-create-close" aria-label={t('common.close')}>
-          <X aria-hidden="true" />
-        </button>
       </header>
 
       <main className="worklog-editor-main task-create-main">
@@ -173,7 +186,7 @@ function TaskCreatePage(): JSX.Element {
       <footer className="worklog-editor-footer task-create-footer">
         <span className="worklog-editor-hint">{t('kanban.newTaskShortcut')}</span>
         <div className="worklog-editor-actions">
-          <button type="button" onClick={() => window.api.taskCreateWindow.close()} className="worklog-editor-secondary-button" disabled={saving}>
+          <button type="button" onClick={() => window.api.taskCreateWindow.close(true)} className="worklog-editor-secondary-button" disabled={saving}>
             <X aria-hidden="true" />{t('common.cancel')}
           </button>
           <button type="button" onClick={() => void handleSave()} className="worklog-editor-primary-button" disabled={saving || !title.trim()}>

@@ -72,6 +72,7 @@ function MainApp(): JSX.Element {
   }, [toast])
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return
       if (quickCreate) return
       const mod = event.metaKey || event.ctrlKey
       if (mod && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen((open) => !open); return }
@@ -118,20 +119,20 @@ function MainApp(): JSX.Element {
     setSearchOpen(false)
   }, [])
   const renderPage = (): JSX.Element => {
-    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} onOpenInbox={() => setCurrentPage('inbox')} />
-    if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} />
+    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} onFocusHandled={() => setWorkLogFocusId(null)} onOpenInbox={() => setCurrentPage('inbox')} />
+    if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} onFocusHandled={() => setTaskFocusId(null)} />
     if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} onOpenInbox={() => setCurrentPage('inbox')} onOpenStats={() => setCurrentPage('stats')} />
     if (currentPage === 'stats') return <StatsPage onOpenReports={() => setCurrentPage('report')} />
     if (currentPage === 'settings') return <SettingsPage onBack={() => setCurrentPage('worklog')} />
-    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} onOpenRecords={() => setCurrentPage('worklog')} />
+    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} onFocusHandled={() => setInboxFocusId(null)} onOpenRecords={() => setCurrentPage('worklog')} />
     if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); setCurrentPage('report') }} onOpenRepositories={() => setCurrentPage('repositories')} />
-    return <RepositoriesPage focusPublicId={repositoryFocusId} onOpenProjects={() => setCurrentPage('projects')} />
+    return <RepositoriesPage focusPublicId={repositoryFocusId} onFocusHandled={() => setRepositoryFocusId(null)} onOpenProjects={() => setCurrentPage('projects')} />
   }
 
   return <div className="hallmark-app workspace-shell h-screen flex flex-col">
     <header className="app-header workspace-header">
       <div className="app-header-main"><button className="app-brand" onClick={() => setCurrentPage('worklog')} aria-label={t('nav.home')}><img src={workpulseMark} alt="" className="app-brand-mark" /><h1>WorkPulse</h1></button><nav className="app-nav workspace-nav" aria-label={t('nav.main')}>{primaryNavigation.map((group) => { const active = group.pages.includes(currentPage as Exclude<Page, 'settings'>); return <button key={group.id} onClick={() => setCurrentPage(group.defaultPage)} className={`app-nav-button ui-nav-item ${active ? 'is-active' : ''}`} aria-current={active ? 'page' : undefined} data-navigation-group={group.id}><group.Icon aria-hidden="true" />{t(group.labelKey)}</button> })}</nav></div>
-      <div className="header-actions"><button className="header-icon-button ui-icon-button" onClick={() => setSearchOpen((open) => !open)} aria-label={t('nav.search')} aria-expanded={searchOpen}><Search aria-hidden="true" /></button><button ref={quickCreateTriggerRef} className="header-create-button ui-button ui-button--primary" onClick={() => setQuickCreate('inbox')}><Plus aria-hidden="true" />{t('nav.quickCreate')}</button><button onClick={() => setCurrentPage('settings')} className="app-settings-button ui-icon-button settings-spin" aria-label={t('nav.settings')}><Settings aria-hidden="true" /></button></div>
+      <div className="header-actions"><button className="header-icon-button ui-icon-button" onClick={() => setSearchOpen((open) => !open)} aria-label={t('nav.search')} aria-expanded={searchOpen}><Search aria-hidden="true" /></button><button ref={quickCreateTriggerRef} className="header-create-button ui-button ui-button--primary" onClick={() => setQuickCreate('inbox')}><Plus aria-hidden="true" />{t('nav.quickCreate')}</button><button onClick={() => setCurrentPage('settings')} className="app-settings-button ui-icon-button" aria-label={t('nav.settings')}><Settings aria-hidden="true" /></button></div>
       {searchOpen && <GlobalSearch onOpenResult={openSearchResult} />}
     </header>
     <main className="app-main flex-1 overflow-auto"><div className={`page-container workspace-content ${currentPage === 'kanban' ? 'page-container-wide' : ''}`}><Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>{renderPage()}</Suspense></div></main>

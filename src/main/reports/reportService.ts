@@ -62,9 +62,16 @@ export class ReportService {
   async generate(request: ReportRequest, options: ReportGenerationOptions = {}): Promise<SavedPeriodReport> {
     options.onStage?.('reading')
     const snapshot = this.query.buildSnapshot(request)
-    const now = new Date().toISOString()
     const projectScope = JSON.stringify([...(request.projectIds ?? [])].sort())
     const repositoryScope = JSON.stringify([...(request.repositoryIds ?? [])].sort())
+    const active = this.database.prepare(`
+      SELECT public_id FROM reports
+      WHERE workspace_id = ? AND type = ? AND period_start = ? AND period_end_exclusive = ?
+        AND project_scope = ? AND repository_scope = ? AND status = 'generating' AND deleted_at IS NULL
+      LIMIT 1
+    `).get(this.context.workspace_id, request.type, snapshot.period.fromUtc, snapshot.period.toUtc, projectScope, repositoryScope) as { public_id: string } | undefined
+    if (active) throw new Error('Report generation is already in progress')
+    const now = new Date().toISOString()
     const created = this.database.transaction(() => this.createGeneratingReport(snapshot, request, projectScope, repositoryScope, now))()
 
     try {
@@ -72,12 +79,26 @@ export class ReportService {
       options.onStage?.('generating')
       const content = await this.generator.generateContent(snapshot, request, options)
       if (!content.trim()) throw new Error('AI response content is empty')
-      return this.database.transaction(() => this.finishReport(created.public_id, content.trim(), now))()
+      return this.database.transaction(() => this.finishReport(created.public_id, content.trim(), new Date().toISOString()))()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI report generation failed'
       this.database.transaction(() => this.failReport(created.public_id, message, now))()
       throw new Error(message)
     }
+  }
+
+  recoverInterruptedGenerations(message = '报告生成在应用退出时中断，请重试'): number {
+    this.assertWorkspace()
+    const now = new Date().toISOString()
+    const rows = this.database.prepare(`
+      UPDATE reports
+      SET status = 'error', error_message = ?, retry_count = retry_count + 1, updated_by = ?, updated_at = ?
+      WHERE workspace_id = ? AND status = 'generating' AND deleted_at IS NULL
+      RETURNING public_id, type, period_start, period_end_exclusive, timezone, project_scope, repository_scope,
+        source_snapshot, content, version, status, error_message, retry_count, generated_at, updated_at
+    `).all(message, this.context.user_id, now, this.context.workspace_id) as ReportRow[]
+    rows.forEach((row) => this.enqueueSync(row.public_id, 'update', row, now))
+    return rows.length
   }
 
   preview(request: ReportRequest): ReportPreview {

@@ -227,11 +227,19 @@ function HeatMap({ data }: { data: DailyStats[] }): JSX.Element {
 
 function StatsPage({ onOpenReports }: { onOpenReports?: () => void }): JSX.Element {
   const [stats, setStats] = useState<Stats | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const { t } = useI18n()
 
-  useEffect(() => {
-    window.api.stats.get(90).then(setStats)
-  }, [])
+  const loadStats = (): void => {
+    setError(null)
+    void window.api.stats.get(90).then(setStats).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t('common.loading')))
+  }
+
+  useEffect(() => { loadStats() }, [])
+
+  if (error) {
+    return <div className="py-16 text-center text-sm text-red-600 dark:text-red-300"><p>{error}</p><button type="button" className="ui-button ui-button--secondary mt-4" onClick={loadStats}>{t('common.retry')}</button></div>
+  }
 
   if (!stats) {
     return (

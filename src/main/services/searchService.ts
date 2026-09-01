@@ -133,7 +133,7 @@ export class SearchService {
     const text = query.text?.trim() ?? ''
     const like = `%${text}%`
     const tagSelect = (table: SearchFilterSpec['tagTable'], column: SearchFilterSpec['tagColumn']): string => `
-      (SELECT GROUP_CONCAT(tags.path, ',') FROM ${table} AS entity_tags
+      (SELECT GROUP_CONCAT(COALESCE(tags.display_path, tags.path), ',') FROM ${table} AS entity_tags
        INNER JOIN tags ON tags.id = entity_tags.tag_id
          AND tags.workspace_id = entity.workspace_id AND tags.deleted_at IS NULL
        WHERE entity_tags.${column} = entity.id) AS tag_paths`

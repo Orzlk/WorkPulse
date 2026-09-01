@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 import { getDatabaseVersion, runMigrations } from './migrations'
@@ -72,5 +72,34 @@ export async function backupDatabase(
       rmSync(temporaryPath, { force: true })
     }
     throw error
+  }
+}
+
+/** Keep startup backups bounded so a long-lived local install cannot fill its disk. */
+export function pruneBackups(directory: string, keep = 30): void {
+  if (!existsSync(directory)) return
+  let names: string[]
+  try {
+    names = readdirSync(directory)
+  } catch {
+    return
+  }
+  const files = names
+    .filter((file) => file.startsWith('workpulse-') && file.endsWith('.db'))
+    .flatMap((file) => {
+      try {
+        return [{ file, mtime: statSync(join(directory, file)).mtimeMs }]
+      } catch {
+        return []
+      }
+    })
+    .sort((left, right) => right.mtime - left.mtime)
+
+  for (const entry of files.slice(Math.max(keep, 1))) {
+    try {
+      unlinkSync(join(directory, entry.file))
+    } catch {
+      // A locked/removed old backup should not prevent the application from starting.
+    }
   }
 }

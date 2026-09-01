@@ -10,7 +10,7 @@ import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import { RecordsSidebar } from '../components/RecordsSidebar'
 import type { InboxFilter } from '../lib/workspaceTypes'
 
-function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpenRecords?: () => void }): JSX.Element {
+function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: string | null; onFocusHandled?: () => void; onOpenRecords?: () => void }): JSX.Element {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [draft, setDraft] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -28,9 +28,9 @@ function InboxPage({ focusId, onOpenRecords }: { focusId?: string | null; onOpen
     void loadByPublicId(focusId).then((item) => {
       if (!item) return
       select(focusId)
-      requestAnimationFrame(() => document.getElementById(`inbox-${focusId}`)?.focus())
-    })
-  }, [focusId, loadByPublicId, select])
+      requestAnimationFrame(() => { document.getElementById(`inbox-${focusId}`)?.focus(); onFocusHandled?.() })
+    }).finally(() => { if (!useInboxStore.getState().items.some((item) => item.public_id === focusId)) onFocusHandled?.() })
+  }, [focusId, loadByPublicId, onFocusHandled, select])
 
   const selected = useMemo(() => items.find((item) => item.public_id === selectedId) ?? null, [items, selectedId])
   const tags = extractHashTags(draft).tags

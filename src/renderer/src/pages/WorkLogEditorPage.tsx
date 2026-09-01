@@ -359,7 +359,6 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       <header className="worklog-editor-header">
         <div>
           <h1>{t('worklog.editorTitle')}</h1>
-          <p>{t('worklog.editorSubtitle')}</p>
         </div>
         <span className={`worklog-editor-status ${isDirty ? 'is-dirty' : ''}`}>
           {isDirty ? t('worklog.editorUnsaved') : t('common.saved')}

@@ -39,11 +39,20 @@ export class TagService {
   }
 
   search(query: string, pagination?: Pagination): Page<Tag> {
-    const result = this.list({ limit: 200, offset: 0 })
+    const all: Tag[] = []
+    let pageOffset = 0
+    let total = 0
+    do {
+      const page = this.list({ limit: 200, offset: pageOffset })
+      all.push(...page.items)
+      total = page.total
+      pageOffset += page.items.length
+      if (page.items.length === 0) break
+    } while (pageOffset < total)
     const normalized = query.trim().toLowerCase()
     const limit = Math.min(Math.max(pagination?.limit ?? 50, 1), 200)
     const offset = Math.max(pagination?.offset ?? 0, 0)
-    const items = normalized ? result.items.filter((tag) => tag.path.includes(normalized)) : result.items
+    const items = normalized ? all.filter((tag) => tag.path.includes(normalized)) : all
     return { items: items.slice(offset, offset + limit), total: items.length }
   }
 

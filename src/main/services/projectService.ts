@@ -114,6 +114,7 @@ export class ProjectService {
           )
       ) AS activity
       ORDER BY occurred_at DESC, record_id DESC
+      LIMIT 500
     `).all(
       this.context.workspace_id, project.id,
       this.context.workspace_id, project.id,

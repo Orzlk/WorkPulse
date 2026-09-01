@@ -100,7 +100,8 @@ export function parseTagNames(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > MAX_TAG_NAMES) throw invalid('tag_names is invalid')
   const names = value.map((tag) => {
     if (typeof tag !== 'string') throw invalid('tag_names is invalid')
-    const normalized = tag.replace(/^#/, '').replace(/\s+/g, ' ').trim().split('/').map((segment) => segment.trim()).filter(Boolean).join('/').toLowerCase()
+    // 保留原始大小写作为展示名；小写身份键由数据库层 normalizeTagName 统一生成
+    const normalized = tag.replace(/^#/, '').replace(/\s+/g, ' ').trim().split('/').map((segment) => segment.trim()).filter(Boolean).join('/')
     if (!normalized || normalized.length > MAX_TAG_NAME_LENGTH) throw invalid('tag_names is invalid')
     return normalized
   })

@@ -67,6 +67,7 @@ describe('IPC contract validation', () => {
 
   it('normalizes and bounds search tag names before calling the service', () => {
     expect(parseTagNames(['  技术  /  前端 ', '#技术/前端'])).toEqual(['技术/前端'])
+    expect(parseTagNames(['#Vue3', 'vue3'])).toEqual(['Vue3', 'vue3'])
     expect(() => parseTagNames('技术/前端')).toThrow('INVALID_ARGUMENT')
     expect(() => parseTagNames([{}])).toThrow('INVALID_ARGUMENT')
     expect(() => parseTagNames(Array.from({ length: 51 }, () => 'tag'))).toThrow('INVALID_ARGUMENT')

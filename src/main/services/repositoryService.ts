@@ -208,7 +208,8 @@ export class RepositoryService {
       fields.push('scan_interval_minutes = ?')
       values.push(input.scan_interval_minutes)
     }
-    const hasBindingUpdate = localPath !== undefined
+    const currentRepository = localPath === undefined ? null : this.findRow(publicId)
+    const hasBindingUpdate = localPath !== undefined && currentRepository?.local_path !== localPath
     if (fields.length === 0 && !hasBindingUpdate) return this.get(publicId)
 
     const now = new Date().toISOString()
@@ -477,7 +478,7 @@ export class RepositoryScheduler {
   start(): void {
     if (this.timer) return
     this.timer = setInterval(() => {
-      if (this.timer) void this.tick()
+      if (this.timer) void this.tick().catch((error: unknown) => console.error('Repository scheduler tick failed', error))
     }, this.intervalMs)
   }
 

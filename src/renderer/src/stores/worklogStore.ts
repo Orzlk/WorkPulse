@@ -16,11 +16,13 @@ interface WorkLog {
 interface WorkLogStore {
   logs: WorkLog[]
   loading: boolean
+  error: string | null
   hasMore: boolean
   searchKeyword: string
   tagFilter: string
   projectFilter: string
   lastDeleted: WorkLog | null
+  pinnedPublicIds: string[]
   fetchLogs: (tagPath?: string, projectPublicId?: string) => Promise<void>
   loadByPublicId: (publicId: string) => Promise<WorkLog | null>
   loadMore: () => Promise<void>
@@ -36,24 +38,29 @@ interface WorkLogStore {
 }
 
 const PAGE_SIZE = 50
-const searchGate = createLatestRequestGate()
+const requestGate = createLatestRequestGate()
 
 export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   logs: [],
   loading: false,
+  error: null,
   hasMore: true,
   searchKeyword: '',
   tagFilter: '',
   projectFilter: '',
   lastDeleted: null,
+  pinnedPublicIds: [],
 
   fetchLogs: async (tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
+    const requestId = requestGate.next()
     set({ loading: true, tagFilter: tagPath, projectFilter: projectPublicId })
     try {
       const logs = await window.api.worklog.list(PAGE_SIZE, 0, tagPath || undefined, projectPublicId || undefined)
-      set({ logs, hasMore: logs.length >= PAGE_SIZE })
+      if (requestGate.isCurrent(requestId)) set({ logs, hasMore: logs.length >= PAGE_SIZE, error: null, pinnedPublicIds: [] })
+    } catch (error) {
+      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '加载日志失败' })
     } finally {
-      set({ loading: false })
+      if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
   },
 
@@ -61,38 +68,44 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     const log = await window.api.worklog.get(publicId)
     if (!log) return null
     set((state) => ({
-      logs: [log, ...state.logs.filter((item) => item.public_id !== log.public_id)].sort((a, b) => b.created_at.localeCompare(a.created_at))
+      logs: [log, ...state.logs.filter((item) => item.public_id !== log.public_id)].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      pinnedPublicIds: state.logs.some((item) => item.public_id === log.public_id) ? state.pinnedPublicIds : [...state.pinnedPublicIds, log.public_id]
     }))
     return log
   },
 
   loadMore: async () => {
     if (get().loading || !get().hasMore || get().searchKeyword) return
+    const requestId = requestGate.next()
+    const offset = Math.max(0, get().logs.length - get().pinnedPublicIds.length)
+    const tagPath = get().tagFilter
+    const projectPublicId = get().projectFilter
     set({ loading: true })
     try {
-      const more = await window.api.worklog.list(PAGE_SIZE, get().logs.length, get().tagFilter || undefined, get().projectFilter || undefined)
-      set({
-        logs: [...get().logs, ...more],
-        hasMore: more.length >= PAGE_SIZE
-      })
+      const more = await window.api.worklog.list(PAGE_SIZE, offset, tagPath || undefined, projectPublicId || undefined)
+      if (requestGate.isCurrent(requestId)) set({ logs: [...get().logs, ...more], hasMore: more.length >= PAGE_SIZE, error: null })
+    } catch (error) {
+      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '加载更多日志失败' })
     } finally {
-      set({ loading: false })
+      if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
   },
 
   searchLogs: async (keyword: string, tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
-    const requestId = searchGate.next()
+    const requestId = requestGate.next()
     set({ loading: true, searchKeyword: keyword, tagFilter: tagPath, projectFilter: projectPublicId })
     try {
       const logs = await window.api.worklog.search(keyword, tagPath || undefined, projectPublicId || undefined)
-      if (searchGate.isCurrent(requestId)) set({ logs })
+      if (requestGate.isCurrent(requestId)) set({ logs, error: null, pinnedPublicIds: [] })
+    } catch (error) {
+      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '搜索日志失败' })
     } finally {
-      if (searchGate.isCurrent(requestId)) set({ loading: false })
+      if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
   },
 
   clearSearch: async () => {
-    searchGate.next()
+    requestGate.next()
     set({ searchKeyword: '' })
     await get().fetchLogs(get().tagFilter, get().projectFilter)
   },

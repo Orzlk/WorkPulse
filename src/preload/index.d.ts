@@ -248,8 +248,9 @@ export interface API {
   }
   taskCreateWindow: {
     open: () => Promise<boolean>
+    setDirty: (isDirty: boolean) => void
     notifyChanged: (publicId: string) => void
-    close: () => void
+    close: (discard?: boolean) => void
   }
   on: {
     quickCreate: (cb: (type: QuickCreateType) => void) => () => void
@@ -288,7 +289,7 @@ export interface API {
     setCategory: (id: number, category: string) => Promise<void>
     update: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<WorkLog | null>
     delete: (id: number) => Promise<boolean>
-    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'>) => Promise<WorkLog>
+    restore: (log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'> & Partial<Pick<WorkLog, 'id' | 'public_id'>>) => Promise<WorkLog>
   }
   stats: {
     get: (days?: number) => Promise<{

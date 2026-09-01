@@ -76,6 +76,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [color, setColor] = useState(PROJECT_COLOR_OPTIONS[0].value)
+  const [createOpen, setCreateOpen] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
@@ -89,9 +90,24 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null)
   const [taskColumns, setTaskColumns] = useState<KanbanColumn[]>([])
   const [taskLoading, setTaskLoading] = useState(false)
+  const projectDrawerRef = useRef<HTMLElement>(null)
+  const projectFocusRestoreRef = useRef<HTMLElement | null>(null)
   const toast = useToast()
   const { t } = useI18n()
   const selectedProject = items.find((project) => project.public_id === selectedProjectId) ?? null
+  const isProjectEditDirty = Boolean(editing && selectedProject && (
+    editName !== selectedProject.name ||
+    editDescription !== selectedProject.description ||
+    editColor !== selectedProject.color
+  ))
+
+  const requestCloseProject = (): boolean => {
+    if (savingEdit) return false
+    if (isProjectEditDirty && !window.confirm(t('workspace.projectEditDiscardConfirm'))) return false
+    setSelectedProjectId(null)
+    setEditing(false)
+    return true
+  }
 
   useEffect(() => { void fetch() }, [])
 
@@ -101,14 +117,11 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
         setProjectMenuId(null)
         return
       }
-      if (event.key === 'Escape' && selectedProjectId && !activeTask) {
-        setSelectedProjectId(null)
-        setEditing(false)
-      }
+      if (event.key === 'Escape' && selectedProjectId && !activeTask) requestCloseProject()
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [activeTask, projectMenuId, selectedProjectId])
+  }, [activeTask, editColor, editDescription, editName, editing, projectMenuId, savingEdit, selectedProjectId])
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent): void => {
@@ -117,6 +130,34 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [])
+
+  useEffect(() => {
+    if (!selectedProjectId) return
+    projectFocusRestoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    requestAnimationFrame(() => projectDrawerRef.current?.focus())
+    const handleTab = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab') return
+      const drawer = projectDrawerRef.current
+      if (!drawer) return
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href]'))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleTab, true)
+    return () => {
+      document.removeEventListener('keydown', handleTab, true)
+      requestAnimationFrame(() => projectFocusRestoreRef.current?.focus())
+      projectFocusRestoreRef.current = null
+    }
+  }, [selectedProjectId])
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -142,6 +183,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
       await create({ name: name.trim(), description: description.trim(), color })
       setName('')
       setDescription('')
+      setCreateOpen(false)
       toast.success(t('workspace.projectCreated'))
     } catch {
       toast.error(t('workspace.projectCreateFailed'))
@@ -277,7 +319,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
   return <div className="workspace-page">
     <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={[{ label: t('nav.projects'), current: true }]} title={t('workspace.projectsTitle')} description={t('workspace.projectsSubtitle')} />
     <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'projects', label: t('nav.projects'), active: true }, { id: 'repositories', label: t('nav.repositories'), onClick: onOpenRepositories }]} />
-    <section className="project-create"><label>{t('workspace.projectName')}<input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('workspace.projectNamePlaceholder')} /></label><label>{t('workspace.projectDescription')}<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('workspace.optional')} /></label><div className="project-color-field"><span>{t('workspace.color')}</span><ProjectColorPicker value={color} onChange={setColor} /></div><button className="primary-action" onClick={() => void submit()} disabled={!name.trim()}><Plus aria-hidden="true" />{t('common.create')}</button></section>
+    <div className="mb-6"><button type="button" className="ui-button ui-button--primary" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" />{t('workspace.newProject')}</button></div>
     {status === 'error' && <div className="inline-error" role="alert">{error ? t(error as Parameters<typeof t>[0]) : ''}<button onClick={() => void fetch()}>{t('common.retry')}</button></div>}
     <section className="project-grid">{items.map((project) => <article className="project-card" key={project.public_id}>
       <div className="project-menu">
@@ -311,9 +353,21 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     {items.length === 0 && status !== 'running' && <div className="empty-state"><FolderKanban aria-hidden="true" /><p>{t('workspace.noProjects')}</p></div>}
     {items.length < total && <button className="load-more" onClick={() => void loadMore()} disabled={status === 'running'}>{t('workspace.loadMore')}</button>}
 
-    {selectedProject && <div className="project-detail-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProject() }}>
-      <aside className="project-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="project-detail-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') closeProject() }}>
-        <header className="project-detail-header"><div><p className="workspace-kicker">{t('workspace.projectDetails')}</p><span className="project-detail-title"><span className="project-detail-color-dot" style={{ backgroundColor: selectedProject.color, '--project-color': selectedProject.color } as CSSProperties} aria-hidden="true" /><h3 id="project-detail-title">{selectedProject.name}</h3></span></div><button type="button" className="project-detail-close" onClick={closeProject} aria-label={t('workspace.closeProject')}><X aria-hidden="true" /></button></header>
+    {createOpen && <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateOpen(false) }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="project-create-title" className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreateOpen(false) } }}>
+        <h2 id="project-create-title" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('workspace.newProject')}</h2>
+        <label className="mt-4 block text-xs font-medium text-zinc-500">{t('workspace.projectName')}<input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void submit()} placeholder={t('workspace.projectNamePlaceholder')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
+        <label className="mt-3 block text-xs font-medium text-zinc-500">{t('workspace.projectDescription')}<input value={description} onChange={(event) => setDescription(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void submit()} placeholder={t('workspace.optional')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
+        <div className="project-color-field mt-3"><span className="text-xs font-medium text-zinc-500">{t('workspace.color')}</span><ProjectColorPicker value={color} onChange={setColor} /></div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" className="ui-button text-xs" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</button>
+          <button type="button" className="ui-button ui-button--primary text-xs" onClick={() => void submit()} disabled={!name.trim()}><Plus className="h-3.5 w-3.5" />{t('common.create')}</button>
+        </div>
+      </div>
+    </div>}
+    {selectedProject && <div className="project-detail-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseProject() }}>
+      <aside ref={projectDrawerRef} className="project-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="project-detail-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestCloseProject() } }}>
+        <header className="project-detail-header"><div><p className="workspace-kicker">{t('workspace.projectDetails')}</p><span className="project-detail-title"><span className="project-detail-color-dot" style={{ backgroundColor: selectedProject.color, '--project-color': selectedProject.color } as CSSProperties} aria-hidden="true" /><h3 id="project-detail-title">{selectedProject.name}</h3></span></div><button type="button" className="project-detail-close" onClick={requestCloseProject} aria-label={t('workspace.closeProject')}><X aria-hidden="true" /></button></header>
         {editing ? <div className="project-detail-edit">
           <label>{t('workspace.projectName')}<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label>
           <label>{t('workspace.projectDescription')}<textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} rows={5} /></label>
@@ -323,7 +377,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
            <p className="project-detail-description">{selectedProject.description || t('workspace.noDescription')}</p>
            <div className="project-detail-metrics" aria-label={t('workspace.projectActivity')}><div><strong>{selectedProject.summary.work_logs}</strong><span>{t('workspace.projectLogs')}</span></div><div><strong>{selectedProject.summary.tasks}</strong><span>{t('workspace.projectTasks')}</span></div><div><strong>{selectedProject.summary.git_commits}</strong><span>{t('workspace.projectCommits')}</span></div><div><strong>{selectedProject.summary.reports}</strong><span>{t('workspace.projectReportsCount')}</span></div></div>
            <ProjectActivityTimeline items={activityItems} status={activityStatus} onRetry={() => setActivityReloadKey((value) => value + 1)} onTaskClick={(publicId) => { void handleOpenTask(publicId) }} />
-           <div className="project-detail-actions"><button type="button" onClick={startEdit}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button><button type="button" className="primary-action" onClick={() => { closeProject(); onOpenReports(selectedProject.public_id) }}><ArrowUpRight aria-hidden="true" />{t('workspace.projectReports')}</button></div>
+            <div className="project-detail-actions"><button type="button" onClick={startEdit}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button><button type="button" className="primary-action" onClick={() => { if (requestCloseProject()) onOpenReports(selectedProject.public_id) }}><ArrowUpRight aria-hidden="true" />{t('workspace.projectReports')}</button></div>
         </>}
       </aside>
     </div>}

@@ -8,6 +8,7 @@ let fetchPromise: Promise<void> | null = null
 interface RepositoryStore {
   items: Repository[]
   total: number
+  pinnedPublicIds: string[]
   status: AsyncStatus
   error: string | null
   fetch: () => Promise<void>
@@ -27,14 +28,14 @@ interface RepositoryStore {
 }
 
 export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
-  items: [], total: 0, status: 'idle', error: null,
+  items: [], total: 0, pinnedPublicIds: [], status: 'idle', error: null,
   fetch: async () => {
     if (fetchPromise) return fetchPromise
     fetchPromise = (async () => {
       set({ status: 'running', error: null })
       try {
         const page = await window.api.repository.list({ limit: PAGE_SIZE, offset: 0 })
-        set({ items: page.items, total: page.total, status: 'success' })
+        set({ items: page.items, total: page.total, pinnedPublicIds: [], status: 'success' })
       } catch (error) {
         set({ status: 'error', error: 'workspace.errorRepositoriesLoad' })
       }
@@ -44,15 +45,23 @@ export const useRepositoryStore = create<RepositoryStore>((set, get) => ({
   loadByPublicId: async (publicId) => {
     const item = await window.api.repository.get(publicId)
     if (!item) return null
-    set((state) => ({ items: [item, ...state.items.filter((current) => current.public_id !== item.public_id)], total: Math.max(state.total, 1), status: 'success' }))
+    set((state) => ({
+      items: [item, ...state.items.filter((current) => current.public_id !== item.public_id)],
+      total: Math.max(state.total, 1),
+      pinnedPublicIds: state.items.some((current) => current.public_id === item.public_id)
+        ? state.pinnedPublicIds
+        : [...state.pinnedPublicIds, item.public_id],
+      status: 'success'
+    }))
     return item
   },
   loadMore: async () => {
     const state = get()
-    if (state.status === 'running' || state.items.length >= state.total) return
+    const offset = Math.max(0, state.items.length - state.pinnedPublicIds.length)
+    if (state.status === 'running' || offset >= state.total) return
     set({ status: 'running', error: null })
     try {
-      const page = await window.api.repository.list({ limit: PAGE_SIZE, offset: state.items.length })
+      const page = await window.api.repository.list({ limit: PAGE_SIZE, offset })
       const merged = mergePage(state.items, page.items, page.total)
       set({ ...merged, total: page.total, status: 'success' })
     } catch (error) {

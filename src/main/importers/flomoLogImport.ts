@@ -19,6 +19,7 @@ export interface FlomoLogWriter {
   ) => unknown
   workLogExists: (content: string, category: string, dateStr?: string) => boolean
   listWorkLogs?: () => FlomoLogRecord[]
+  addWorkLogsBatch?: (records: Array<{ content: string; category?: string; taskId?: number | null; createdAt?: string; associations?: { tagNames?: string[] } }>) => unknown
 }
 
 export interface FlomoLogRecord {
@@ -58,6 +59,7 @@ export function importFlomoMemos(
   let attachmentsImported = 0
   let attachmentsSkipped = 0
   const existingLogs = options && writer.listWorkLogs ? writer.listWorkLogs() : []
+  const pending: Array<{ content: string; category: string; taskId: null; createdAt: string; associations: { tagNames: string[] } }> = []
 
   for (const memo of memos) {
     const isDuplicate = writer.workLogExists(memo.content, '', memo.createdAt) || existingLogs.some((log) => (
@@ -71,12 +73,15 @@ export function importFlomoMemos(
     }
 
     const attachmentResult = options ? importAttachments(memo, options) : { content: memo.content, imported: 0, skipped: 0 }
-    writer.addWorkLog(attachmentResult.content, '', null, memo.createdAt, { tagNames: memo.tagNames })
+    pending.push({ content: attachmentResult.content, category: '', taskId: null, createdAt: memo.createdAt, associations: { tagNames: memo.tagNames } })
     imported++
     attachmentsImported += attachmentResult.imported
     attachmentsSkipped += attachmentResult.skipped
     existingLogs.push({ content: attachmentResult.content, category: '', created_at: memo.createdAt })
   }
+
+  if (writer.addWorkLogsBatch) writer.addWorkLogsBatch(pending)
+  else pending.forEach((record) => writer.addWorkLog(record.content, record.category, record.taskId, record.createdAt, record.associations))
 
   return { imported, skipped, attachmentsImported, attachmentsSkipped }
 }

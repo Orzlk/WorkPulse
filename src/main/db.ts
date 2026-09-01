@@ -4,9 +4,9 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'node:crypto'
 
-import { backupDatabase, getDatabaseVersion, initializeDatabase, runMigrations } from './database/connection'
+import { backupDatabase, getDatabaseVersion, initializeDatabase, pruneBackups, runMigrations } from './database/connection'
 import type { WorkspaceContext } from './repositories/contracts'
-import { normalizeTagName } from './repositories/localTagRepository'
+import { displayTagName, normalizeTagName } from './repositories/localTagRepository'
 import { assertStatsDays, DEFAULT_STATS_DAYS } from './lib/stats'
 import { buildFtsQuery } from './search/ftsQuery'
 import { isTaskPriority, normalizeChecklist, parseChecklist, type TaskChecklistItem, type TaskPriority } from './kanban/kanbanTypes'
@@ -20,6 +20,19 @@ function formatLocalDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function getLocalDayBounds(value: string): { fromUtc: string; toUtc: string } | null {
+  const datePart = value.slice(0, 10)
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart)
+  if (!match) return null
+  const localStart = new Date()
+  localStart.setHours(0, 0, 0, 0)
+  localStart.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  if (formatLocalDate(localStart) !== datePart) return null
+  const localEnd = new Date(localStart)
+  localEnd.setDate(localEnd.getDate() + 1)
+  return { fromUtc: localStart.toISOString(), toUtc: localEnd.toISOString() }
 }
 
 function getDbPath(): string {
@@ -84,6 +97,7 @@ export async function initDatabase(): Promise<void> {
     dbPath,
     async (database) => {
       await backupDatabase(database, getBackupPath(getDatabaseVersion(database)))
+      pruneBackups(join(app.getPath('userData'), 'backups'))
     },
     (database) => runMigrations(database)
   )
@@ -91,10 +105,29 @@ export async function initDatabase(): Promise<void> {
   if (!runIntegrityCheck()) {
     throw new Error('Database integrity check failed')
   }
+  cleanupSyncOperations()
 }
 
 export function getDatabase(): Database.Database {
   return db
+}
+
+/** The local outbox has no remote consumer yet; bound terminal history without dropping pending work. */
+export function cleanupSyncOperations(): number {
+  const result = db.prepare(`
+    DELETE FROM sync_operations
+    WHERE (completed_at IS NOT NULL AND completed_at < datetime('now', '-30 days'))
+       OR (failed_at IS NOT NULL AND failed_at < datetime('now', '-90 days'))
+       OR (
+         (completed_at IS NOT NULL OR failed_at IS NOT NULL)
+         AND id NOT IN (
+           SELECT id FROM sync_operations
+           WHERE completed_at IS NOT NULL OR failed_at IS NOT NULL
+           ORDER BY id DESC LIMIT 5000
+         )
+       )
+  `).run()
+  return result.changes
 }
 
 export function getDefaultWorkspaceContext(): WorkspaceContext {
@@ -267,17 +300,23 @@ function associationPatch(associations: WorkItemAssociations): Record<string, un
 
 function ensureTagIds(names: string[], workspaceId: number, userId: number, now: string): number[] {
   const ids: number[] = []
-  for (const rawName of Array.from(new Set(names.map((name) => normalizeTagName(name))))) {
-    const existing = db.prepare('SELECT id, public_id, deleted_at FROM tags WHERE workspace_id = ? AND path = ?').get(workspaceId, rawName) as { id: number; public_id: string; deleted_at: string | null } | undefined
+  for (const rawName of Array.from(new Set(names))) {
+    const path = normalizeTagName(rawName)
+    const display = displayTagName(rawName)
+    const existing = db.prepare('SELECT id, public_id, deleted_at, display_path FROM tags WHERE workspace_id = ? AND path = ?').get(workspaceId, path) as { id: number; public_id: string; deleted_at: string | null; display_path: string | null } | undefined
     let tagId = existing?.id
     if (existing && tagId && existing.deleted_at !== null) {
       db.prepare('UPDATE tags SET deleted_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?').run(now, tagId, workspaceId)
-      db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, existing.public_id, JSON.stringify({ public_id: existing.public_id, path: rawName, deleted_at: null }), now, now)
+      db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, existing.public_id, JSON.stringify({ public_id: existing.public_id, path, display_path: existing.display_path ?? display, deleted_at: null }), now, now)
+    }
+    // 老数据（迁移回填前 display_path 为 NULL）：首次再次使用时以当次输入的大小写作为展示名
+    if (existing && tagId && existing.display_path == null) {
+      db.prepare('UPDATE tags SET display_path = ?, updated_at = ? WHERE id = ? AND workspace_id = ?').run(display, now, tagId, workspaceId)
     }
     if (!tagId) {
-      const tag = db.prepare(`INSERT INTO tags (public_id, workspace_id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id, public_id`).get(randomUUID(), workspaceId, rawName, rawName, now, now) as { id: number; public_id: string }
+      const tag = db.prepare(`INSERT INTO tags (public_id, workspace_id, name, path, display_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, public_id`).get(randomUUID(), workspaceId, display, path, display, now, now) as { id: number; public_id: string }
       tagId = tag.id
-      db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'create', ?, ?, ?)`).run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path: rawName }), now, now)
+      db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, 'tag', ?, 'create', ?, ?, ?)`).run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path, display_path: display }), now, now)
     }
     ids.push(tagId)
   }
@@ -349,21 +388,42 @@ function setEntityTags(linkTable: 'work_log_tags' | 'task_tags', entityColumn: '
 }
 
 function tagNames(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_log_id' | 'task_id', entityId: number): string[] {
-  const rows = db.prepare(`SELECT tags.path FROM ${linkTable} INNER JOIN tags ON tags.id = ${linkTable}.tag_id WHERE ${linkTable}.${entityColumn} = ? AND tags.deleted_at IS NULL ORDER BY tags.path`).all(entityId) as Array<{ path: string }>
-  return rows.map((row) => row.path)
+  const rows = db.prepare(`SELECT COALESCE(tags.display_path, tags.path) AS name FROM ${linkTable} INNER JOIN tags ON tags.id = ${linkTable}.tag_id WHERE ${linkTable}.${entityColumn} = ? AND tags.deleted_at IS NULL ORDER BY tags.path`).all(entityId) as Array<{ name: string }>
+  return rows.map((row) => row.name)
 }
 
 function restoreEntityTags(linkTable: 'work_log_tags' | 'task_tags', entityColumn: 'work_log_id' | 'task_id', entityId: number, workspaceId: number, now: string): void {
-  const tags = db.prepare(`SELECT tags.id, tags.public_id, tags.path FROM ${linkTable} INNER JOIN tags ON tags.id = ${linkTable}.tag_id WHERE ${linkTable}.${entityColumn} = ? AND tags.workspace_id = ? AND tags.deleted_at IS NOT NULL`).all(entityId, workspaceId) as Array<{ id: number; public_id: string; path: string }>
+  const tags = db.prepare(`SELECT tags.id, tags.public_id, tags.path, COALESCE(tags.display_path, tags.path) AS display FROM ${linkTable} INNER JOIN tags ON tags.id = ${linkTable}.tag_id WHERE ${linkTable}.${entityColumn} = ? AND tags.workspace_id = ? AND tags.deleted_at IS NOT NULL`).all(entityId, workspaceId) as Array<{ id: number; public_id: string; path: string; display: string }>
   const restore = db.prepare('UPDATE tags SET deleted_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?')
   for (const tag of tags) {
     restore.run(now, tag.id, workspaceId)
-    db.prepare('INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, \'tag\', ?, \'update\', ?, ?, ?)').run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path: tag.path, deleted_at: null }), now, now)
+    db.prepare('INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, \'tag\', ?, \'update\', ?, ?, ?)').run(randomUUID(), workspaceId, tag.public_id, JSON.stringify({ public_id: tag.public_id, path: tag.path, display_path: tag.display, deleted_at: null }), now, now)
   }
 }
 
-function enqueueEntitySync(entityType: 'work_log' | 'task', entityPublicId: string, payload: unknown, workspaceId: number, now: string): void {
-  db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, ?, ?, 'update', ?, ?, ?)`).run(randomUUID(), workspaceId, entityType, entityPublicId, JSON.stringify(payload), now, now)
+function enqueueEntitySync(entityType: 'work_log' | 'task' | 'kanban_column', entityPublicId: string, payload: unknown, workspaceId: number, now: string, operationType: 'create' | 'update' | 'delete' = 'update'): void {
+  db.prepare(`INSERT INTO sync_operations (public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(randomUUID(), workspaceId, entityType, entityPublicId, operationType, JSON.stringify(payload), now, now)
+}
+
+export interface NewWorkLogInput {
+  content: string
+  category?: string
+  taskId?: number | null
+  createdAt?: string
+  associations?: WorkItemAssociations
+}
+
+function insertWorkLog(input: NewWorkLogInput, metadata: WriteMetadata): string {
+  const resolvedTaskId = resolveWorkLogTaskId(input.taskId ?? null, metadata.workspaceId)
+  const associations = input.associations ?? {}
+  const projectId = resolveProjectId(associations.projectId, metadata.workspaceId)
+  const result = db.prepare(
+    `INSERT INTO work_logs (content, category, task_id, project_id, created_at, updated_at, public_id, workspace_id, created_by, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(input.content, input.category ?? '', resolvedTaskId, projectId ?? null, metadata.timestamp, metadata.timestamp, metadata.publicId, metadata.workspaceId, metadata.userId, metadata.userId)
+  setEntityTags('work_log_tags', 'work_log_id', Number(result.lastInsertRowid), metadata.publicId, associations.tagNames, metadata.workspaceId, metadata.userId, metadata.timestamp)
+  enqueueEntitySync('work_log', metadata.publicId, { content: input.content, category: input.category ?? '', ...associationPatch(associations) }, metadata.workspaceId, metadata.timestamp, 'create')
+  return metadata.publicId
 }
 
 function resolveWorkLogTaskId(taskId: number | null, workspaceId: number): number | null {
@@ -381,30 +441,18 @@ export function addWorkLog(
 ): WorkLog {
   const metadata = getWriteMetadata(createdAt)
   const create = db.transaction(() => {
-    const resolvedTaskId = resolveWorkLogTaskId(taskId, metadata.workspaceId)
-    const projectId = resolveProjectId(associations.projectId, metadata.workspaceId)
-    const result = db.prepare(
-      `INSERT INTO work_logs (
-        content, category, task_id, project_id, created_at, updated_at,
-        public_id, workspace_id, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      content,
-      category,
-      resolvedTaskId,
-      projectId ?? null,
-      metadata.timestamp,
-      metadata.timestamp,
-      metadata.publicId,
-      metadata.workspaceId,
-      metadata.userId,
-      metadata.userId
-    )
-    setEntityTags('work_log_tags', 'work_log_id', Number(result.lastInsertRowid), metadata.publicId, associations.tagNames, metadata.workspaceId, metadata.userId, metadata.timestamp)
-    enqueueEntitySync('work_log', metadata.publicId, associationPatch(associations), metadata.workspaceId, metadata.timestamp)
-    return metadata.publicId
+    return insertWorkLog({ content, category, taskId, createdAt, associations }, metadata)
   })
   return getWorkLogById(create(), metadata.workspaceId)!
+}
+
+export function addWorkLogsBatch(inputs: NewWorkLogInput[]): WorkLog[] {
+  if (inputs.length === 0) return []
+  const publicIds = db.transaction(() => inputs.map((input) => {
+    const metadata = getWriteMetadata(input.createdAt)
+    return insertWorkLog(input, metadata)
+  }))()
+  return publicIds.map((publicId) => getWorkLogByPublicId(publicId)).filter((log): log is WorkLog => log !== null)
 }
 
 function getWorkLogById(publicId: string, workspaceId: number): WorkLog | null {
@@ -481,7 +529,10 @@ export function getWorkLogs(limit = 200, offset = 0, tagPath?: string, projectPu
 
 export function getWorkLogsByDateRange(from: string, to: string): WorkLog[] {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const rows = db.prepare('SELECT public_id FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND date(created_at) >= date(?) AND date(created_at) <= date(?) ORDER BY created_at ASC').all(workspaceId, from, to) as Array<{ public_id: string }>
+  const fromBounds = getLocalDayBounds(from)
+  const toBounds = getLocalDayBounds(to)
+  if (!fromBounds || !toBounds || fromBounds.fromUtc > toBounds.fromUtc) return []
+  const rows = db.prepare('SELECT public_id FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND created_at >= ? AND created_at < ? ORDER BY created_at ASC').all(workspaceId, fromBounds.fromUtc, toBounds.toUtc) as Array<{ public_id: string }>
   return rows.map((row) => getWorkLogById(row.public_id, workspaceId)).filter((row): row is WorkLog => row !== null)
 }
 
@@ -531,10 +582,12 @@ export function searchWorkLogs(keyword: string, limit = 200, tagPath?: string, p
 export function workLogExists(content: string, category: string, dateStr?: string): boolean {
   const workspaceId = getDefaultWorkspaceContext().workspace_id
   if (dateStr) {
+    const bounds = getLocalDayBounds(dateStr)
+    if (!bounds) return false
     const stmt = db.prepare(
-      'SELECT 1 FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND content = ? AND category = ? AND date(created_at) = date(?) LIMIT 1'
+      'SELECT 1 FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND content = ? AND category = ? AND created_at >= ? AND created_at < ? LIMIT 1'
     )
-    return !!stmt.get(workspaceId, content, category, dateStr)
+    return !!stmt.get(workspaceId, content, category, bounds.fromUtc, bounds.toUtc)
   }
   const stmt = db.prepare(
     'SELECT 1 FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND content = ? AND category = ? LIMIT 1'
@@ -543,20 +596,37 @@ export function workLogExists(content: string, category: string, dateStr?: strin
 }
 
 export function deleteWorkLog(id: number): boolean {
-  const workspaceId = getDefaultWorkspaceContext().workspace_id
-  const now = new Date().toISOString()
+  const metadata = getWriteMetadata()
+  const workspaceId = metadata.workspaceId
+  const now = metadata.timestamp
   return db.transaction(() => {
-    const result = db.prepare('DELETE FROM work_logs WHERE id = ? AND workspace_id = ?').run(id, workspaceId)
-    if (result.changes > 0) cleanupUnusedTags(workspaceId, now)
+    const row = db.prepare('SELECT public_id, content, category FROM work_logs WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, workspaceId) as { public_id: string; content: string; category: string } | undefined
+    if (!row) return false
+    const result = db.prepare('UPDATE work_logs SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').run(now, now, metadata.userId, id, workspaceId)
+    if (result.changes > 0) {
+      enqueueEntitySync('work_log', row.public_id, { public_id: row.public_id, content: row.content, category: row.category, deleted_at: now }, workspaceId, now, 'delete')
+      cleanupUnusedTags(workspaceId, now)
+    }
     return result.changes > 0
   })()
 }
 
-export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'>): WorkLog {
-  return addWorkLog(log.content, log.category, log.task_id, log.created_at, {
-    projectId: log.project_id,
-    tagNames: log.tag_names
-  })
+export function restoreWorkLog(log: Pick<WorkLog, 'content' | 'category' | 'created_at' | 'task_id' | 'project_id' | 'tag_names'> & Partial<Pick<WorkLog, 'id' | 'public_id'>>): WorkLog {
+  const metadata = getWriteMetadata()
+  if (log.id !== undefined) {
+    const logId = log.id
+    const restored = db.transaction(() => {
+      const result = db.prepare('UPDATE work_logs SET deleted_at = NULL, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL').run(metadata.timestamp, metadata.userId, logId, metadata.workspaceId)
+      if (!result.changes) return null
+      restoreEntityTags('work_log_tags', 'work_log_id', logId, metadata.workspaceId, metadata.timestamp)
+      const row = db.prepare('SELECT public_id FROM work_logs WHERE id = ? AND workspace_id = ?').get(logId, metadata.workspaceId) as { public_id: string }
+      enqueueEntitySync('work_log', row.public_id, { deleted_at: null }, metadata.workspaceId, metadata.timestamp)
+      return row.public_id
+    })()
+    const publicId = restored ?? log.public_id
+    if (publicId) return getWorkLogByPublicId(publicId) ?? addWorkLog(log.content, log.category, log.task_id, log.created_at, { projectId: log.project_id, tagNames: log.tag_names })
+  }
+  return addWorkLog(log.content, log.category, log.task_id, log.created_at, { projectId: log.project_id, tagNames: log.tag_names })
 }
 
 // --- Reports CRUD ---
@@ -662,7 +732,7 @@ export function addTask(title: string, description = '', status: 'todo' | 'draft
       dueDate ?? null
     )
     setEntityTags('task_tags', 'task_id', Number(result.lastInsertRowid), metadata.publicId, associations.tagNames, metadata.workspaceId, metadata.userId, metadata.timestamp)
-    enqueueEntitySync('task', metadata.publicId, { ...associationPatch(associations), due_date: dueDate ?? null, priority: normalizedPriority, checklist: normalizeChecklist(checklist) }, metadata.workspaceId, metadata.timestamp)
+    enqueueEntitySync('task', metadata.publicId, { title, description, status, board_column: status, ...associationPatch(associations), due_date: dueDate ?? null, priority: normalizedPriority, checklist: normalizeChecklist(checklist) }, metadata.workspaceId, metadata.timestamp, 'create')
     return metadata.publicId
   })
   return getTaskByPublicId(create())!
@@ -728,8 +798,12 @@ export function updateTask(
 
     if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title) }
     if (updates.description !== undefined) { fields.push('description = ?'); values.push(updates.description) }
-    if (updates.board_column !== undefined) { fields.push('board_column = ?'); values.push(updates.board_column) }
+    if (updates.board_column !== undefined) {
+      assertBoardColumn(updates.board_column, metadata.workspaceId)
+      fields.push('board_column = ?'); values.push(updates.board_column)
+    }
     if (updates.status !== undefined) {
+      assertTaskStatus(updates.status)
       if (updates.board_column === undefined) { fields.push('board_column = ?'); values.push(updates.status) }
       fields.push('status = ?')
       values.push(updates.status)
@@ -771,8 +845,13 @@ export function updateTask(
 export function deleteTask(id: number): boolean {
   const metadata = getWriteMetadata()
   return db.transaction(() => {
+    const row = db.prepare('SELECT public_id, title FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, metadata.workspaceId) as { public_id: string; title: string } | undefined
+    if (!row) return false
     const deleted = db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').run(metadata.timestamp, metadata.timestamp, metadata.userId, id, metadata.workspaceId).changes > 0
-    if (deleted) cleanupUnusedTags(metadata.workspaceId, metadata.timestamp)
+    if (deleted) {
+      enqueueEntitySync('task', row.public_id, { public_id: row.public_id, title: row.title, deleted_at: metadata.timestamp }, metadata.workspaceId, metadata.timestamp, 'delete')
+      cleanupUnusedTags(metadata.workspaceId, metadata.timestamp)
+    }
     return deleted
   })()
 }
@@ -781,7 +860,11 @@ export function restoreTask(id: number): Task | null {
   const metadata = getWriteMetadata()
   const restored = db.transaction(() => {
     const result = db.prepare('UPDATE tasks SET deleted_at = NULL, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL').run(metadata.timestamp, metadata.userId, id, metadata.workspaceId)
-    if (result.changes > 0) restoreEntityTags('task_tags', 'task_id', id, metadata.workspaceId, metadata.timestamp)
+    if (result.changes > 0) {
+      restoreEntityTags('task_tags', 'task_id', id, metadata.workspaceId, metadata.timestamp)
+      const row = db.prepare('SELECT public_id FROM tasks WHERE id = ? AND workspace_id = ?').get(id, metadata.workspaceId) as { public_id: string }
+      enqueueEntitySync('task', row.public_id, { deleted_at: null }, metadata.workspaceId, metadata.timestamp)
+    }
     return result.changes > 0
   })()
   return restored ? getTaskById(metadata.workspaceId, id) : null
@@ -796,6 +879,10 @@ export function reorderTasks(
   sourceStatus?: Task['status']
 ): void {
   const metadata = getWriteMetadata()
+  assertBoardColumn(boardColumn, metadata.workspaceId)
+  assertTaskStatus(status)
+  if (sourceBoardColumn) assertBoardColumn(sourceBoardColumn, metadata.workspaceId)
+  if (sourceStatus) assertTaskStatus(sourceStatus)
   const stmt = db.prepare(`
     UPDATE tasks
     SET
@@ -811,7 +898,11 @@ export function reorderTasks(
     groups.forEach(({ ids, column, taskStatus }) => ids.forEach((id, index) => {
       const current = db.prepare('SELECT completed_at FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, metadata.workspaceId) as { completed_at: string | null } | undefined
       const completedAt = taskStatus === 'done' ? current?.completed_at ?? metadata.timestamp : null
-      stmt.run(index, column, taskStatus, metadata.timestamp, metadata.userId, completedAt, id, metadata.workspaceId)
+      const result = stmt.run(index, column, taskStatus, metadata.timestamp, metadata.userId, completedAt, id, metadata.workspaceId)
+      if (result.changes > 0) {
+        const row = db.prepare('SELECT public_id FROM tasks WHERE id = ? AND workspace_id = ?').get(id, metadata.workspaceId) as { public_id: string }
+        enqueueEntitySync('task', row.public_id, { board_column: column, status: taskStatus, position: index }, metadata.workspaceId, metadata.timestamp)
+      }
     }))
   })
   const groups = [{ ids: taskIds, column: boardColumn, taskStatus: status }]
@@ -819,6 +910,29 @@ export function reorderTasks(
     groups.push({ ids: sourceTaskIds, column: sourceBoardColumn, taskStatus: sourceStatus ?? (sourceBoardColumn as Task['status']) })
   }
   tx(groups)
+}
+
+function assertBoardColumn(column: string, workspaceId: number): void {
+  if (column === 'draft') return
+  const exists = db.prepare('SELECT 1 FROM kanban_columns WHERE workspace_id = ? AND column_key = ?').get(workspaceId, column)
+  if (!exists) throw new Error('Kanban column is invalid')
+}
+
+function assertTaskStatus(status: string): asserts status is Task['status'] {
+  if (!['todo', 'in_progress', 'done', 'draft'].includes(status)) throw new Error('Task status is invalid')
+}
+
+export function completeTask(id: number, logContent: string): Task | null {
+  const metadata = getWriteMetadata()
+  const publicId = db.transaction(() => {
+    const updated = db.prepare(`UPDATE tasks SET status = 'done', board_column = 'done', completed_at = COALESCE(completed_at, ?), updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`).run(metadata.timestamp, metadata.timestamp, metadata.userId, id, metadata.workspaceId)
+    if (!updated.changes) return null
+    const task = db.prepare('SELECT public_id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, metadata.workspaceId) as { public_id: string }
+    if (logContent.trim()) insertWorkLog({ content: logContent.trim(), category: '', taskId: id }, { ...metadata, publicId: randomUUID() })
+    enqueueEntitySync('task', task.public_id, { status: 'done', board_column: 'done', completed_at: metadata.timestamp }, metadata.workspaceId, metadata.timestamp)
+    return task.public_id
+  })()
+  return publicId ? getTaskByPublicId(publicId) : null
 }
 
 export interface KanbanColumn {
@@ -846,11 +960,15 @@ export function createKanbanColumn(name: string): KanbanColumn {
   if (!normalizedName) throw new Error('Kanban column name is required')
   const metadata = getWriteMetadata()
   const columnKey = `custom_${randomUUID()}`
+  const publicId = randomUUID()
   const position = (db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM kanban_columns WHERE workspace_id = ?').get(metadata.workspaceId) as { next: number }).next
-  db.prepare(`
-    INSERT INTO kanban_columns (public_id, workspace_id, column_key, name, status, position, is_system, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'in_progress', ?, 0, ?, ?)
-  `).run(randomUUID(), metadata.workspaceId, columnKey, normalizedName, position, metadata.timestamp, metadata.timestamp)
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO kanban_columns (public_id, workspace_id, column_key, name, status, position, is_system, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'in_progress', ?, 0, ?, ?)
+    `).run(publicId, metadata.workspaceId, columnKey, normalizedName, position, metadata.timestamp, metadata.timestamp)
+    enqueueEntitySync('kanban_column', publicId, { public_id: publicId, column_key: columnKey, name: normalizedName, status: 'in_progress', position }, metadata.workspaceId, metadata.timestamp, 'create')
+  })()
   return getKanbanColumns().find((column) => column.column_key === columnKey)!
 }
 
@@ -858,7 +976,14 @@ export function updateKanbanColumn(publicId: string, name: string): KanbanColumn
   const normalizedName = name.trim()
   if (!normalizedName) throw new Error('Kanban column name is required')
   const metadata = getWriteMetadata()
-  db.prepare('UPDATE kanban_columns SET name = ?, updated_at = ? WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(normalizedName, metadata.timestamp, publicId, metadata.workspaceId)
+  const updated = db.transaction(() => {
+    const column = db.prepare('SELECT column_key, status, position FROM kanban_columns WHERE public_id = ? AND workspace_id = ? AND is_system = 0').get(publicId, metadata.workspaceId) as { column_key: string; status: KanbanColumn['status']; position: number } | undefined
+    if (!column) return false
+    db.prepare('UPDATE kanban_columns SET name = ?, updated_at = ? WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(normalizedName, metadata.timestamp, publicId, metadata.workspaceId)
+    enqueueEntitySync('kanban_column', publicId, { public_id: publicId, column_key: column.column_key, name: normalizedName, status: column.status, position: column.position }, metadata.workspaceId, metadata.timestamp)
+    return true
+  })()
+  if (!updated) return null
   return getKanbanColumns().find((column) => column.public_id === publicId) ?? null
 }
 
@@ -867,8 +992,12 @@ export function deleteKanbanColumn(publicId: string): boolean {
   return db.transaction(() => {
     const column = db.prepare('SELECT column_key, is_system FROM kanban_columns WHERE public_id = ? AND workspace_id = ?').get(publicId, metadata.workspaceId) as { column_key: string; is_system: number } | undefined
     if (!column || column.is_system === 1) return false
+    const tasks = db.prepare('SELECT public_id FROM tasks WHERE workspace_id = ? AND board_column = ? AND deleted_at IS NULL').all(metadata.workspaceId, column.column_key) as Array<{ public_id: string }>
     db.prepare("UPDATE tasks SET board_column = 'todo', status = 'todo', updated_at = ?, updated_by = ? WHERE workspace_id = ? AND board_column = ? AND deleted_at IS NULL").run(metadata.timestamp, metadata.userId, metadata.workspaceId, column.column_key)
-    return db.prepare('DELETE FROM kanban_columns WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(publicId, metadata.workspaceId).changes > 0
+    tasks.forEach((task) => enqueueEntitySync('task', task.public_id, { board_column: 'todo', status: 'todo' }, metadata.workspaceId, metadata.timestamp))
+    const deleted = db.prepare('DELETE FROM kanban_columns WHERE public_id = ? AND workspace_id = ? AND is_system = 0').run(publicId, metadata.workspaceId).changes > 0
+    if (deleted) enqueueEntitySync('kanban_column', publicId, { public_id: publicId, column_key: column.column_key, deleted_at: metadata.timestamp }, metadata.workspaceId, metadata.timestamp, 'delete')
+    return deleted
   })()
 }
 
@@ -888,33 +1017,36 @@ export function getStats(days = DEFAULT_STATS_DAYS, context: WorkspaceContext = 
   streak: number
 } {
   const validatedDays = assertStatsDays(days)
-  const fromUtc = new Date(Date.now() - validatedDays * 24 * 60 * 60 * 1000).toISOString()
-  const daily = db.prepare(`
-    SELECT date(created_at) as date, COUNT(*) as log_count, 0 as task_completed
-    FROM work_logs
-    WHERE workspace_id = ? AND deleted_at IS NULL AND created_at >= ?
-    GROUP BY date(created_at)
-    ORDER BY date ASC
-  `).all(context.workspace_id, fromUtc) as DailyStats[]
+  const localStart = new Date()
+  localStart.setHours(0, 0, 0, 0)
+  localStart.setDate(localStart.getDate() - validatedDays)
+  const fromUtc = localStart.toISOString()
+  const dailyMap = new Map<string, DailyStats>()
+  const logDates = new Set<string>()
+  const localDate = (value: string): string => formatLocalDate(new Date(value))
+  const logs = db.prepare('SELECT created_at FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL AND created_at >= ?').all(context.workspace_id, fromUtc) as Array<{ created_at: string }>
+  logs.forEach((log) => {
+    const date = localDate(log.created_at)
+    logDates.add(date)
+    const current = dailyMap.get(date) ?? { date, log_count: 0, task_completed: 0 }
+    current.log_count++
+    dailyMap.set(date, current)
+  })
 
   // Merge completed tasks per day
   const taskDone = db.prepare(`
-    SELECT date(completed_at) as date, COUNT(*) as cnt
+    SELECT completed_at
     FROM tasks
     WHERE workspace_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at >= ?
-    GROUP BY date(completed_at)
-  `).all(context.workspace_id, fromUtc) as { date: string; cnt: number }[]
-
-  const doneMap = new Map(taskDone.map((r) => [r.date, r.cnt]))
-  for (const d of daily) {
-    d.task_completed = doneMap.get(d.date) || 0
-  }
-  // Add days that only have completed tasks but no logs
-  doneMap.forEach((cnt, date) => {
-    if (!daily.find((d) => d.date === date)) {
-      daily.push({ date, log_count: 0, task_completed: cnt })
-    }
+  `).all(context.workspace_id, fromUtc) as Array<{ completed_at: string }>
+  taskDone.forEach((task) => {
+    const date = localDate(task.completed_at)
+    const current = dailyMap.get(date) ?? { date, log_count: 0, task_completed: 0 }
+    current.task_completed++
+    dailyMap.set(date, current)
   })
+  const daily: DailyStats[] = []
+  dailyMap.forEach((value) => daily.push(value))
   daily.sort((a, b) => a.date.localeCompare(b.date))
 
   const totalLogs = (db.prepare('SELECT COUNT(*) as c FROM work_logs WHERE workspace_id = ? AND deleted_at IS NULL').get(context.workspace_id) as { c: number }).c
@@ -925,7 +1057,6 @@ export function getStats(days = DEFAULT_STATS_DAYS, context: WorkspaceContext = 
   let streak = 0
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const logDates = new Set(daily.map((d) => d.date))
   for (let i = 0; i <= validatedDays; i++) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
@@ -959,8 +1090,12 @@ export function getCategories(): string[] {
 
 export function updateWorkLogCategory(id: number, category: string): void {
   const metadata = getWriteMetadata()
-  db.prepare('UPDATE work_logs SET category = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+  const update = db.prepare('UPDATE work_logs SET category = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
     .run(category, metadata.timestamp, metadata.userId, id, metadata.workspaceId)
+  if (update.changes > 0) {
+    const row = db.prepare('SELECT public_id FROM work_logs WHERE id = ? AND workspace_id = ?').get(id, metadata.workspaceId) as { public_id: string }
+    enqueueEntitySync('work_log', row.public_id, { category }, metadata.workspaceId, metadata.timestamp)
+  }
 }
 
 export function updateWorkLog(id: number, content: string, category: string, created_at?: string, associations: WorkItemAssociations = {}): WorkLog | null {

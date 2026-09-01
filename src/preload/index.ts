@@ -247,11 +247,14 @@ const api = {
   },
   taskCreateWindow: {
     open: () => ipcRenderer.invoke('task-create:open') as Promise<boolean>,
+    setDirty: (isDirty: boolean) => {
+      ipcRenderer.send('task-create:set-dirty', isDirty)
+    },
     notifyChanged: (publicId: string) => {
       ipcRenderer.send('task-create:changed', publicId)
     },
-    close: () => {
-      ipcRenderer.send('task-create:close')
+    close: (discard = false) => {
+      ipcRenderer.send('task-create:close', discard)
     }
   },
   worklog: {

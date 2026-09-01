@@ -21,4 +21,10 @@ describe('repository management cards', () => {
     expect(styles).not.toMatch(/\.repository-card:hover\s*\{[^}]*width:/s)
     expect(styles).not.toMatch(/\.repository-card:hover\s*\{[^}]*padding-/s)
   })
+
+  it('protects repository edit drafts and warns before discarding changes', () => {
+    expect(page).toContain('const isEditDirty =')
+    expect(page).toContain('requestCloseEdit')
+    expect(page).toContain('repositoryEditDiscardConfirm')
+  })
 })

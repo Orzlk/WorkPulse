@@ -37,11 +37,24 @@ export function normalizeTagName(value: string): string {
   return path
 }
 
+/** 与 normalizeTagName 相同的清洗规则，但保留原始大小写作为展示名。 */
+export function displayTagName(value: string): string {
+  const withoutHash = value.trim().replace(/^#/, '')
+  const display = withoutHash
+    .split('/')
+    .map((segment) => segment.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join('/')
+  if (!display) throw new Error('Tag name is required')
+  return display
+}
+
 function toTag(row: Record<string, unknown>): Tag {
+  const path = row.path as string
   return {
     public_id: row.public_id as string,
-    name: row.name as string,
-    path: row.path as string,
+    name: (row.display_path as string | null) ?? path,
+    path,
     parent_id: row.parent_public_id as string | null,
     usage_count: Number(row.usage_count ?? 0)
   }
@@ -60,7 +73,7 @@ export class LocalTagRepository implements TagRepository {
   list(context: WorkspaceContext, pagination?: Pagination): Page<Tag> {
     const { limit, offset } = resolvePagination(pagination)
     const items = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id,
+      SELECT tags.public_id, tags.path, tags.display_path, parent.public_id AS parent_public_id,
         ${TAG_USAGE_COUNT_SQL} AS usage_count
       FROM tags
       LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.deleted_at IS NULL
@@ -77,7 +90,7 @@ export class LocalTagRepository implements TagRepository {
 
   get(context: WorkspaceContext, publicId: string, options: ReadOptions = {}): Tag | null {
     const row = this.database.prepare(`
-      SELECT tags.public_id, tags.name, tags.path, parent.public_id AS parent_public_id,
+      SELECT tags.public_id, tags.path, tags.display_path, parent.public_id AS parent_public_id,
         ${TAG_USAGE_COUNT_SQL} AS usage_count
       FROM tags
       LEFT JOIN tags AS parent ON parent.id = tags.parent_id AND parent.deleted_at IS NULL
@@ -88,9 +101,10 @@ export class LocalTagRepository implements TagRepository {
 
   create(context: WorkspaceContext, name: string): Tag {
     const path = normalizeTagName(name)
+    const display = displayTagName(name)
     const now = new Date().toISOString()
     const existing = this.database.prepare(`
-      SELECT id, public_id, name, path, parent_id, deleted_at FROM tags
+      SELECT id, public_id, path, display_path, deleted_at FROM tags
       WHERE workspace_id = ? AND path = ?
     `).get(context.workspace_id, path) as Record<string, unknown> | undefined
     if (existing) {
@@ -100,25 +114,32 @@ export class LocalTagRepository implements TagRepository {
           WHERE workspace_id = ? AND id = ?
         `).run(now, context.workspace_id, existing.id)
       }
+      if (existing.display_path == null) {
+        this.database.prepare(`
+          UPDATE tags SET display_path = ?, updated_at = ?
+          WHERE workspace_id = ? AND id = ?
+        `).run(display, now, context.workspace_id, existing.id)
+      }
       return this.get(context, existing.public_id as string) as Tag
     }
 
     const row = this.database.prepare(`
-      INSERT INTO tags (public_id, workspace_id, name, path, parent_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      RETURNING public_id, name, path, NULL AS parent_public_id
-    `).get(randomUUID(), context.workspace_id, path, path, null, now, now) as Record<string, unknown>
+      INSERT INTO tags (public_id, workspace_id, name, path, display_path, parent_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING public_id, path, display_path, NULL AS parent_public_id
+    `).get(randomUUID(), context.workspace_id, display, path, display, null, now, now) as Record<string, unknown>
     return toTag(row)
   }
 
   update(context: WorkspaceContext, publicId: string, name: string): Tag | null {
     const path = normalizeTagName(name)
+    const display = displayTagName(name)
     const now = new Date().toISOString()
     const row = this.database.prepare(`
-      UPDATE tags SET name = ?, path = ?, updated_at = ?
+      UPDATE tags SET name = ?, path = ?, display_path = ?, updated_at = ?
       WHERE workspace_id = ? AND public_id = ? AND deleted_at IS NULL
-      RETURNING public_id, name, path, NULL AS parent_public_id
-    `).get(path, path, now, context.workspace_id, publicId) as Record<string, unknown> | undefined
+      RETURNING public_id, path, display_path, NULL AS parent_public_id
+    `).get(display, path, display, now, context.workspace_id, publicId) as Record<string, unknown> | undefined
     return row ? toTag(row) : null
   }
 

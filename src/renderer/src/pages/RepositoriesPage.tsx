@@ -19,7 +19,7 @@ interface RepositoryForm {
 
 const emptyRepositoryForm: RepositoryForm = { name: '', local_path: '', remote_url: '', project_id: '' }
 
-function RepositoriesPage({ focusPublicId, onOpenProjects }: { focusPublicId?: string | null; onOpenProjects?: () => void }): JSX.Element {
+function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { focusPublicId?: string | null; onFocusHandled?: () => void; onOpenProjects?: () => void }): JSX.Element {
   const { items, total, status, error, fetch, loadByPublicId, loadMore, create, update, remove, scan, scanAll } = useRepositoryStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
@@ -48,9 +48,10 @@ function RepositoriesPage({ focusPublicId, onOpenProjects }: { focusPublicId?: s
         const element = document.getElementById(`repository-${focusPublicId}`)
         element?.scrollIntoView({ block: 'center' })
         element?.focus()
+        onFocusHandled?.()
       })
-    })
-  }, [focusPublicId, loadByPublicId])
+    }).finally(() => { if (!useRepositoryStore.getState().items.some((repository) => repository.public_id === focusPublicId)) onFocusHandled?.() })
+  }, [focusPublicId, loadByPublicId, onFocusHandled])
   useEffect(() => {
     const closeMenu = (event: PointerEvent): void => {
       if (!(event.target instanceof Element) || !event.target.closest('.repository-card-menu')) setOpenMenuId(null)
@@ -67,6 +68,27 @@ function RepositoriesPage({ focusPublicId, onOpenProjects }: { focusPublicId?: s
   const isBusy = operation !== null
   const repositoryNames = useMemo(() => new Map(items.map((item) => [item.public_id, item.name])), [items])
   const projectNames = useMemo(() => new Map(projects.map((project) => [project.public_id, project.name])), [projects])
+  const isEditDirty = Boolean(editingRepository && (
+    editForm.name !== editingRepository.name ||
+    editForm.local_path !== editingRepository.local_path ||
+    editForm.remote_url !== (editingRepository.remote_url ?? '') ||
+    editForm.project_id !== (editingRepository.project_id ?? '')
+  ))
+
+  const requestCloseEdit = (): void => {
+    if (savingEdit) return
+    if (isEditDirty && !window.confirm(t('workspace.repositoryEditDiscardConfirm'))) return
+    setEditingRepository(null)
+  }
+
+  useEffect(() => {
+    if (!editingRepository) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') requestCloseEdit()
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [editingRepository, editForm, savingEdit])
 
   const add = async (): Promise<void> => {
     if (!name.trim() || !path.trim()) return
@@ -206,7 +228,7 @@ function RepositoriesPage({ focusPublicId, onOpenProjects }: { focusPublicId?: s
     </article>)}</section>
     {items.length === 0 && status !== 'running' && <div className="empty-state"><ServerCog aria-hidden="true" /><p>{t('workspace.noRepositories')}</p></div>}
     {items.length < total && <button className="load-more" onClick={() => void loadMore()} disabled={status === 'running' || isBusy}>{t('workspace.loadMore')}</button>}
-    {editingRepository && <div className="repository-edit-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditingRepository(null) }}><div className="repository-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="repository-edit-title"><div className="repository-edit-heading"><div><p className="workspace-kicker">{t('workspace.repositoryEdit')}</p><h3 id="repository-edit-title">{editingRepository.name}</h3></div><button aria-label={t('common.close')} onClick={() => setEditingRepository(null)}><X aria-hidden="true" /></button></div><label>{t('workspace.repositoryName')}<input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label><label>{t('workspace.localPath')}<input value={editForm.local_path} onChange={(event) => setEditForm({ ...editForm, local_path: event.target.value })} /></label><label>{t('workspace.remoteUrl')}<input value={editForm.remote_url} onChange={(event) => setEditForm({ ...editForm, remote_url: event.target.value })} placeholder="https://..." /></label><label>{t('workspace.project')}<select value={editForm.project_id} onChange={(event) => setEditForm({ ...editForm, project_id: event.target.value })}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><div className="repository-edit-actions"><button onClick={() => setEditingRepository(null)} disabled={savingEdit}>{t('common.cancel')}</button><button className="primary-action" onClick={() => void saveEdit()} disabled={savingEdit || !editForm.name.trim() || !editForm.local_path.trim()}>{savingEdit ? t('common.saving') : t('common.save')}</button></div></div></div>}
+    {editingRepository && <div className="repository-edit-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseEdit() }}><div className="repository-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="repository-edit-title"><div className="repository-edit-heading"><div><p className="workspace-kicker">{t('workspace.repositoryEdit')}</p><h3 id="repository-edit-title">{editingRepository.name}</h3></div><button type="button" aria-label={t('common.close')} onClick={requestCloseEdit}><X aria-hidden="true" /></button></div><label>{t('workspace.repositoryName')}<input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label><label>{t('workspace.localPath')}<input value={editForm.local_path} onChange={(event) => setEditForm({ ...editForm, local_path: event.target.value })} /></label><label>{t('workspace.remoteUrl')}<input value={editForm.remote_url} onChange={(event) => setEditForm({ ...editForm, remote_url: event.target.value })} placeholder="https://..." /></label><label>{t('workspace.project')}<select value={editForm.project_id} onChange={(event) => setEditForm({ ...editForm, project_id: event.target.value })}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><div className="repository-edit-actions"><button type="button" onClick={requestCloseEdit} disabled={savingEdit}>{t('common.cancel')}</button><button type="button" className="primary-action" onClick={() => void saveEdit()} disabled={savingEdit || !editForm.name.trim() || !editForm.local_path.trim()}>{savingEdit ? t('common.saving') : t('common.save')}</button></div></div></div>}
   </div>
 }
 

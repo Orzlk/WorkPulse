@@ -211,6 +211,33 @@ describe('database transfer package', () => {
     target.close()
   })
 
+  it('does not shadow an existing real repository binding with an empty imported one', () => {
+    const source = createDatabase()
+    const sourceContext = context(source)
+    source.prepare(`INSERT INTO repositories (public_id, workspace_id, name, enabled, created_by, updated_by, created_at, updated_at)
+      VALUES ('shared-repository', ?, 'repo', 1, ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(sourceContext.workspace_id, sourceContext.user_id, sourceContext.user_id)
+    const sourceRepositoryId = (source.prepare("SELECT id FROM repositories WHERE public_id = 'shared-repository'").get() as { id: number }).id
+    source.prepare(`INSERT INTO repository_bindings (public_id, repository_id, workspace_id, local_path, is_valid, created_by, updated_by, created_at, updated_at)
+      VALUES ('imported-binding', ?, ?, 'Z:/source', 1, ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(sourceRepositoryId, sourceContext.workspace_id, sourceContext.user_id, sourceContext.user_id)
+
+    const target = createDatabase()
+    const targetContext = context(target)
+    const targetRepository = target.prepare(`INSERT INTO repositories (public_id, workspace_id, name, enabled, created_by, updated_by, created_at, updated_at)
+      VALUES ('shared-repository', ?, '本地仓库', 1, ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(targetContext.workspace_id, targetContext.user_id, targetContext.user_id)
+    target.prepare(`INSERT INTO repository_bindings (public_id, repository_id, workspace_id, local_path, is_valid, created_by, updated_by, created_at, updated_at)
+      VALUES ('real-binding', ?, ?, 'D:/real-repository', 1, ?, ?, '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`)
+      .run(targetRepository.lastInsertRowid, targetContext.workspace_id, targetContext.user_id, targetContext.user_id)
+
+    mergeDatabaseImport(target, targetContext, createDatabaseExport(source, sourceContext))
+    expect(target.prepare('SELECT COUNT(*) AS count FROM repository_bindings WHERE repository_id = ?').get(targetRepository.lastInsertRowid)).toEqual({ count: 1 })
+    expect(target.prepare('SELECT local_path FROM repository_bindings WHERE repository_id = ?').get(targetRepository.lastInsertRowid)).toEqual({ local_path: 'D:/real-repository' })
+    source.close()
+    target.close()
+  })
+
   it('rejects malformed packages before writes and rolls back a failed merge', () => {
     const database = createDatabase()
     const packageData: DatabaseTransferPackage = {

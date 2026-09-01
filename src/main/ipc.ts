@@ -4,6 +4,7 @@ import { writeFileSync, readFileSync, statSync } from 'fs'
 import { dirname, join } from 'path'
 import {
   addWorkLog,
+  addWorkLogsBatch,
   getWorkLogs,
   getWorkLogsByDateRange,
   getWorkLogByPublicId,
@@ -26,6 +27,7 @@ import {
   deleteTask,
   restoreTask,
   reorderTasks,
+  completeTask,
   getKanbanColumns,
   createKanbanColumn,
   updateKanbanColumn,
@@ -71,6 +73,7 @@ import { parseFlomoHtml } from './importers/flomoHtmlImporter'
 import { importFlomoMemos } from './importers/flomoLogImport'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
+const INBOX_AI_TIMEOUT_MS = 60_000
 const pendingImports = new ImportTokenStore<unknown>(10 * 60 * 1000)
 
 type ReportStreamEvent =
@@ -80,6 +83,25 @@ type ReportStreamEvent =
   | { request_id: string; type: 'error'; code: 'cancelled' | 'failed'; message: string }
 
 const reportStreams = new Map<string, { controller: AbortController; senderId: number; sender: Electron.WebContents }>()
+
+async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work(controller.signal),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error('AI inbox organization timed out'))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+    controller.abort()
+  }
+}
 
 function sendReportStreamEvent(sender: Electron.WebContents, event: ReportStreamEvent): void {
   if (!sender.isDestroyed()) sender.send('report:stream', event)
@@ -110,6 +132,8 @@ function guarded<TArgs extends unknown[], TResult>(handler: (...args: TArgs) => 
     try {
       return await handler(...args)
     } catch (error) {
+      // 未归类的异常会以 INTERNAL_ERROR 返回渲染层；在此保留底层错误便于排查运行时问题
+      console.error('[ipc] unhandled handler error', error)
       throw toIpcContractError(error)
     }
   }
@@ -128,45 +152,45 @@ function guardedWithEvent<TArgs extends unknown[], TResult>(handler: (event: Ele
 export function registerIpcHandlers(): void {
   // --- Work Logs ---
 
-  ipcMain.handle('worklog:add', (_event, content: string, category?: string, associations?: unknown) => {
+  ipcMain.handle('worklog:add', guarded((content: string, category?: string, associations?: unknown) => {
     return addWorkLog(content, category, null, undefined, parseWorkItemAssociations(associations))
-  })
+  }))
 
-  ipcMain.handle('worklog:list', (_event, limit?: number, offset?: number, tagPath?: string, projectPublicId?: string) => {
+  ipcMain.handle('worklog:list', guarded((limit?: number, offset?: number, tagPath?: string, projectPublicId?: string) => {
     return getWorkLogs(limit, offset, tagPath, projectPublicId)
-  })
+  }))
 
   ipcMain.handle('worklog:get', guarded((publicId: unknown) => getWorkLogByPublicId(id(publicId, 'worklog id'))))
 
-  ipcMain.handle('worklog:byDateRange', (_event, from: string, to: string) => {
+  ipcMain.handle('worklog:byDateRange', guarded((from: string, to: string) => {
     return getWorkLogsByDateRange(from, to)
-  })
+  }))
 
-  ipcMain.handle('worklog:search', (_event, keyword: string, tagPath?: string, projectPublicId?: string) => {
+  ipcMain.handle('worklog:search', guarded((keyword: string, tagPath?: string, projectPublicId?: string) => {
     return searchWorkLogs(keyword, undefined, tagPath, projectPublicId)
-  })
+  }))
 
-  ipcMain.handle('worklog:categories', () => {
+  ipcMain.handle('worklog:categories', guarded(() => {
     return getCategories()
-  })
+  }))
 
-  ipcMain.handle('worklog:setCategory', (_event, id: number, category: string) => {
+  ipcMain.handle('worklog:setCategory', guarded((id: number, category: string) => {
     updateWorkLogCategory(id, category)
-  })
+  }))
 
-  ipcMain.handle('worklog:update', (_event, id: number, content: string, category: string, created_at?: string, associations?: unknown) => {
+  ipcMain.handle('worklog:update', guarded((id: number, content: string, category: string, created_at?: string, associations?: unknown) => {
     return updateWorkLog(id, content, category, created_at, parseWorkItemAssociations(associations))
-  })
+  }))
 
-  ipcMain.handle('worklog:delete', (_event, id: number) => {
+  ipcMain.handle('worklog:delete', guarded((id: number) => {
     return deleteWorkLog(id)
-  })
+  }))
 
   ipcMain.handle(
     'worklog:restore',
-    (_event, log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; tag_names: string[] }) => {
+    guarded((log: { content: string; category: string; created_at: string; task_id: number | null; project_id: string | null; tag_names: string[]; id?: number; public_id?: string }) => {
       return restoreWorkLog(log)
-    }
+    })
   )
 
   ipcMain.handle('stats:get', guarded((days?: unknown) => getStats(parseStatsDays(days))))
@@ -275,11 +299,13 @@ export function registerIpcHandlers(): void {
     let failed = 0
     for (const candidate of candidates) {
       try {
-        const suggestion = await generateInboxSuggestion(candidate.content, references)
+        const suggestion = await withTimeout((signal) => generateInboxSuggestion(candidate.content, references, signal), INBOX_AI_TIMEOUT_MS)
         const updated = domain.inbox.update(candidate.public_id, { ai_suggestion: suggestion })
         if (updated) items.push(updated)
-      } catch {
+      } catch (error) {
         failed++
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn('Inbox AI organization failed', { publicId: candidate.public_id, message })
       }
     }
     return { processed: candidates.length, updated: items.length, failed, items }
@@ -374,88 +400,75 @@ export function registerIpcHandlers(): void {
 
   // --- Tasks ---
 
-  ipcMain.handle('task:add', (_event, title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown, priority?: Task['priority'], dueDate?: string | null, checklist?: unknown) => {
+  ipcMain.handle('task:add', guarded((title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: unknown, priority?: Task['priority'], dueDate?: string | null, checklist?: unknown) => {
     return addTask(title, description, status, createdAt, parseWorkItemAssociations(associations), priority, dueDate, Array.isArray(checklist) ? checklist as Task['checklist'] : [])
-  })
+  }))
 
-  ipcMain.handle('task:list', () => {
+  ipcMain.handle('task:list', guarded(() => {
     return getTasks()
-  })
+  }))
 
   ipcMain.handle('task:get', guarded((publicId: unknown) => getTaskByPublicId(id(publicId, 'task id'))))
 
   ipcMain.handle(
     'task:update',
-    (
-      _event,
-      id: number,
-      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'tag_names'>>
-    ) => {
+    guarded((id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist' | 'project_id' | 'tag_names'>>) => {
       return updateTask(id, { ...updates, ...parseWorkItemAssociations({ project_id: updates.project_id, tag_names: updates.tag_names }) })
-    }
+    })
   )
 
-  ipcMain.handle('task:delete', (_event, id: number) => {
+  ipcMain.handle('task:delete', guarded((id: number) => {
     return deleteTask(id)
-  })
+  }))
 
-  ipcMain.handle('task:restore', (_event, id: number) => {
+  ipcMain.handle('task:restore', guarded((id: number) => {
     return restoreTask(id)
-  })
+  }))
 
-  ipcMain.handle('task:reorder', (_event, taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) => {
+  ipcMain.handle('task:reorder', guarded((taskIds: number[], boardColumn: string, status?: Task['status'], sourceBoardColumn?: string, sourceTaskIds?: number[], sourceStatus?: Task['status']) => {
     reorderTasks(taskIds, boardColumn, status, sourceBoardColumn, sourceTaskIds, sourceStatus)
-  })
+  }))
 
-  ipcMain.handle('kanban:columns:list', (): KanbanColumn[] => getKanbanColumns())
-  ipcMain.handle('kanban:columns:create', (_event, name: string): KanbanColumn => createKanbanColumn(name))
-  ipcMain.handle('kanban:columns:update', (_event, publicId: string, name: string): KanbanColumn | null => updateKanbanColumn(publicId, name))
-  ipcMain.handle('kanban:columns:delete', (_event, publicId: string): boolean => deleteKanbanColumn(publicId))
+  ipcMain.handle('kanban:columns:list', guarded((): KanbanColumn[] => getKanbanColumns()))
+  ipcMain.handle('kanban:columns:create', guarded((name: string): KanbanColumn => createKanbanColumn(name)))
+  ipcMain.handle('kanban:columns:update', guarded((publicId: string, name: string): KanbanColumn | null => updateKanbanColumn(publicId, name)))
+  ipcMain.handle('kanban:columns:delete', guarded((publicId: string): boolean => deleteKanbanColumn(publicId)))
 
   // Complete task + auto create work log
-  ipcMain.handle(
-    'task:complete',
-    (_event, id: number, logContent: string) => {
-      const task = updateTask(id, { status: 'done' })
-      if (task && logContent.trim()) {
-        addWorkLog(logContent.trim(), '', id)
-      }
-      return task
-    }
-  )
+  ipcMain.handle('task:complete', guarded((id: number, logContent: string) => completeTask(id, logContent)))
 
-  ipcMain.handle('task:completeOnly', (_event, id: number) => {
+  ipcMain.handle('task:completeOnly', guarded((id: number) => {
     return updateTask(id, { status: 'done' })
-  })
+  }))
 
   // --- Settings ---
 
-  ipcMain.handle('settings:get', (_event, key: string) => {
+  ipcMain.handle('settings:get', guarded((key: string) => {
     if (key === 'api_key') {
       return getStoredApiKey()
     }
     return getSetting(key)
-  })
+  }))
 
-  ipcMain.handle('settings:set', (_event, key: string, value: string) => {
+  ipcMain.handle('settings:set', guarded((key: string, value: string) => {
     if (key === 'api_key') {
       setStoredApiKey(value)
       return
     }
     setSetting(key, value)
-  })
+  }))
 
-  ipcMain.handle('settings:delete', (_event, key: string) => {
+  ipcMain.handle('settings:delete', guarded((key: string) => {
     if (key === 'api_key') {
       deleteStoredApiKey()
       return
     }
     deleteSetting(key)
-  })
+  }))
 
   // --- Export ---
 
-  ipcMain.handle('export:logs', async (_event, format: 'csv' | 'markdown') => {
+  ipcMain.handle('export:logs', guarded(async (format: 'csv' | 'markdown') => {
     const logs = getAllWorkLogs()
     if (logs.length === 0) throw new Error(tMain('noLogsToExport'))
 
@@ -500,9 +513,9 @@ export function registerIpcHandlers(): void {
 
     writeFileSync(result.filePath, content, 'utf-8')
     return result.filePath
-  })
+  }))
 
-  ipcMain.handle('export:report', async (_event, reportContent: string, dateRange: string) => {
+  ipcMain.handle('export:report', guarded(async (reportContent: string, dateRange: string) => {
     const defaultPath = dateRange.startsWith('workpulse-')
       ? `${dateRange}.md`
       : `workpulse-report-${dateRange}.md`
@@ -516,11 +529,11 @@ export function registerIpcHandlers(): void {
 
     writeFileSync(result.filePath, reportContent, 'utf-8')
     return result.filePath
-  })
+  }))
 
   // --- Import ---
 
-  ipcMain.handle('import:logs', async (_event) => {
+  ipcMain.handle('import:logs', guarded(async () => {
     const result = await dialog.showOpenDialog({
       title: '导入工作日志',
       filters: [
@@ -543,7 +556,7 @@ export function registerIpcHandlers(): void {
     if (ext === 'html') {
       const parsed = parseFlomoHtml(content)
       if (parsed.memos.length === 0) throw new Error('未找到有效的 Flomo HTML 笔记')
-      const summary = importFlomoMemos(parsed.memos, { addWorkLog, workLogExists, listWorkLogs: getAllWorkLogs }, {
+      const summary = importFlomoMemos(parsed.memos, { addWorkLog, addWorkLogsBatch, workLogExists, listWorkLogs: getAllWorkLogs }, {
         sourceRoot: dirname(filePath),
         attachmentRoot: join(app.getPath('userData'), 'attachments'),
         saveAttachment
@@ -557,6 +570,18 @@ export function registerIpcHandlers(): void {
 
     let imported = 0
     let skipped = 0
+    const batch: Array<{ content: string; category: string; taskId: null; createdAt?: string }> = []
+    const pendingKeys = new Set<string>()
+    const queueIfNew = (content: string, category: string, createdAt?: string): void => {
+      const key = `${content}\u0000${category}\u0000${createdAt ?? ''}`
+      if (!content || pendingKeys.has(key) || workLogExists(content, category, createdAt)) {
+        skipped++
+        return
+      }
+      pendingKeys.add(key)
+      batch.push({ content, category, taskId: null, createdAt })
+      imported++
+    }
     if (ext === 'csv') {
       const lines = content.split('\n').filter((line) => line.trim())
       for (let i = 1; i < lines.length; i++) {
@@ -566,12 +591,7 @@ export function registerIpcHandlers(): void {
         if (parts.length >= 3) {
           const [time, category, logContent] = parts
           const cat = category || ''
-          if (logContent && !workLogExists(logContent, cat, time || undefined)) {
-            addWorkLog(logContent, cat, null, time || undefined)
-            imported++
-          } else {
-            skipped++
-          }
+          queueIfNew(logContent, cat, time || undefined)
         }
       }
     } else {
@@ -591,26 +611,22 @@ export function registerIpcHandlers(): void {
             const logContent = match[4].trim()
             const createdAt = dateStr ? `${dateStr} ${time}` : undefined
             const cat = category
-            if (logContent && !workLogExists(logContent, cat, createdAt || undefined)) {
-              addWorkLog(logContent, cat, null, createdAt)
-              imported++
-            } else {
-              skipped++
-            }
+            queueIfNew(logContent, cat, createdAt || undefined)
           }
         }
       }
     }
 
+    addWorkLogsBatch(batch)
     return { imported, skipped, filePath, source: 'file' as const, attachmentsImported: 0, attachmentsSkipped: 0 }
-  })
+  }))
 
   // --- App ---
 
-  ipcMain.handle('app:open-backup-dir', async () => {
+  ipcMain.handle('app:open-backup-dir', guarded(async () => {
     const backupDir = join(app.getPath('userData'), 'backups')
     return shell.openPath(backupDir)
-  })
+  }))
 }
 
 function parseCSVLine(line: string): string[] {

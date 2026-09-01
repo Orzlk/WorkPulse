@@ -318,6 +318,31 @@ describe('GitScanner', () => {
     database.close()
   })
 
+  it('仅编辑仓库其他字段且路径未变化时保留分支与扫描游标', () => {
+    const directory = createGitRepository()
+    const { database, context } = createDatabase()
+    const repositories = new RepositoryService(database, context)
+    const repository = repositories.create({ name: '保留状态仓库', local_path: directory })
+    const originalScannedAt = '2026-08-20T00:00:00.000Z'
+    database.prepare('UPDATE repository_bindings SET branch = ?, updated_at = ? WHERE repository_id = (SELECT id FROM repositories WHERE public_id = ?)')
+      .run('main', originalScannedAt, repository.public_id)
+    database.prepare('UPDATE repositories SET last_scanned_at = ? WHERE public_id = ?')
+      .run(originalScannedAt, repository.public_id)
+
+    const updated = repositories.update(repository.public_id, {
+      name: '只改名称',
+      local_path: directory
+    })
+
+    expect(updated).toMatchObject({
+      name: '只改名称',
+      local_path: directory,
+      branch: 'main',
+      last_scanned_at: originalScannedAt
+    })
+    database.close()
+  })
+
   it('软删除仓库跟踪项但保留本地目录和可恢复的数据库记录', () => {
     const directory = createGitRepository()
     const { database, context } = createDatabase()

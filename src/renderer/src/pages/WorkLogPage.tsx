@@ -9,7 +9,6 @@ import {
   Search,
   Send,
   Trash2,
-  Undo2,
   X
 } from 'lucide-react'
 import { useToast } from '../components/Toast'
@@ -30,8 +29,8 @@ import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosit
 import { applySelectedTagToComposer } from '../lib/tagComposerDefaults'
 import type { Tag } from '../lib/workspaceTypes'
 
-function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | null; onOpenInbox?: () => void }): JSX.Element {
-  const { logs, fetchLogs, loadByPublicId, loadMore, hasMore, addLog, deleteLog, undoDelete, dismissUndo, lastDeleted, searchLogs, clearSearch, searchKeyword, loading, tagFilter, setTagFilter, projectFilter, setProjectFilter } =
+function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPublicId?: string | null; onFocusHandled?: () => void; onOpenInbox?: () => void }): JSX.Element {
+  const { logs, fetchLogs, loadByPublicId, loadMore, hasMore, addLog, deleteLog, undoDelete, searchLogs, clearSearch, searchKeyword, loading, error: storeError, tagFilter, setTagFilter, projectFilter, setProjectFilter } =
     useWorkLogStore()
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
@@ -146,9 +145,10 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
         const element = document.getElementById(`work-log-${focusPublicId}`)
         element?.scrollIntoView({ block: 'center' })
         element?.focus()
+        onFocusHandled?.()
       })
-    })
-  }, [focusPublicId, loadByPublicId])
+    }).finally(() => { if (!useWorkLogStore.getState().logs.some((log) => log.public_id === focusPublicId)) onFocusHandled?.() })
+  }, [focusPublicId, loadByPublicId, onFocusHandled])
 
   const handleSubmit = async (): Promise<void> => {
     const trimmed = input.trim()
@@ -330,10 +330,14 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
   }
 
   const handleDelete = async (id: number): Promise<void> => {
-    await deleteLog(id)
-    await refreshTagTree()
-    setDeletingId(null)
-    toast.success(t('worklog.deleted'))
+    try {
+      await deleteLog(id)
+      await refreshTagTree()
+      setDeletingId(null)
+      toast.successWithAction(t('worklog.deleted'), t('worklog.undo'), () => { void handleUndo() })
+    } catch {
+      setError(t('worklog.saveError'))
+    }
   }
 
   const handleUndo = async (): Promise<void> => {
@@ -429,6 +433,7 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
         )}
         </div>
       </div>
+      {storeError && <div className="inline-error" role="alert">{storeError}<button type="button" onClick={() => void fetchLogs()}>{t('common.retry')}</button></div>}
       {/* Input */}
       <div className="quick-entry-section">
         <div ref={composerRef} className={`quick-entry ${shaking ? 'animate-shake is-error' : ''}`}>
@@ -659,26 +664,6 @@ function WorkLogPage({ focusPublicId, onOpenInbox }: { focusPublicId?: string | 
         </>
       )}
 
-      {/* Undo bar */}
-      {lastDeleted && (
-        <div className="fixed bottom-4 left-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg shadow-lg text-sm animate-undo-slide-up">
-          <span>{t('worklog.deletedOne')}</span>
-          <button
-            onClick={handleUndo}
-            className="flex items-center gap-1 font-medium text-blue-300 dark:text-blue-600 hover:text-blue-200 dark:hover:text-blue-500"
-          >
-            <Undo2 className="w-3.5 h-3.5" />
-            {t('worklog.undo')}
-          </button>
-          <button
-            onClick={dismissUndo}
-            className="ml-1 p-0.5 text-zinc-400 dark:text-zinc-500 hover:text-white dark:hover:text-zinc-900"
-            title={t('common.confirm')}
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
         </main>
       </div>
       <datalist id="worklog-category-suggestions">

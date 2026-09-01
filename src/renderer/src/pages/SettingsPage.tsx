@@ -101,6 +101,8 @@ type AiTestState =
   | { status: 'success'; latencyMs: number; model: string }
   | { status: 'error'; message: string }
 
+type SettingsFieldStatus = 'saving' | 'saved' | 'error'
+
 interface AppUpdateState {
   status: UpdateStatus
   currentVersion: string
@@ -372,6 +374,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [style, setStyle] = useState(t('settings.styleConcise'))
   const [systemPrompt, setSystemPrompt] = useState(getDefaultSystemPrompt(resolvedLanguage))
   const [reportTemplate, setReportTemplate] = useState(getDefaultReportTemplate(resolvedLanguage))
+  const [fieldSaveStatus, setFieldSaveStatus] = useState<Record<string, SettingsFieldStatus>>({})
   const [reportRemindersEnabled, setReportRemindersEnabled] = useState(true)
   const [savingReportReminder, setSavingReportReminder] = useState(false)
   const [reportReminderPeriod, setReportReminderPeriod] = useState<'weekly' | 'monthly'>('weekly')
@@ -395,10 +398,10 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   ]
 
   useEffect(() => {
-    loadSettings()
+    void loadSettings().catch(() => toast.error(t('settings.saveFailed')))
 
-    void window.api.app.getVersion().then(setAppVersion)
-    void window.api.app.getUpdateState().then(setUpdateState)
+    void window.api.app.getVersion().then(setAppVersion).catch(() => undefined)
+    void window.api.app.getUpdateState().then(setUpdateState).catch(() => undefined)
     const unsubscribeUpdateStatus = window.api.on.updateStatus(setUpdateState)
 
     return () => {
@@ -473,14 +476,18 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     value: string,
     setter: (v: string) => void
   ): Promise<void> => {
-    const updated = await window.api.shortcut.update(key, value)
-    if (!updated) {
-      toast.error(t('settings.shortcutTaken'))
-      return
-    }
+    try {
+      const updated = await window.api.shortcut.update(key, value)
+      if (!updated) {
+        toast.error(t('settings.shortcutTaken'))
+        return
+      }
 
-    setter(value)
-    toast.success(t('settings.shortcutSaved'))
+      setter(value)
+      toast.success(t('settings.shortcutSaved'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const maskKey = (key: string): string => {
@@ -490,18 +497,26 @@ function SettingsPage({ onBack }: Props): JSX.Element {
 
   const handleSaveKey = async (): Promise<void> => {
     if (!apiKey.trim()) return
-    await window.api.settings.set('api_key', apiKey.trim())
-    setHasKey(true)
-    setEditing(false)
-    toast.success(t('settings.apiKeySaved'))
+    try {
+      await window.api.settings.set('api_key', apiKey.trim())
+      setHasKey(true)
+      setEditing(false)
+      toast.success(t('settings.apiKeySaved'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleDeleteKey = async (): Promise<void> => {
-    await window.api.settings.delete('api_key')
-    setApiKey('')
-    setHasKey(false)
-    setEditing(false)
-    toast.success(t('settings.apiKeyDeleted'))
+    try {
+      await window.api.settings.delete('api_key')
+      setApiKey('')
+      setHasKey(false)
+      setEditing(false)
+      toast.success(t('settings.apiKeyDeleted'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const saveSetting = async (key: string, value: string): Promise<void> => {
@@ -512,9 +527,41 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     }
   }
 
+  const clearFieldSaveStatus = (field: string): void => {
+    setFieldSaveStatus((current) => {
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
+  const saveFieldSetting = async (field: string, save: () => Promise<void>): Promise<void> => {
+    setFieldSaveStatus((current) => ({ ...current, [field]: 'saving' }))
+    try {
+      await save()
+      setFieldSaveStatus((current) => ({ ...current, [field]: 'saved' }))
+    } catch {
+      setFieldSaveStatus((current) => ({ ...current, [field]: 'error' }))
+    }
+  }
+
+  const settingsFieldStatus = (field: string): JSX.Element | null => {
+    const status = fieldSaveStatus[field]
+    if (!status) return null
+    return <span className={`settings-field-status settings-field-status-${status}`} role={status === 'error' ? 'alert' : undefined}>
+      {status === 'saving' ? t('settings.saving') : status === 'saved' ? t('settings.saved') : t('settings.saveFailed')}
+    </span>
+  }
+
   const handleProviderChange = async (value: AiProvider): Promise<void> => {
+    const previous = provider
     setProvider(value)
-    await window.api.settings.set('ai_provider', value)
+    try {
+      await window.api.settings.set('ai_provider', value)
+    } catch {
+      setProvider(previous)
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleAiConnectionTest = async (): Promise<void> => {
@@ -538,41 +585,61 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   }
 
   const handleBaseUrlBlur = async (): Promise<void> => {
-    await saveSetting('ai_base_url', baseUrl)
+    await saveFieldSetting('baseUrl', () => saveSetting('ai_base_url', baseUrl))
   }
 
   const handleModelBlur = async (): Promise<void> => {
-    await saveSetting('ai_model', model)
+    await saveFieldSetting('model', () => saveSetting('ai_model', model))
   }
 
   const handleLanguageChange = async (value: string): Promise<void> => {
+    const previous = reportLanguage
     setReportLanguage(value)
-    await window.api.settings.set('report_language', value)
+    try {
+      await window.api.settings.set('report_language', value)
+    } catch {
+      setReportLanguage(previous)
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleStyleChange = async (value: string): Promise<void> => {
+    const previous = style
     setStyle(value)
-    await window.api.settings.set('report_style', value)
+    try {
+      await window.api.settings.set('report_style', value)
+    } catch {
+      setStyle(previous)
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleAppLanguageChange = async (value: AppLanguage): Promise<void> => {
-    await setAppLanguage(value)
+    try {
+      await setAppLanguage(value)
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleSystemPromptBlur = async (): Promise<void> => {
-    if (systemPrompt.trim() === getDefaultSystemPrompt(resolvedLanguage).trim()) {
-      await window.api.settings.delete('system_prompt')
-    } else {
-      await window.api.settings.set('system_prompt', systemPrompt)
-    }
+    await saveFieldSetting('systemPrompt', async () => {
+      if (systemPrompt.trim() === getDefaultSystemPrompt(resolvedLanguage).trim()) {
+        await window.api.settings.delete('system_prompt')
+      } else {
+        await window.api.settings.set('system_prompt', systemPrompt)
+      }
+    })
   }
 
   const handleReportTemplateBlur = async (): Promise<void> => {
-    if (reportTemplate.trim() === getDefaultReportTemplate(resolvedLanguage).trim()) {
-      await window.api.settings.delete('report_template')
-    } else {
-      await window.api.settings.set('report_template', reportTemplate)
-    }
+    await saveFieldSetting('reportTemplate', async () => {
+      if (reportTemplate.trim() === getDefaultReportTemplate(resolvedLanguage).trim()) {
+        await window.api.settings.delete('report_template')
+      } else {
+        await window.api.settings.set('report_template', reportTemplate)
+      }
+    })
   }
 
   const handleReminderToggle = async (enabled: boolean): Promise<void> => {
@@ -590,35 +657,65 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   }
 
   const handleReminderPeriodChange = async (period: 'weekly' | 'monthly'): Promise<void> => {
+    const previous = reportReminderPeriod
     setReportReminderPeriod(period)
-    await window.api.settings.set('report_reminder_period', period)
+    try {
+      await window.api.settings.set('report_reminder_period', period)
+    } catch {
+      setReportReminderPeriod(previous)
+      toast.error(t('settings.reportReminderSaveFailed'))
+    }
   }
 
   const resetSystemPrompt = async (): Promise<void> => {
     setSystemPrompt(getDefaultSystemPrompt(resolvedLanguage))
-    await window.api.settings.delete('system_prompt')
-    toast.success(t('settings.systemPromptReset'))
+    try {
+      await window.api.settings.delete('system_prompt')
+      toast.success(t('settings.systemPromptReset'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const resetReportTemplate = async (): Promise<void> => {
     setReportTemplate(getDefaultReportTemplate(resolvedLanguage))
-    await window.api.settings.delete('report_template')
-    toast.success(t('settings.templateReset'))
+    try {
+      await window.api.settings.delete('report_template')
+      toast.success(t('settings.templateReset'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleCheckUpdates = async (): Promise<void> => {
-    const state = await window.api.app.checkForUpdates()
-    setUpdateState(state)
+    try {
+      const state = await window.api.app.checkForUpdates()
+      setUpdateState(state)
 
-    if (state.status === 'not_available') {
-      toast.success(t('settings.updateNotAvailable'))
-    } else if (state.status === 'error') {
-      toast.error(t('settings.updateError', { message: state.error || '' }))
+      if (state.status === 'not_available') {
+        toast.success(t('settings.updateNotAvailable'))
+      } else if (state.status === 'error') {
+        toast.error(t('settings.updateError', { message: state.error || '' }))
+      }
+    } catch {
+      toast.error(t('settings.updateError', { message: '' }))
     }
   }
 
   const handleInstallUpdate = async (): Promise<void> => {
-    await window.api.app.installUpdate()
+    try {
+      await window.api.app.installUpdate()
+    } catch {
+      toast.error(t('settings.updateError', { message: '' }))
+    }
+  }
+
+  const handleOpenBackupDir = async (): Promise<void> => {
+    try {
+      await window.api.app.openBackupDir()
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const clearDataLanguage: 'zh' | 'en' = resolvedLanguage === 'zh' ? 'zh' : 'en'
@@ -752,7 +849,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                   />
                   <button
                     onClick={handleSaveKey}
-                    className="px-4 py-2 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-800 dark:hover:bg-zinc-200"
+                    className="settings-primary-button px-4 text-sm"
                   >
                     {t('common.save')}
                   </button>
@@ -797,11 +894,12 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               <input
                 type="text"
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                onChange={(e) => { setBaseUrl(e.target.value); clearFieldSaveStatus('baseUrl') }}
                 onBlur={handleBaseUrlBlur}
                 placeholder={provider === 'openai' ? 'https://api.openai.com' : provider === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.anthropic.com'}
                 className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
               />
+              {settingsFieldStatus('baseUrl')}
             </div>
             {/* Model */}
             <div className="mb-4">
@@ -812,11 +910,12 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               <input
                 type="text"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => { setModel(e.target.value); clearFieldSaveStatus('model') }}
                 onBlur={handleModelBlur}
                 placeholder={provider === 'openai' ? 'gpt-4o-mini' : provider === 'deepseek' ? 'deepseek-chat' : 'claude-sonnet-4-20250514'}
                 className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
               />
+              {settingsFieldStatus('model')}
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
@@ -925,11 +1024,12 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               </p>
               <textarea
                 value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
+                onChange={(e) => { setSystemPrompt(e.target.value); clearFieldSaveStatus('systemPrompt') }}
                 onBlur={handleSystemPromptBlur}
                 rows={8}
                 className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-lg text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono leading-relaxed resize-y"
               />
+              {settingsFieldStatus('systemPrompt')}
             </div>
 
             {/* Report Template */}
@@ -950,11 +1050,12 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               </p>
               <textarea
                 value={reportTemplate}
-                onChange={(e) => setReportTemplate(e.target.value)}
+                onChange={(e) => { setReportTemplate(e.target.value); clearFieldSaveStatus('reportTemplate') }}
                 onBlur={handleReportTemplateBlur}
                 rows={10}
                 className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-lg text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono leading-relaxed resize-y"
               />
+              {settingsFieldStatus('reportTemplate')}
             </div>
           </section>
 
@@ -1154,7 +1255,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 <div className="settings-about-card-icon"><ShieldCheck aria-hidden="true" /></div>
                 <h3>{t('settings.aboutPrivacyTitle')}</h3>
                 <p>{t('settings.aboutPrivacyText')}</p>
-                <button type="button" onClick={() => { void window.api.app.openBackupDir() }} className="settings-secondary-button">
+                <button type="button" onClick={() => { void handleOpenBackupDir() }} className="settings-secondary-button">
                   <FolderOpen aria-hidden="true" />
                   {t('settings.openBackupDir')}
                 </button>
@@ -1167,12 +1268,22 @@ function SettingsPage({ onBack }: Props): JSX.Element {
       </main>
 
       {clearDataOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="presentation">
+        <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="presentation">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="clear-data-dialog-title"
             className="w-full max-w-md rounded-xl border border-red-200 bg-white p-5 shadow-2xl dark:border-red-900 dark:bg-zinc-900"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                if (!clearingData) {
+                  setClearDataOpen(false)
+                  setClearDataInput('')
+                }
+              }
+            }}
           >
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden="true" />
@@ -1211,7 +1322,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                 type="button"
                 onClick={() => { void handleClearData() }}
                 disabled={!canConfirmClearData || clearingData}
-                className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="ui-button ui-button--danger text-sm"
               >
                 {clearingData ? t('settings.clearDataClearing') : t('settings.clearDataConfirm')}
               </button>

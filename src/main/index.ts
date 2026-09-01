@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell, Menu, Tray, nativeImage, globalShortcut, ipcMain, net, protocol } from 'electron'
+import { app, BrowserWindow, dialog, shell, Menu, Tray, nativeImage, nativeTheme, globalShortcut, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { pathToFileURL } from 'node:url'
@@ -9,9 +9,10 @@ import { tMain, type AppLanguage } from './i18n'
 import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './updater'
 import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
 import { buildWorkLogEditorQuery, shouldPromptWorkLogEditorClose } from './workLogEditorWindow'
-import { buildTaskCreateQuery } from './taskCreateWindow'
+import { buildTaskCreateQuery, buildTaskCreateTitleBarOverlay, shouldPromptTaskCreateClose } from './taskCreateWindow'
 import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
+import { ReportService } from './reports/reportService'
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'workpulse-attachment',
@@ -26,6 +27,19 @@ let workLogEditorWindow: BrowserWindow | null = null
 let workLogEditorPublicId: string | null = null
 let workLogEditorDirty = false
 let taskCreateWindow: BrowserWindow | null = null
+let taskCreateDirty = false
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection in WorkPulse main process', reason)
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception in WorkPulse main process', error)
+  if (app.isReady()) {
+    dialog.showErrorBox('WorkPulse 发生错误', error instanceof Error ? error.message : String(error))
+  }
+  app.quit()
+})
 
 // --- Helpers ---
 
@@ -335,12 +349,12 @@ function createWorkLogEditorWindow(publicId: string, parent: BrowserWindow | nul
     if (!shouldPromptWorkLogEditorClose(workLogEditorDirty, isQuitting)) return
     const result = dialog.showMessageBoxSync(editorWindow, {
       type: 'warning',
-      buttons: ['继续编辑', '放弃修改'],
+      buttons: [tMain('continueEditing'), tMain('discardChanges')],
       defaultId: 0,
       cancelId: 0,
-      title: '未保存的日志',
-      message: '当前日志还有未保存的修改。',
-      detail: '关闭窗口将丢失这些修改。'
+      title: tMain('unsavedWorkLogTitle'),
+      message: tMain('unsavedWorkLogMessage'),
+      detail: tMain('unsavedWorkLogDetail')
     })
     if (result === 0) {
       event.preventDefault()
@@ -372,6 +386,9 @@ function createTaskCreateWindow(parent: BrowserWindow | null): void {
     return
   }
 
+  const savedTheme = getSetting('theme')
+  const isDarkTheme = savedTheme === 'dark' || (savedTheme !== 'light' && nativeTheme.shouldUseDarkColors)
+
   const editorWindow = new BrowserWindow({
     width: 980,
     height: 760,
@@ -382,6 +399,10 @@ function createTaskCreateWindow(parent: BrowserWindow | null): void {
     parent: parent && !parent.isDestroyed() ? parent : undefined,
     autoHideMenuBar: true,
     icon: getAppIconPath(),
+    // Windows/Linux 隐藏原生标题栏，使用系统 overlay 关闭控件；macOS 保留原生标题栏
+    ...(process.platform === 'win32' || process.platform === 'linux'
+      ? { titleBarStyle: 'hidden' as const, titleBarOverlay: buildTaskCreateTitleBarOverlay(isDarkTheme) }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -389,6 +410,7 @@ function createTaskCreateWindow(parent: BrowserWindow | null): void {
   })
 
   taskCreateWindow = editorWindow
+  taskCreateDirty = false
 
   editorWindow.once('ready-to-show', () => {
     if (!editorWindow.isDestroyed()) {
@@ -397,8 +419,29 @@ function createTaskCreateWindow(parent: BrowserWindow | null): void {
     }
   })
 
+  editorWindow.on('close', (event) => {
+    if (!shouldPromptTaskCreateClose(taskCreateDirty, isQuitting)) return
+    const result = dialog.showMessageBoxSync(editorWindow, {
+      type: 'warning',
+      buttons: [tMain('continueEditing'), tMain('discardChanges')],
+      defaultId: 0,
+      cancelId: 0,
+      title: tMain('unsavedTaskCreateTitle'),
+      message: tMain('unsavedTaskCreateMessage'),
+      detail: tMain('unsavedTaskCreateDetail')
+    })
+    if (result === 0) {
+      event.preventDefault()
+    } else {
+      taskCreateDirty = false
+    }
+  })
+
   editorWindow.on('closed', () => {
-    if (taskCreateWindow === editorWindow) taskCreateWindow = null
+    if (taskCreateWindow === editorWindow) {
+      taskCreateWindow = null
+      taskCreateDirty = false
+    }
   })
 
   const query = buildTaskCreateQuery()
@@ -443,15 +486,21 @@ function registerTaskCreateIpc(): void {
     return true
   })
 
+  ipcMain.on('task-create:set-dirty', (event, isDirty: boolean) => {
+    const editorWindow = BrowserWindow.fromWebContents(event.sender)
+    if (editorWindow === taskCreateWindow) taskCreateDirty = isDirty
+  })
+
   ipcMain.on('task-create:changed', (event, publicId: string) => {
     if (BrowserWindow.fromWebContents(event.sender) !== taskCreateWindow) return
     if (typeof publicId !== 'string' || !publicId.trim()) return
     getMainWindow()?.webContents.send('task-create:changed', publicId)
   })
 
-  ipcMain.on('task-create:close', (event) => {
+  ipcMain.on('task-create:close', (event, discard = false) => {
     const editorWindow = BrowserWindow.fromWebContents(event.sender)
     if (!editorWindow || editorWindow !== taskCreateWindow) return
+    if (discard === true) taskCreateDirty = false
     editorWindow.close()
   })
 }
@@ -513,6 +562,7 @@ if (!gotTheLock) {
     })
 
     await initDatabase()
+    new ReportService(getDatabase(), getDefaultWorkspaceContext()).recoverInterruptedGenerations()
     registerAttachmentProtocol()
     startRepositoryScheduler()
     configureAutoUpdater()
@@ -534,6 +584,10 @@ if (!gotTheLock) {
     if (!results.log || !results.task) {
       console.warn('One or more global shortcuts could not be registered')
     }
+  }).catch((error: unknown) => {
+    console.error('WorkPulse startup failed', error)
+    dialog.showErrorBox('WorkPulse 启动失败', error instanceof Error ? error.message : '数据库初始化失败，请检查数据目录和备份目录。')
+    app.quit()
   })
 
   app.on('before-quit', () => {
