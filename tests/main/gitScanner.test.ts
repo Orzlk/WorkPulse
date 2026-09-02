@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { openDatabase, runMigrations } from '../../src/main/database/connection'
 import type { WorkspaceContext } from '../../src/main/repositories/contracts'
@@ -88,11 +88,10 @@ describe('GitScanner', () => {
       await expect(command.execute(directory, args)).rejects.toThrow('只读')
     }
 
-    // Windows CI 的临时目录可能是 8.3 短路径（RUNNER~1），git 返回长路径；统一用真实路径并忽略大小写比较
+    // Windows CI 的临时目录可能是 8.3 短路径（RUNNER~1）而 git 返回长路径，realpath 也不展开；
+    // mkdtemp 的随机目录名每次运行唯一，用它验证 git 解析到了同一个仓库根，且不受大小写影响
     const toplevel = await command.execute(directory, ['rev-parse', '--show-toplevel'])
-    expect(toplevel.replaceAll('\\', '/').toLowerCase()).toContain(
-      realpathSync(directory).replaceAll('\\', '/').toLowerCase()
-    )
+    expect(toplevel.replaceAll('\\', '/').toLowerCase()).toContain(basename(directory).toLowerCase())
   })
 
   it('仅发起允许的只读 Git 命令', async () => {

@@ -2,7 +2,10 @@
   "name": "workpulse",
   "version": "0.0.1",
   "description": "Work log + AI report generator desktop app",
-  "author": "Orzlk",
+  "author": {
+    "name": "Orzlk",
+    "email": "Orzlk@users.noreply.github.com"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
