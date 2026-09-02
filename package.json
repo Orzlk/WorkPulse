@@ -107,12 +107,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "resources/icon.ico"
@@ -123,9 +117,6 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "portable": {
-      "artifactName": "WorkPulse-Portable-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
