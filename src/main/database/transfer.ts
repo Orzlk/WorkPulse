@@ -26,16 +26,16 @@ export interface DatabaseImportResult {
   conflict_public_ids: string[]
 }
 
+// sync_operations 是本地待同步队列，payload 可能包含仓库本地路径等敏感信息，不参与导出/导入。
 type ExportTable =
-  | 'workspaces' | 'users' | 'projects' | 'repositories' | 'repository_bindings'
-  | 'work_logs' | 'tasks' | 'kanban_columns' | 'inbox_items' | 'tags' | 'work_log_tags' | 'task_tags'
+  | 'workspaces' | 'users' | 'projects' | 'repositories' | 'repository_bindings' | 'work_logs' | 'tasks' | 'kanban_columns' | 'inbox_items' | 'tags' | 'work_log_tags' | 'task_tags'
   | 'inbox_tags' | 'git_commits' | 'git_commit_tags' | 'reports' | 'report_projects'
-  | 'report_repositories' | 'report_tags' | 'sync_operations'
+  | 'report_repositories' | 'report_tags'
 
 const EXPORT_TABLES: readonly ExportTable[] = [
   'workspaces', 'users', 'projects', 'repositories', 'repository_bindings', 'work_logs', 'tasks', 'kanban_columns',
   'inbox_items', 'tags', 'work_log_tags', 'task_tags', 'inbox_tags', 'git_commits', 'git_commit_tags',
-  'reports', 'report_projects', 'report_repositories', 'report_tags', 'sync_operations'
+  'reports', 'report_projects', 'report_repositories', 'report_tags'
 ]
 const EXPORT_COLUMNS: Record<ExportTable, readonly string[]> = {
   workspaces: ['id', 'public_id', 'name', 'created_at', 'updated_at', 'deleted_at'],
@@ -56,8 +56,7 @@ const EXPORT_COLUMNS: Record<ExportTable, readonly string[]> = {
   reports: ['id', 'public_id', 'type', 'period_type', 'date_from', 'date_to', 'period_start', 'period_end_exclusive', 'time_zone', 'timezone', 'project_scope', 'repository_scope', 'source_snapshot', 'content', 'version', 'status', 'error_message', 'retry_count', 'generated_at', 'created_at', 'updated_at', 'deleted_at'],
   report_projects: ['report_id', 'project_id'],
   report_repositories: ['report_id', 'repository_id'],
-  report_tags: ['report_id', 'tag_id'],
-  sync_operations: ['id', 'public_id', 'entity_type', 'entity_public_id', 'operation_type', 'payload', 'created_at', 'updated_at', 'attempted_at', 'completed_at', 'failed_at', 'attempt_count', 'error_message']
+  report_tags: ['report_id', 'tag_id']
 }
 const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
   ...EXPORT_COLUMNS,
@@ -73,7 +72,6 @@ const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
   tags: [...EXPORT_COLUMNS.tags, 'workspace_id'],
   git_commits: [...EXPORT_COLUMNS.git_commits, 'workspace_id', 'created_by', 'updated_by'],
   reports: [...EXPORT_COLUMNS.reports, 'workspace_id', 'created_by', 'updated_by'],
-  sync_operations: [...EXPORT_COLUMNS.sync_operations, 'workspace_id'],
   work_log_tags: EXPORT_COLUMNS.work_log_tags,
   task_tags: EXPORT_COLUMNS.task_tags,
   inbox_tags: EXPORT_COLUMNS.inbox_tags,
@@ -84,7 +82,7 @@ const IMPORT_COMPAT_COLUMNS: Record<ExportTable, readonly string[]> = {
 }
 const IMPORT_ORDER: readonly ExportTable[] = [
   'workspaces', 'users', 'projects', 'tags', 'repositories', 'repository_bindings', 'kanban_columns', 'tasks', 'work_logs', 'inbox_items',
-  'git_commits', 'reports', 'sync_operations', 'work_log_tags', 'task_tags', 'inbox_tags',
+  'git_commits', 'reports', 'work_log_tags', 'task_tags', 'inbox_tags',
   'git_commit_tags', 'report_projects', 'report_repositories', 'report_tags'
 ]
 interface ExportScope {
@@ -153,8 +151,7 @@ const EXPORT_SCOPES: Record<ExportTable, ExportScope> = {
     where: 'WHERE reports.workspace_id = ? AND tags.workspace_id = ?',
     parameterCount: 2,
     tableAlias: 'report_tags'
-  },
-  sync_operations: { from: 'sync_operations', where: 'WHERE workspace_id = ?', parameterCount: 1 }
+  }
 }
 const LINK_TABLES = new Set<ExportTable>([
   'work_log_tags', 'task_tags', 'inbox_tags', 'git_commit_tags', 'report_projects', 'report_repositories', 'report_tags'

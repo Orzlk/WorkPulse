@@ -134,7 +134,9 @@ describe('stage 1 acceptance', () => {
 
     const exported = createDatabaseExport(database, context)
     const serialized = JSON.stringify(exported)
+    // 同时检查正斜杠与反斜杠形态，避免 Windows 本地因斜杠方向不同而漏检路径泄漏
     expect(serialized).not.toContain(gitDirectory)
+    expect(serialized).not.toContain(gitDirectory.replaceAll('\\', '/'))
     expect(serialized).not.toContain('api_key')
 
     const targetDirectory = createTemporaryDirectory('workpulse-stage1-import-')

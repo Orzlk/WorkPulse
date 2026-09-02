@@ -269,11 +269,13 @@ describe('database transfer package', () => {
     expect(exported.tables.users).toHaveLength(1)
     for (const table of [
       'projects', 'repositories', 'repository_bindings', 'tasks', 'work_logs', 'inbox_items', 'tags',
-      'git_commits', 'reports', 'sync_operations', 'work_log_tags', 'task_tags', 'inbox_tags',
+      'git_commits', 'reports', 'work_log_tags', 'task_tags', 'inbox_tags',
       'git_commit_tags', 'report_tags', 'report_projects', 'report_repositories'
     ] as const) {
       expect(exported.tables[table]).toHaveLength(1)
     }
+    // sync_operations 属于本地 outbox，不进入导出
+    expect(exported.tables.sync_operations).toBeUndefined()
     expect(JSON.stringify(exported)).toContain('-current')
     expect(JSON.stringify(exported)).not.toContain('-other')
     database.close()
@@ -301,11 +303,13 @@ describe('database transfer package', () => {
     expect(target.prepare('SELECT COUNT(*) AS count FROM users').get()).toEqual({ count: userCountBefore })
     for (const table of [
       'projects', 'repositories', 'repository_bindings', 'tasks', 'work_logs', 'inbox_items', 'tags',
-      'git_commits', 'reports', 'sync_operations', 'work_log_tags', 'task_tags', 'inbox_tags',
+      'git_commits', 'reports', 'work_log_tags', 'task_tags', 'inbox_tags',
       'git_commit_tags', 'report_tags', 'report_projects', 'report_repositories'
     ]) {
       expect(target.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 1 })
     }
+    // 导入不会写入 outbox 行
+    expect(target.prepare('SELECT COUNT(*) AS count FROM sync_operations').get()).toEqual({ count: 0 })
     expect(target.prepare('SELECT COUNT(*) AS count FROM projects WHERE public_id = ?').get('project-other')).toEqual({ count: 0 })
     expect(target.prepare('SELECT workspace_id FROM projects WHERE public_id = ?').get('project-current')).toEqual({ workspace_id: targetContext.workspace_id })
     source.close()
