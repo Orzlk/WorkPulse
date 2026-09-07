@@ -1,6 +1,6 @@
 import { ipcMain, dialog, app, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { writeFileSync, readFileSync, statSync } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, statSync, unlinkSync } from 'fs'
 import { dirname, join } from 'path'
 import {
   addWorkLog,
@@ -46,7 +46,8 @@ import { RepositoryService } from './services/repositoryService'
 import { ReportService } from './reports/reportService'
 import { testAiConnection } from './reports/aiProvider'
 import { generateInboxSuggestion } from './ai'
-import { saveAttachment } from './attachments/attachmentStorage'
+import { clearAttachments, saveAttachment } from './attachments/attachmentStorage'
+import { MAX_ARCHIVE_BYTES, readAttachmentArchive, type AttachmentArchiveEntry } from './attachments/attachmentArchive'
 import {
   IpcContractError,
   id,
@@ -72,6 +73,7 @@ import {
   toIpcContractError
 } from './ipcContracts'
 import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
+import { createWorkspaceBackup } from './database/workspaceBackup'
 import { ImportTokenStore } from './database/importTokenStore'
 import { parseFlomoHtml } from './importers/flomoHtmlImporter'
 import { assertImportFileSize, buildImportKey, importFlomoMemos } from './importers/flomoLogImport'
@@ -79,6 +81,7 @@ import { assertImportFileSize, buildImportKey, importFlomoMemos } from './import
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const INBOX_AI_TIMEOUT_MS = 60_000
 const pendingImports = new ImportTokenStore<unknown>(10 * 60 * 1000)
+const pendingArchiveImports = new ImportTokenStore<{ entries: AttachmentArchiveEntry[]; payload: unknown }>(10 * 60 * 1000)
 
 type ReportStreamEvent =
   | { request_id: string; type: 'stage'; stage: 'reading' | 'generating' }
@@ -368,6 +371,23 @@ export function registerIpcHandlers(): void {
     return { filePath: result.filePath, preview: previewDatabaseImport(payload) }
   }))
 
+  ipcMain.handle('database:archive-export', guarded(async () => {
+    const result = await dialog.showSaveDialog({
+      title: `${tMain('exportDatabaseTitle')}（含附件）`,
+      defaultPath: 'workpulse-archive.zip',
+      filters: [{ name: 'WorkPulse ZIP', extensions: ['zip'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const backup = await createWorkspaceBackup(
+      getDatabase(),
+      getDefaultWorkspaceContext(),
+      join(app.getPath('userData'), 'attachments'),
+      result.filePath
+    )
+    const payload = JSON.parse(readAttachmentArchive(readFileSync(backup.filePath)).find((entry) => entry.name === 'data.json')!.data.toString('utf8'))
+    return { filePath: backup.filePath, preview: previewDatabaseImport(payload), attachments: backup.attachments }
+  }))
+
   ipcMain.handle('database:import', guardedWithEvent(async (event, request: unknown) => {
     const action = request && typeof request === 'object' && !Array.isArray(request) ? request as Record<string, unknown> : null
     if (!action || Object.keys(action).some((key) => !['action', 'token'].includes(key)) || (action.action !== 'preview' && action.action !== 'merge')) {
@@ -397,7 +417,66 @@ export function registerIpcHandlers(): void {
     return mergeDatabaseImport(getDatabase(), getDefaultWorkspaceContext(), payload)
   }))
 
-  ipcMain.handle('database:clear', guarded(() => clearWorkspaceData()))
+  ipcMain.handle('database:archive-import', guardedWithEvent(async (event, request: unknown) => {
+    const action = request && typeof request === 'object' && !Array.isArray(request) ? request as Record<string, unknown> : null
+    if (!action || Object.keys(action).some((key) => !['action', 'token'].includes(key)) || (action.action !== 'preview' && action.action !== 'merge')) {
+      throw new IpcContractError('INVALID_ARGUMENT', 'Archive import request is invalid')
+    }
+    if (action.action === 'preview') {
+      const result = await dialog.showOpenDialog({
+        title: `${tMain('importDatabaseTitle')}（含附件）`,
+        filters: [{ name: 'WorkPulse ZIP', extensions: ['zip'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const filePath = result.filePaths[0]
+      if (statSync(filePath).size > MAX_ARCHIVE_BYTES) throw new IpcContractError('IMPORT_TOO_LARGE', 'Archive is too large')
+      const entries = readAttachmentArchive(readFileSync(filePath))
+      let payload: unknown
+      try { payload = JSON.parse(entries.find((entry) => entry.name === 'data.json')!.data.toString('utf8')) } catch { throw new IpcContractError('IMPORT_INVALID', 'Invalid archive data') }
+      const preview = previewDatabaseImport(payload)
+      const token = pendingArchiveImports.put({ entries, payload }, String(event.sender.id))
+      return { token, preview, attachments: entries.filter((entry) => entry.name.startsWith('attachments/')).length }
+    }
+    if (typeof action.token !== 'string') throw new IpcContractError('IMPORT_NOT_READY', 'Archive preview is required')
+    const stored = pendingArchiveImports.take(action.token, String(event.sender.id))
+    if (!stored) throw new IpcContractError('IMPORT_NOT_READY', 'Archive preview expired')
+    const { entries, payload } = stored
+    const attachmentRoot = join(app.getPath('userData'), 'attachments')
+    mkdirSync(attachmentRoot, { recursive: true })
+    const createdAttachments: string[] = []
+    try {
+      for (const entry of entries.filter((candidate) => candidate.name.startsWith('attachments/'))) {
+        const name = entry.name.slice('attachments/'.length)
+        const target = join(attachmentRoot, name)
+        try {
+          writeFileSync(target, entry.data, { flag: 'wx' })
+          createdAttachments.push(target)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        }
+      }
+      return mergeDatabaseImport(getDatabase(), getDefaultWorkspaceContext(), payload)
+    } catch (error) {
+      for (const path of createdAttachments) {
+        try { unlinkSync(path) } catch { /* Best effort rollback of this import's new files. */ }
+      }
+      throw error
+    }
+  }))
+
+  ipcMain.handle('database:clear', guarded(async () => {
+    const result = await clearWorkspaceData(async (database) => {
+      const backupPath = join(
+        app.getPath('userData'),
+        'backups',
+        `workpulse-workspace-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.zip`
+      )
+      return (await createWorkspaceBackup(database, getDefaultWorkspaceContext(), join(app.getPath('userData'), 'attachments'), backupPath)).filePath
+    })
+    clearAttachments(join(app.getPath('userData'), 'attachments'))
+    return result
+  }))
 
   ipcMain.handle('attachment:save', guarded((input: unknown) => {
     const value = parseAttachmentInput(input)

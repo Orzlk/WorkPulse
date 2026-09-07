@@ -14,6 +14,8 @@ import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
 import { ReportService } from './reports/reportService'
 import { parseShortcutUpdateArgs } from './ipcContracts'
+import { collectAttachmentNames, removeUnreferencedAttachments } from './attachments/attachmentArchive'
+import { createDatabaseExport } from './database/transfer'
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'workpulse-attachment',
@@ -564,6 +566,12 @@ if (!gotTheLock) {
     })
 
     await initDatabase()
+    try {
+      const referenced = collectAttachmentNames(createDatabaseExport(getDatabase(), getDefaultWorkspaceContext()))
+      removeUnreferencedAttachments(join(app.getPath('userData'), 'attachments'), referenced)
+    } catch (error) {
+      console.warn('Attachment cleanup skipped', error)
+    }
     new ReportService(getDatabase(), getDefaultWorkspaceContext()).recoverInterruptedGenerations()
     registerAttachmentProtocol()
     startRepositoryScheduler()

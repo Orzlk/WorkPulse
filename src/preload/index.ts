@@ -369,7 +369,9 @@ const api = {
   },
   database: {
     export: () => ipcRenderer.invoke('database:export') as Promise<{ filePath: string; preview: unknown } | null>,
+    archiveExport: () => ipcRenderer.invoke('database:archive-export') as Promise<{ filePath: string; preview: unknown; attachments: number } | null>,
     import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:import', request) as Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>,
+    archiveImport: (request: { action: 'preview' } | { action: 'merge'; token: string }) => ipcRenderer.invoke('database:archive-import', request) as Promise<{ token: string; preview: unknown; attachments?: number } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>,
     clear: () => ipcRenderer.invoke('database:clear') as Promise<ClearWorkspaceDataResult>
   },
   settings: {

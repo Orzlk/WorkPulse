@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve, sep } from 'node:path'
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -63,4 +63,8 @@ export function resolveAttachmentPath(root: string, requestUrl: string): string 
   const candidate = resolve(rootPath, fileName)
   if (candidate !== rootPath && !candidate.startsWith(`${rootPath}${sep}`)) return null
   return existsSync(candidate) ? candidate : null
+}
+
+export function clearAttachments(root: string): void {
+  rmSync(root, { recursive: true, force: true })
 }

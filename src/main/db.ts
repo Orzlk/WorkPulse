@@ -253,10 +253,12 @@ const CLEAR_WORKSPACE_OPERATIONS: ClearWorkspaceOperation[] = [
   }
 ]
 
-export async function clearWorkspaceData(): Promise<ClearWorkspaceDataResult> {
+export async function clearWorkspaceData(createBackup?: (database: Database.Database) => Promise<string>): Promise<ClearWorkspaceDataResult> {
   const context = getDefaultWorkspaceContext()
-  const backupPath = getBackupPath(getDatabaseVersion(db))
-  await backupDatabase(db, backupPath)
+  const backupPath = createBackup
+    ? await createBackup(db)
+    : getBackupPath(getDatabaseVersion(db))
+  if (!createBackup) await backupDatabase(db, backupPath)
 
   const deleted = db.transaction(() => {
     const counts: Record<string, number> = {}

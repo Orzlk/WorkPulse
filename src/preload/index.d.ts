@@ -359,7 +359,9 @@ export interface API {
   }
   database: {
     export: () => Promise<{ filePath: string; preview: unknown } | null>
+    archiveExport: () => Promise<{ filePath: string; preview: unknown; attachments: number } | null>
     import: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<{ token: string; preview: unknown } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
+    archiveImport: (request: { action: 'preview' } | { action: 'merge'; token: string }) => Promise<{ token: string; preview: unknown; attachments?: number } | { inserted: number; conflicts: number; skipped: number; conflict_public_ids: string[] } | null>
     clear: () => Promise<ClearWorkspaceDataResult>
   }
   settings: {

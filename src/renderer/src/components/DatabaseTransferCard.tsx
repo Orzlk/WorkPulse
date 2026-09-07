@@ -12,6 +12,8 @@ interface DatabaseImportPreview {
 interface DatabaseImportReview {
   token: string
   preview: DatabaseImportPreview
+  archive: boolean
+  attachments?: number
 }
 
 interface DatabaseImportResult {
@@ -37,7 +39,7 @@ export function DatabaseTransferCard(): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const [preview, setPreview] = useState<DatabaseImportReview | null>(null)
-  const [busy, setBusy] = useState<'export' | 'import' | 'merge' | null>(null)
+  const [busy, setBusy] = useState<'export' | 'import' | 'merge' | 'archive-export' | 'archive-import' | 'archive-merge' | null>(null)
 
   const exportDatabase = async (): Promise<void> => {
     if (busy) return
@@ -57,7 +59,7 @@ export function DatabaseTransferCard(): JSX.Element {
     setBusy('import')
     try {
       const result = await window.api.database.import({ action: 'preview' })
-      if (isImportReview(result)) setPreview({ token: result.token, preview: result.preview as DatabaseImportPreview })
+      if (isImportReview(result)) setPreview({ token: result.token, preview: result.preview as DatabaseImportPreview, archive: false })
     } catch {
       toast.error(t('settings.databaseImportFailed'))
     } finally {
@@ -65,11 +67,42 @@ export function DatabaseTransferCard(): JSX.Element {
     }
   }
 
+  const exportArchive = async (): Promise<void> => {
+    if (busy) return
+    setBusy('archive-export')
+    try {
+      const result = await window.api.database.archiveExport()
+      if (result) toast.success(t('settings.databaseArchiveExported', { path: result.filePath, count: result.attachments }))
+    } catch {
+      toast.error(t('settings.databaseArchiveExportFailed'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const previewArchive = async (): Promise<void> => {
+    if (busy) return
+    setBusy('archive-import')
+    try {
+      const result = await window.api.database.archiveImport({ action: 'preview' })
+      if (isImportReview(result)) {
+        const archiveResult = result as { token: string; preview: DatabaseImportPreview; attachments?: number }
+        setPreview({ token: archiveResult.token, preview: archiveResult.preview, archive: true, attachments: archiveResult.attachments })
+      }
+    } catch {
+      toast.error(t('settings.databaseArchiveImportFailed'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const mergeDatabase = async (): Promise<void> => {
     if (!preview || busy) return
-    setBusy('merge')
+    setBusy(preview.archive ? 'archive-merge' : 'merge')
     try {
-      const result = await window.api.database.import({ action: 'merge', token: preview.token })
+      const result = preview.archive
+        ? await window.api.database.archiveImport({ action: 'merge', token: preview.token })
+        : await window.api.database.import({ action: 'merge', token: preview.token })
       if (!isImportResult(result)) throw new Error('Invalid import result')
       setPreview(null)
       toast.success(t('settings.databaseImportMerged', {
@@ -79,7 +112,7 @@ export function DatabaseTransferCard(): JSX.Element {
       }))
       window.setTimeout(() => window.location.reload(), 700)
     } catch {
-      toast.error(t('settings.databaseImportFailed'))
+      toast.error(t(preview?.archive ? 'settings.databaseArchiveImportFailed' : 'settings.databaseImportFailed'))
     } finally {
       setBusy(null)
     }
@@ -99,9 +132,17 @@ export function DatabaseTransferCard(): JSX.Element {
           <Download aria-hidden="true" />
           {busy === 'export' ? t('settings.databaseExporting') : t('settings.databaseExport')}
         </button>
+        <button type="button" onClick={() => { void exportArchive() }} disabled={Boolean(busy)}>
+          <Download aria-hidden="true" />
+          {busy === 'archive-export' ? t('settings.databaseArchiveExporting') : t('settings.databaseArchiveExport')}
+        </button>
         <button type="button" onClick={() => { void previewDatabase() }} disabled={Boolean(busy)}>
           <Upload aria-hidden="true" />
           {busy === 'import' ? t('settings.databaseImporting') : t('settings.databaseImport')}
+        </button>
+        <button type="button" onClick={() => { void previewArchive() }} disabled={Boolean(busy)}>
+          <Upload aria-hidden="true" />
+          {busy === 'archive-import' ? t('settings.databaseArchiveImporting') : t('settings.databaseArchiveImport')}
         </button>
       </div>
 
@@ -113,11 +154,12 @@ export function DatabaseTransferCard(): JSX.Element {
             <div className="settings-transfer-summary">
               <strong>{t('settings.databaseImportRecords', { count: preview.preview.total_records })}</strong>
               <span>{t('settings.databaseImportSchema', { version: preview.preview.schema_version })}</span>
+              {preview.archive && <span>{t('settings.databaseArchiveAttachments', { count: preview.attachments ?? 0 })}</span>}
             </div>
             <div className="settings-transfer-dialog-actions">
               <button type="button" onClick={() => setPreview(null)} disabled={busy === 'merge'}>{t('common.cancel')}</button>
-              <button type="button" className="primary-action" onClick={() => { void mergeDatabase() }} disabled={busy === 'merge'}>
-                {busy === 'merge' ? t('settings.databaseMerging') : t('settings.databaseImportConfirm')}
+              <button type="button" className="primary-action" onClick={() => { void mergeDatabase() }} disabled={busy === 'merge' || busy === 'archive-merge'}>
+                {busy === 'merge' || busy === 'archive-merge' ? t('settings.databaseMerging') : t('settings.databaseImportConfirm')}
               </button>
             </div>
           </div>

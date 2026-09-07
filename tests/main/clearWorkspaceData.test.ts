@@ -1,6 +1,5 @@
-import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -16,6 +15,8 @@ import {
   saveReport,
   setSetting
 } from '../../src/main/db'
+import { readAttachmentArchive } from '../../src/main/attachments/attachmentArchive'
+import { createWorkspaceBackup } from '../../src/main/database/workspaceBackup'
 
 const directories: string[] = []
 
@@ -83,12 +84,13 @@ describe('clearWorkspaceData', () => {
     `).run(context.workspace_id, log.public_id, now, now)
     setSetting('clear-test-setting', 'must-survive')
 
-    const result = await clearWorkspaceData()
-    const backup = new Database(result.backupPath, { readonly: true })
+    const backupPath = join(directory, 'backups', 'clear-workspace.zip')
+    const result = await clearWorkspaceData(async (source) => {
+      return (await createWorkspaceBackup(source, context, join(directory, 'attachments'), backupPath)).filePath
+    })
     expect(existsSync(result.backupPath)).toBe(true)
-    expect(backup.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }])
-    expect(backup.prepare('SELECT COUNT(*) AS count FROM work_logs').get()).toEqual({ count: 1 })
-    backup.close()
+    const entries = readAttachmentArchive(readFileSync(result.backupPath))
+    expect(entries.find((entry) => entry.name === 'data.json')?.data.toString()).toContain('需要清除的日志')
 
     for (const table of [
       'work_logs', 'tasks', 'reports', 'projects', 'repositories', 'repository_bindings',
@@ -103,5 +105,21 @@ describe('clearWorkspaceData', () => {
     expect(database.prepare('SELECT COUNT(*) AS count FROM users').get()).toEqual({ count: 1 })
     expect(result.deleted.work_logs).toBe(1)
     expect(result.deleted.tasks).toBe(1)
+  })
+
+  it('keeps business data when the required full backup fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-clear-backup-failure-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const context = database.prepare('SELECT workspace_id FROM users ORDER BY id LIMIT 1').get() as { workspace_id: number }
+    database.prepare(`
+      INSERT INTO work_logs (public_id, workspace_id, content, category, created_at, updated_at)
+      VALUES ('backup-failure-log', ?, 'must remain', '', '2026-09-07T00:00:00.000Z', '2026-09-07T00:00:00.000Z')
+    `).run(context.workspace_id)
+
+    await expect(clearWorkspaceData(async () => { throw new Error('backup failed') })).rejects.toThrow('backup failed')
+    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'backup-failure-log'").get()).toEqual({ content: 'must remain' })
   })
 })
