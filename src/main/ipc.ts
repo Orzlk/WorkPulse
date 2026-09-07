@@ -46,7 +46,7 @@ import { RepositoryService } from './services/repositoryService'
 import { ReportService } from './reports/reportService'
 import { testAiConnection } from './reports/aiProvider'
 import { generateInboxSuggestion } from './ai'
-import { clearAttachments, saveAttachment } from './attachments/attachmentStorage'
+import { saveAttachment, stageAttachmentsForClear } from './attachments/attachmentStorage'
 import { MAX_ARCHIVE_BYTES, readAttachmentArchive, type AttachmentArchiveEntry } from './attachments/attachmentArchive'
 import {
   IpcContractError,
@@ -373,9 +373,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('database:archive-export', guarded(async () => {
     const result = await dialog.showSaveDialog({
-      title: `${tMain('exportDatabaseTitle')}（含附件）`,
+      title: tMain('exportDatabaseArchiveTitle'),
       defaultPath: 'workpulse-archive.zip',
-      filters: [{ name: 'WorkPulse ZIP', extensions: ['zip'] }]
+      filters: [{ name: tMain('databaseArchiveFilter'), extensions: ['zip'] }]
     })
     if (result.canceled || !result.filePath) return null
     const backup = await createWorkspaceBackup(
@@ -424,8 +424,8 @@ export function registerIpcHandlers(): void {
     }
     if (action.action === 'preview') {
       const result = await dialog.showOpenDialog({
-        title: `${tMain('importDatabaseTitle')}（含附件）`,
-        filters: [{ name: 'WorkPulse ZIP', extensions: ['zip'] }],
+        title: tMain('importDatabaseArchiveTitle'),
+        filters: [{ name: tMain('databaseArchiveFilter'), extensions: ['zip'] }],
         properties: ['openFile']
       })
       if (result.canceled || !result.filePaths[0]) return null
@@ -466,15 +466,15 @@ export function registerIpcHandlers(): void {
   }))
 
   ipcMain.handle('database:clear', guarded(async () => {
+    const attachmentRoot = join(app.getPath('userData'), 'attachments')
     const result = await clearWorkspaceData(async (database) => {
       const backupPath = join(
         app.getPath('userData'),
         'backups',
         `workpulse-workspace-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.zip`
       )
-      return (await createWorkspaceBackup(database, getDefaultWorkspaceContext(), join(app.getPath('userData'), 'attachments'), backupPath)).filePath
-    })
-    clearAttachments(join(app.getPath('userData'), 'attachments'))
+      return (await createWorkspaceBackup(database, getDefaultWorkspaceContext(), attachmentRoot, backupPath)).filePath
+    }, () => stageAttachmentsForClear(attachmentRoot))
     return result
   }))
 

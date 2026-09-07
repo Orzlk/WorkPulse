@@ -9,6 +9,7 @@ import {
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { afterEach } from 'vitest'
 
 const directories: string[] = []
@@ -44,6 +45,30 @@ describe('attachment archive', () => {
     const endOffset = archive.length - 22
     expect(archive.readUInt16LE(endOffset + 8)).toBe(2)
     expect(archive.readUInt16LE(endOffset + 10)).toBe(2)
+  })
+
+  const windowsOnly = process.platform === 'win32' ? it : it.skip
+  windowsOnly('opens the archive with .NET System.IO.Compression', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workpulse-dotnet-zip-'))
+    directories.push(root)
+    const archivePath = join(root, 'backup.zip')
+    writeFileSync(archivePath, createAttachmentArchive([
+      { name: 'data.json', data: Buffer.from('{"ok":true}', 'utf8') },
+      { name: 'attachments/image.txt', data: Buffer.from('image-data', 'utf8') }
+    ]))
+
+    const output = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [IO.Compression.ZipFile]::OpenRead($env:WORKPULSE_ARCHIVE_PATH); try { @($zip.Entries | ForEach-Object { $reader = [IO.StreamReader]::new($_.Open()); try { [PSCustomObject]@{ Name = $_.FullName; Content = $reader.ReadToEnd() } } finally { $reader.Dispose() } }) | ConvertTo-Json -Compress } finally { $zip.Dispose() }"
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, WORKPULSE_ARCHIVE_PATH: archivePath }
+    })
+
+    const entries = JSON.parse(output) as Array<{ Name: string; Content: string }>
+    expect(entries).toHaveLength(2)
+    expect(entries.map((entry) => entry.Name)).toEqual(['data.json', 'attachments/image.txt'])
+    expect(entries.map((entry) => entry.Content)).toEqual(['{"ok":true}', 'image-data'])
   })
 
   it('keeps references written as markdown links and reference links', () => {

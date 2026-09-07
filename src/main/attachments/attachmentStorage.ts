@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, extname, resolve, sep } from 'node:path'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
@@ -16,6 +16,11 @@ export interface SavedAttachment {
   mimeType: string
   size: number
   url: string
+}
+
+export interface StagedAttachmentClear {
+  restore(): void
+  discard(): void
 }
 
 function extensionFor(input: AttachmentInput): string {
@@ -67,4 +72,24 @@ export function resolveAttachmentPath(root: string, requestUrl: string): string 
 
 export function clearAttachments(root: string): void {
   rmSync(root, { recursive: true, force: true })
+}
+
+export function stageAttachmentsForClear(root: string): StagedAttachmentClear {
+  const source = resolve(root)
+  if (!existsSync(source)) return { restore: () => {}, discard: () => {} }
+  const staged = join(dirname(source), `.${basename(source)}-clearing-${randomUUID()}`)
+  renameSync(source, staged)
+  let active = true
+  return {
+    restore: () => {
+      if (!active) return
+      renameSync(staged, source)
+      active = false
+    },
+    discard: () => {
+      if (!active) return
+      rmSync(staged, { recursive: true, force: true })
+      active = false
+    }
+  }
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,6 +17,7 @@ import {
 } from '../../src/main/db'
 import { readAttachmentArchive } from '../../src/main/attachments/attachmentArchive'
 import { createWorkspaceBackup } from '../../src/main/database/workspaceBackup'
+import { stageAttachmentsForClear } from '../../src/main/attachments/attachmentStorage'
 
 const directories: string[] = []
 
@@ -121,5 +122,59 @@ describe('clearWorkspaceData', () => {
 
     await expect(clearWorkspaceData(async () => { throw new Error('backup failed') })).rejects.toThrow('backup failed')
     expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'backup-failure-log'").get()).toEqual({ content: 'must remain' })
+  })
+
+  it('restores the attachment directory and database data when clearing fails after staging', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-clear-stage-rollback-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const context = database.prepare('SELECT workspace_id FROM users ORDER BY id LIMIT 1').get() as { workspace_id: number }
+    database.prepare(`
+      INSERT INTO work_logs (public_id, workspace_id, content, category, created_at, updated_at)
+      VALUES ('staged-rollback-log', ?, 'must remain', '', '2026-09-07T00:00:00.000Z', '2026-09-07T00:00:00.000Z')
+    `).run(context.workspace_id)
+    const attachmentRoot = join(directory, 'attachments')
+    mkdirSync(attachmentRoot)
+    writeFileSync(join(attachmentRoot, 'must-remain.png'), 'attachment-data')
+    database.exec("CREATE TRIGGER fail_clear BEFORE DELETE ON work_logs BEGIN SELECT RAISE(ABORT, 'forced clear failure'); END")
+    let staged = 0
+
+    await expect(clearWorkspaceData(
+      async () => join(directory, 'backup.zip'),
+      () => {
+        staged += 1
+        return stageAttachmentsForClear(attachmentRoot)
+      }
+    )).rejects.toThrow('forced clear failure')
+
+    expect(staged).toBe(1)
+    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'staged-rollback-log'").get()).toEqual({ content: 'must remain' })
+    expect(readFileSync(join(attachmentRoot, 'must-remain.png'), 'utf8')).toBe('attachment-data')
+  })
+
+  it('restores the attachment directory and database data when staged-directory cleanup fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-clear-stage-discard-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const context = database.prepare('SELECT workspace_id FROM users ORDER BY id LIMIT 1').get() as { workspace_id: number }
+    database.prepare(`
+      INSERT INTO work_logs (public_id, workspace_id, content, category, created_at, updated_at)
+      VALUES ('staged-discard-log', ?, 'must clear', '', '2026-09-07T00:00:00.000Z', '2026-09-07T00:00:00.000Z')
+    `).run(context.workspace_id)
+    const attachmentRoot = join(directory, 'attachments')
+    mkdirSync(attachmentRoot)
+    writeFileSync(join(attachmentRoot, 'cleared.png'), 'attachment-data')
+
+    await expect(clearWorkspaceData(async () => join(directory, 'backup.zip'), () => {
+      const staged = stageAttachmentsForClear(attachmentRoot)
+      return { restore: staged.restore, discard: () => { throw new Error('attachment directory is locked') } }
+    })).rejects.toThrow('attachment directory is locked')
+
+    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'staged-discard-log'").get()).toEqual({ content: 'must clear' })
+    expect(readFileSync(join(attachmentRoot, 'cleared.png'), 'utf8')).toBe('attachment-data')
   })
 })

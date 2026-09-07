@@ -12,6 +12,7 @@ import { buildFtsQuery } from './search/ftsQuery'
 import { isTaskPriority, normalizeChecklist, parseChecklist, type TaskChecklistItem, type TaskPriority } from './kanban/kanbanTypes'
 import { normalizeTaskBoardState } from './kanban/kanbanState'
 import { enqueueOutbox, getPendingOutboxCount } from './sync/outbox'
+import type { StagedAttachmentClear } from './attachments/attachmentStorage'
 
 let db: Database.Database
 
@@ -253,22 +254,33 @@ const CLEAR_WORKSPACE_OPERATIONS: ClearWorkspaceOperation[] = [
   }
 ]
 
-export async function clearWorkspaceData(createBackup?: (database: Database.Database) => Promise<string>): Promise<ClearWorkspaceDataResult> {
+export async function clearWorkspaceData(
+  createBackup?: (database: Database.Database) => Promise<string>,
+  stageAttachments?: () => StagedAttachmentClear
+): Promise<ClearWorkspaceDataResult> {
   const context = getDefaultWorkspaceContext()
   const backupPath = createBackup
     ? await createBackup(db)
     : getBackupPath(getDatabaseVersion(db))
   if (!createBackup) await backupDatabase(db, backupPath)
+  const stagedAttachments = stageAttachments?.()
 
-  const deleted = db.transaction(() => {
-    const counts: Record<string, number> = {}
-    for (const operation of CLEAR_WORKSPACE_OPERATIONS) {
-      const row = db.prepare(operation.countSql).get(context.workspace_id) as { count: number }
-      counts[operation.table] = row.count
-      db.prepare(operation.deleteSql).run(context.workspace_id)
-    }
-    return counts
-  })()
+  let deleted: Record<string, number>
+  try {
+    deleted = db.transaction(() => {
+      const counts: Record<string, number> = {}
+      for (const operation of CLEAR_WORKSPACE_OPERATIONS) {
+        const row = db.prepare(operation.countSql).get(context.workspace_id) as { count: number }
+        counts[operation.table] = row.count
+        db.prepare(operation.deleteSql).run(context.workspace_id)
+      }
+      stagedAttachments?.discard()
+      return counts
+    })()
+  } catch (error) {
+    try { stagedAttachments?.restore() } catch { /* Preserve the original database error. */ }
+    throw error
+  }
 
   return { backupPath, deleted }
 }
