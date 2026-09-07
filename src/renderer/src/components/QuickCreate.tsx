@@ -48,6 +48,10 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
     }
   }, [fetchProjects, returnFocusRef])
 
+  useEffect(() => {
+    setMode(initialMode)
+  }, [initialMode])
+
   useEffect(() => { inputRef.current?.focus() }, [mode])
 
   // 内容越多输入区越高，超过上限后内部滚动

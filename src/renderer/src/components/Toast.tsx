@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { CheckCircle2, AlertCircle, X } from 'lucide-react'
+import { useI18n } from '../stores/languageStore'
 
 interface Toast {
   id: number
@@ -21,6 +22,7 @@ let nextId = 0
 
 export function ToastProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const { t } = useI18n()
 
   const remove = useCallback((id: number) => {
     // Start exit animation
@@ -37,11 +39,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
     setTimeout(() => remove(id), action ? 5000 : 2500)
   }, [remove])
 
-  const value: ToastContextValue = {
-    success: useCallback((msg: string) => add(msg, 'success'), [add]),
-    successWithAction: useCallback((msg: string, actionLabel: string, onAction: () => void) => add(msg, 'success', { label: actionLabel, onClick: onAction }), [add]),
-    error: useCallback((msg: string) => add(msg, 'error'), [add])
-  }
+  const success = useCallback((msg: string) => add(msg, 'success'), [add])
+  const successWithAction = useCallback((msg: string, actionLabel: string, onAction: () => void) => add(msg, 'success', { label: actionLabel, onClick: onAction }), [add])
+  const error = useCallback((msg: string) => add(msg, 'error'), [add])
+  const value = useMemo<ToastContextValue>(() => ({ success, successWithAction, error }), [error, success, successWithAction])
 
   return (
     <ToastContext.Provider value={value}>
@@ -51,25 +52,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm ${
-              toast.exiting ? 'animate-toast-out' : 'animate-toast'
-            } ${
-              toast.type === 'success'
-                ? 'bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
-                : 'bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-            }`}
+            role={toast.type === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`toast-notification ${toast.exiting ? 'animate-toast-out' : 'animate-toast'} ${toast.type === 'success' ? 'toast-success' : 'toast-error'}`}
           >
             {toast.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+              <CheckCircle2 className="toast-icon toast-icon-success" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <AlertCircle className="toast-icon toast-icon-error" />
             )}
             <span>{toast.message}</span>
             {toast.action && (
               <button
                 type="button"
                 onClick={() => { toast.action?.onClick(); remove(toast.id) }}
-                className="font-medium text-green-700 underline underline-offset-2 hover:text-green-900 dark:text-green-300 dark:hover:text-green-100"
+                className="toast-action"
               >
                 {toast.action.label}
               </button>
@@ -77,7 +74,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
             <button
               type="button"
               onClick={() => remove(toast.id)}
-              className="ml-2 p-0.5 text-zinc-400 hover:text-zinc-600"
+              className="toast-close"
+              aria-label={t('workspace.closeToast')}
             >
               <X className="w-3.5 h-3.5" />
             </button>

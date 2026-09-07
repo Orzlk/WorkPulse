@@ -3,21 +3,28 @@ import { Clock3, Search, X } from 'lucide-react'
 import { createLatestRequestGate } from '../lib/workspaceInteractions'
 import { useI18n } from '../stores/languageStore'
 import type { SearchResult } from '../lib/workspaceTypes'
+import { getNextSearchIndex } from '../lib/searchNavigation'
+import { useOverlayStack } from './OverlayStack'
 
 interface Props {
   onOpenResult: (result: SearchResult) => void
+  onClose?: () => void
 }
 
 const PAGE_SIZE = 12
 
-export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
+export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<SearchResult[]>([])
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle')
+  const [activeIndex, setActiveIndex] = useState<number | null>(null)
   const gate = useMemo(createLatestRequestGate, [])
   const controllerRef = useRef<AbortController | null>(null)
   const { t, resolvedLanguage } = useI18n()
+  const overlayStack = useOverlayStack()
+
+  useEffect(() => overlayStack.register({ id: 'global-search', priority: 20, requestClose: () => onClose?.() }), [onClose, overlayStack])
 
   const runSearch = (text: string, offset: number, append: boolean): void => {
     controllerRef.current?.abort()
@@ -39,6 +46,7 @@ export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
 
   useEffect(() => {
     const text = query.trim()
+    setActiveIndex(null)
     controllerRef.current?.abort()
     if (!text) {
       setItems([])
@@ -49,6 +57,10 @@ export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
     const timer = window.setTimeout(() => runSearch(text, 0, false), 280)
     return () => window.clearTimeout(timer)
   }, [query])
+
+  useEffect(() => {
+    if (activeIndex !== null && activeIndex >= items.length) setActiveIndex(null)
+  }, [activeIndex, items.length])
 
   const sourceLabel = (source: SearchResult['source']): string => {
     const key = {
@@ -76,6 +88,16 @@ export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
         autoComplete="off"
         aria-expanded={Boolean(query)}
         aria-controls="global-search-results"
+        aria-activedescendant={activeIndex === null ? undefined : `global-search-result-${activeIndex}`}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            setActiveIndex((current) => getNextSearchIndex(current, items.length, event.key === 'ArrowDown' ? 1 : -1))
+          } else if (event.key === 'Enter' && activeIndex !== null && items[activeIndex]) {
+            event.preventDefault()
+            onOpenResult(items[activeIndex])
+          }
+        }}
       />
       {query && <button className="global-search-clear" onClick={() => setQuery('')} aria-label={t('workspace.clearSearch')}><X aria-hidden="true" /></button>}
       {query && <>
@@ -84,9 +106,9 @@ export function GlobalSearch({ onOpenResult }: Props): JSX.Element {
           {status === 'error' && t('workspace.searchFailed')}
           {status === 'idle' && items.length === 0 && t('workspace.noSearchResults')}
         </div>
-        <div id="global-search-results" className="global-search-results" role="list" aria-label={t('workspace.searchResults')}>
-          {items.map((item) => <div role="listitem" key={`${item.source}:${item.public_id}`}>
-            <button className="global-search-result" onClick={() => onOpenResult(item)}>
+        <div id="global-search-results" className="global-search-results" role="listbox" aria-label={t('workspace.searchResults')}>
+          {items.map((item, index) => <div role="option" aria-selected={activeIndex === index} id={`global-search-result-${index}`} key={`${item.source}:${item.public_id}`}>
+            <button className={`global-search-result ${activeIndex === index ? 'is-active' : ''}`} onClick={() => onOpenResult(item)}>
               <span className="search-result-content"><strong>{item.title}</strong><span>{item.excerpt}</span></span>
               <span className="search-result-meta">
                 <span>{sourceLabel(item.source)}</span>

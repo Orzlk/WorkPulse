@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import type { InboxItem, Page, SearchResult } from '../domain/types'
 import type { Pagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
-import { normalizeTagName } from '../repositories/localTagRepository'
+import { escapeLikePattern, normalizeTagName } from '../repositories/localTagRepository'
 import { buildFtsQuery } from '../search/ftsQuery'
 
 export interface InboxSearchQuery extends Pagination {
@@ -84,9 +84,9 @@ export class SearchService {
           WHERE content_search.entity_type = 'inbox_item'
             AND content_search.entity_id = CAST(inbox_items.id AS TEXT)
             AND content_search.workspace_id = inbox_items.workspace_id
-            AND content_search.content LIKE ?
+            AND content_search.content LIKE ? ESCAPE '!'
         )`)
-        values.push(`%${query.text.trim()}%`)
+        values.push(`%${escapeLikePattern(query.text.trim())}%`)
       }
     }
     for (const tagName of query.tag_names ?? []) {
@@ -98,9 +98,9 @@ export class SearchService {
         WHERE inbox_tags.inbox_item_id = inbox_items.id
           AND tags.workspace_id = inbox_items.workspace_id
           AND tags.deleted_at IS NULL
-          AND (tags.path = ? OR tags.path LIKE ?)
-      )`)
-      values.push(path, `${path}/%`)
+          AND (tags.path = ? OR tags.path LIKE ? ESCAPE '!')
+        )`)
+      values.push(path, `${escapeLikePattern(path)}/%`)
     }
     const where = conditions.join(' AND ')
     const rows = this.database.prepare(`
@@ -131,7 +131,7 @@ export class SearchService {
   private searchWithTextMode(query: UnifiedSearchQuery, textMode: 'fts' | 'like'): Page<SearchResult> {
     this.assertWorkspace()
     const text = query.text?.trim() ?? ''
-    const like = `%${text}%`
+    const like = `%${escapeLikePattern(text)}%`
     const tagSelect = (table: SearchFilterSpec['tagTable'], column: SearchFilterSpec['tagColumn']): string => `
       (SELECT GROUP_CONCAT(COALESCE(tags.display_path, tags.path), ',') FROM ${table} AS entity_tags
        INNER JOIN tags ON tags.id = entity_tags.tag_id

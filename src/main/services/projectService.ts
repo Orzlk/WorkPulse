@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
 
 import type Database from 'better-sqlite3'
 
 import type { Page, Project, ProjectActivityItem, ProjectInput } from '../domain/types'
 import type { Pagination, ReadOptions, WorkspaceContext } from '../repositories/contracts'
+import { enqueueOutbox } from '../sync/outbox'
 import { LocalProjectRepository } from '../repositories/localProjectRepository'
 
 export class ProjectService {
@@ -196,20 +196,12 @@ export class ProjectService {
     payload: unknown
   ): void {
     const now = new Date().toISOString()
-    this.database.prepare(`
-      INSERT INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type,
-        payload, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      this.context.workspace_id,
-      entityType,
-      entityPublicId,
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: entityType,
+      publicId: entityPublicId,
       operationType,
-      JSON.stringify(payload),
-      now,
-      now
-    )
+      changedAt: now,
+      data: payload
+    })
   }
 }

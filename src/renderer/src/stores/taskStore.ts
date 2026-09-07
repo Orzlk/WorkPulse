@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { WorkItemAssociations } from '../lib/workspaceTypes'
+import { createLatestRequestGate } from '../lib/workspaceInteractions'
 
 interface Task {
   id: number
@@ -24,12 +25,13 @@ interface TaskStore {
   loading: boolean
   error: string | null
   lastDeleted: Task | null
+  deletedTasks: Task[]
   fetchTasks: () => Promise<void>
   loadByPublicId: (publicId: string) => Promise<Task | null>
   addTask: (title: string, description?: string, status?: 'todo' | 'draft', createdAt?: string, associations?: WorkItemAssociations, priority?: Task['priority'], dueDate?: string | null) => Promise<Task>
   updateTask: (id: number, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'board_column' | 'position' | 'due_date' | 'priority' | 'checklist'>> & WorkItemAssociations) => Promise<void>
   deleteTask: (id: number) => Promise<void>
-  undoDelete: () => Promise<void>
+  undoDelete: (id?: number) => Promise<void>
   dismissUndo: () => void
   completeTask: (id: number, logContent: string) => Promise<void>
   completeTaskOnly: (id: number) => Promise<void>
@@ -37,21 +39,25 @@ interface TaskStore {
   getByStatus: (status: Task['status']) => Task[]
 }
 
+const requestGate = createLatestRequestGate()
+
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: [],
   loading: false,
   error: null,
   lastDeleted: null,
+  deletedTasks: [],
 
   fetchTasks: async () => {
+    const requestId = requestGate.next()
     set({ loading: true })
     try {
       const tasks = await window.api.task.list()
-      set({ tasks, error: null })
+      if (requestGate.isCurrent(requestId)) set({ tasks, error: null })
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : '加载任务失败' })
+      if (requestGate.isCurrent(requestId)) set({ error: 'kanban.saveFailed' })
     } finally {
-      set({ loading: false })
+      if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
   },
 
@@ -78,21 +84,23 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   deleteTask: async (id) => {
     const deleted = get().tasks.find((task) => task.id === id) ?? null
     await window.api.task.delete(id)
-    set({ tasks: get().tasks.filter((t) => t.id !== id), lastDeleted: deleted })
+    const deletedTasks = deleted ? [deleted, ...get().deletedTasks.filter((task) => task.id !== id)].slice(0, 10) : get().deletedTasks
+    set({ tasks: get().tasks.filter((t) => t.id !== id), lastDeleted: deleted ?? get().lastDeleted, deletedTasks })
   },
 
-  undoDelete: async () => {
-    const deleted = get().lastDeleted
+  undoDelete: async (id) => {
+    const deleted = get().deletedTasks.find((task) => task.id === id) ?? (id === undefined ? get().lastDeleted : null)
     if (!deleted) return
     const restored = await window.api.task.restore(deleted.id)
     if (restored) {
-      set({ lastDeleted: null })
+      const deletedTasks = get().deletedTasks.filter((task) => task.id !== deleted.id)
+      set({ lastDeleted: deletedTasks[0] ?? null, deletedTasks })
       await get().fetchTasks()
     }
   },
 
   dismissUndo: () => {
-    set({ lastDeleted: null })
+    set({ lastDeleted: null, deletedTasks: [] })
   },
 
   completeTask: async (id, logContent) => {

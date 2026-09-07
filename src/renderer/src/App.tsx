@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { BarChart3, ClipboardList, Columns3, FolderKanban, Plus, Search, Settings } from 'lucide-react'
 import { QuickCreate } from './components/QuickCreate'
+import { OverlayStackProvider } from './components/OverlayStack'
 import { GlobalSearch } from './components/GlobalSearch'
 import { useToast } from './components/Toast'
 import { useThemeStore } from './stores/themeStore'
@@ -11,6 +12,7 @@ import { useI18n } from './stores/languageStore'
 import type { SearchResult } from './lib/workspaceTypes'
 import { parseWorkLogEditorRoute } from './lib/workLogEditorRoute'
 import { parseTaskCreateRoute } from './lib/taskCreateRoute'
+import { requestNavigation } from './lib/navigationGuard'
 import workpulseMark from './assets/workpulse-mark.png'
 
 const WorkLogPage = lazy(() => import('./pages/WorkLogPage'))
@@ -49,6 +51,7 @@ function MainApp(): JSX.Element {
   const [taskFocusId, setTaskFocusId] = useState<string | null>(null)
   const [repositoryFocusId, setRepositoryFocusId] = useState<string | null>(null)
   const [reportProjectId, setReportProjectId] = useState<string | null>(null)
+  const [reportFocusId, setReportFocusId] = useState<string | null>(null)
   const initTheme = useThemeStore((state) => state.init)
   const initLanguage = useLanguageStore((state) => state.init)
   const projects = useProjectStore((state) => state.items)
@@ -59,6 +62,9 @@ function MainApp(): JSX.Element {
   const { t } = useI18n()
   const quickCreateTriggerRef = useRef<HTMLButtonElement>(null)
   const updateDownloadedNotifiedRef = useRef(false)
+  const navigate = useCallback((page: Page): void => {
+    void requestNavigation(page, () => setCurrentPage(page))
+  }, [])
 
   useEffect(() => { void initTheme(); void initLanguage(); void fetchProjects(); void fetchRepositories() }, [initTheme, initLanguage, fetchProjects, fetchRepositories])
   useEffect(() => {
@@ -74,19 +80,20 @@ function MainApp(): JSX.Element {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented) return
       if (quickCreate) return
+      if (event.key === 'Escape' && (document.querySelector('[role="dialog"]') || (event.target instanceof Element && event.target.closest('[role="dialog"]')))) return
       const mod = event.metaKey || event.ctrlKey
       if (mod && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen((open) => !open); return }
-      if (mod && event.key === '1') { event.preventDefault(); setCurrentPage('worklog') }
-      else if (mod && event.key === '2') { event.preventDefault(); setCurrentPage('kanban') }
-      else if (mod && event.key === '3') { event.preventDefault(); setCurrentPage('projects') }
-      else if (mod && event.key === '4') { event.preventDefault(); setCurrentPage('report') }
-      else if (mod && event.key === '5') { event.preventDefault(); setCurrentPage('inbox') }
-      else if (mod && event.key === ',') { event.preventDefault(); setCurrentPage('settings') }
-      else if (event.key === 'Escape') { setSearchOpen(false); if (currentPage === 'settings') setCurrentPage('worklog') }
+      if (mod && event.key === '1') { event.preventDefault(); navigate('worklog') }
+      else if (mod && event.key === '2') { event.preventDefault(); navigate('kanban') }
+      else if (mod && event.key === '3') { event.preventDefault(); navigate('projects') }
+      else if (mod && event.key === '4') { event.preventDefault(); navigate('report') }
+      else if (mod && event.key === '5') { event.preventDefault(); navigate('inbox') }
+      else if (mod && event.key === ',') { event.preventDefault(); navigate('settings') }
+      else if (event.key === 'Escape') { setSearchOpen(false); if (currentPage === 'settings') navigate('worklog') }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentPage, quickCreate])
+  }, [currentPage, navigate, quickCreate])
   useEffect(() => {
     const unsubCreate = window.api.on.quickCreate((type) => {
       if (type === 'task') {
@@ -95,45 +102,46 @@ function MainApp(): JSX.Element {
       }
       setQuickCreate(type)
     })
-    const unsubNav = window.api.on.navigate((page) => setCurrentPage(page))
+    const unsubNav = window.api.on.navigate((page) => navigate(page))
     return () => { unsubCreate(); unsubNav() }
-  }, [])
+  }, [navigate])
 
   const openSearchResult = useCallback((result: SearchResult) => {
-    if (result.source === 'inbox') {
-      setInboxFocusId(result.public_id)
-      setCurrentPage('inbox')
-    } else if (result.source === 'work_log') {
-      setWorkLogFocusId(result.public_id)
-      setCurrentPage('worklog')
-    } else if (result.source === 'task') {
-      setTaskFocusId(result.public_id)
-      setCurrentPage('kanban')
-    } else if (result.source === 'git_commit') {
-      setRepositoryFocusId(result.repository_id)
-      setCurrentPage('repositories')
-    } else {
-      setReportProjectId(result.project_id)
-      setCurrentPage('report')
-    }
-    setSearchOpen(false)
+    const page: Page = result.source === 'inbox'
+      ? 'inbox'
+      : result.source === 'work_log'
+        ? 'worklog'
+        : result.source === 'task'
+          ? 'kanban'
+          : result.source === 'git_commit'
+            ? 'repositories'
+            : 'report'
+    void requestNavigation(page, () => {
+      if (result.source === 'inbox') setInboxFocusId(result.public_id)
+      else if (result.source === 'work_log') setWorkLogFocusId(result.public_id)
+      else if (result.source === 'task') setTaskFocusId(result.public_id)
+      else if (result.source === 'git_commit') setRepositoryFocusId(result.repository_id)
+      else { setReportProjectId(result.project_id); setReportFocusId(result.public_id) }
+      setCurrentPage(page)
+      setSearchOpen(false)
+    })
   }, [])
   const renderPage = (): JSX.Element => {
-    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} onFocusHandled={() => setWorkLogFocusId(null)} onOpenInbox={() => setCurrentPage('inbox')} />
+    if (currentPage === 'worklog') return <WorkLogPage focusPublicId={workLogFocusId} onFocusHandled={() => setWorkLogFocusId(null)} onOpenInbox={() => navigate('inbox')} />
     if (currentPage === 'kanban') return <KanbanPage focusPublicId={taskFocusId} onFocusHandled={() => setTaskFocusId(null)} />
-    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} onProjectChange={setReportProjectId} onOpenInbox={() => setCurrentPage('inbox')} onOpenStats={() => setCurrentPage('stats')} />
-    if (currentPage === 'stats') return <StatsPage onOpenReports={() => setCurrentPage('report')} />
-    if (currentPage === 'settings') return <SettingsPage onBack={() => setCurrentPage('worklog')} />
-    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} onFocusHandled={() => setInboxFocusId(null)} onOpenRecords={() => setCurrentPage('worklog')} />
-    if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); setCurrentPage('report') }} onOpenRepositories={() => setCurrentPage('repositories')} />
-    return <RepositoriesPage focusPublicId={repositoryFocusId} onFocusHandled={() => setRepositoryFocusId(null)} onOpenProjects={() => setCurrentPage('projects')} />
+    if (currentPage === 'report') return <ReportPage projectId={reportProjectId} focusReportId={reportFocusId} onReportFocusHandled={() => setReportFocusId(null)} onProjectChange={setReportProjectId} onOpenInbox={() => navigate('inbox')} onOpenStats={() => navigate('stats')} />
+    if (currentPage === 'stats') return <StatsPage onOpenReports={() => navigate('report')} />
+    if (currentPage === 'settings') return <SettingsPage onBack={() => navigate('worklog')} />
+    if (currentPage === 'inbox') return <InboxPage focusId={inboxFocusId} onFocusHandled={() => setInboxFocusId(null)} onOpenRecords={() => navigate('worklog')} />
+    if (currentPage === 'projects') return <ProjectsPage onOpenReports={(projectId) => { setReportProjectId(projectId); navigate('report') }} onOpenRepositories={() => navigate('repositories')} />
+    return <RepositoriesPage focusPublicId={repositoryFocusId} onFocusHandled={() => setRepositoryFocusId(null)} onOpenProjects={() => navigate('projects')} />
   }
 
   return <div className="hallmark-app workspace-shell h-screen flex flex-col">
     <header className="app-header workspace-header">
-      <div className="app-header-main"><button className="app-brand" onClick={() => setCurrentPage('worklog')} aria-label={t('nav.home')}><img src={workpulseMark} alt="" className="app-brand-mark" /><h1>WorkPulse</h1></button><nav className="app-nav workspace-nav" aria-label={t('nav.main')}>{primaryNavigation.map((group) => { const active = group.pages.includes(currentPage as Exclude<Page, 'settings'>); return <button key={group.id} onClick={() => setCurrentPage(group.defaultPage)} className={`app-nav-button ui-nav-item ${active ? 'is-active' : ''}`} aria-current={active ? 'page' : undefined} data-navigation-group={group.id}><group.Icon aria-hidden="true" />{t(group.labelKey)}</button> })}</nav></div>
-      <div className="header-actions"><button className="header-icon-button ui-icon-button" onClick={() => setSearchOpen((open) => !open)} aria-label={t('nav.search')} aria-expanded={searchOpen}><Search aria-hidden="true" /></button><button ref={quickCreateTriggerRef} className="header-create-button ui-button ui-button--primary" onClick={() => setQuickCreate('inbox')}><Plus aria-hidden="true" />{t('nav.quickCreate')}</button><button onClick={() => setCurrentPage('settings')} className="app-settings-button ui-icon-button" aria-label={t('nav.settings')}><Settings aria-hidden="true" /></button></div>
-      {searchOpen && <GlobalSearch onOpenResult={openSearchResult} />}
+      <div className="app-header-main"><button className="app-brand" onClick={() => navigate('worklog')} aria-label={t('nav.home')}><img src={workpulseMark} alt="" className="app-brand-mark" /><h1>WorkPulse</h1></button><nav className="app-nav workspace-nav" aria-label={t('nav.main')}>{primaryNavigation.map((group) => { const active = group.pages.includes(currentPage as Exclude<Page, 'settings'>); return <button key={group.id} onClick={() => navigate(group.defaultPage)} className={`app-nav-button ui-nav-item ${active ? 'is-active' : ''}`} aria-current={active ? 'page' : undefined} data-navigation-group={group.id}><group.Icon aria-hidden="true" />{t(group.labelKey)}</button> })}</nav></div>
+      <div className="header-actions"><button className="header-icon-button ui-icon-button" onClick={() => setSearchOpen((open) => !open)} aria-label={t('nav.search')} aria-expanded={searchOpen}><Search aria-hidden="true" /></button><button ref={quickCreateTriggerRef} className="header-create-button ui-button ui-button--primary" onClick={() => setQuickCreate('inbox')}><Plus aria-hidden="true" />{t('nav.quickCreate')}</button><button onClick={() => navigate('settings')} className="app-settings-button ui-icon-button" aria-label={t('nav.settings')}><Settings aria-hidden="true" /></button></div>
+      {searchOpen && <GlobalSearch onOpenResult={openSearchResult} onClose={() => setSearchOpen(false)} />}
     </header>
     <main className="app-main flex-1 overflow-auto"><div className={`page-container workspace-content ${currentPage === 'kanban' ? 'page-container-wide' : ''}`}><Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>{renderPage()}</Suspense></div></main>
     {quickCreate && <QuickCreate initialMode={quickCreate} returnFocusRef={quickCreateTriggerRef} onClose={() => setQuickCreate(null)} />}
@@ -141,12 +149,13 @@ function MainApp(): JSX.Element {
 }
 
 function App(): JSX.Element {
+  const { t } = useI18n()
   const route = parseWorkLogEditorRoute(window.location.search)
   const taskCreateRoute = parseTaskCreateRoute(window.location.search)
   if (route.isEditor && route.publicId) {
     return (
       <div className="hallmark-app workspace-shell h-screen">
-        <Suspense fallback={<div className="page-loading" role="status">加载中...</div>}>
+        <Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>
           <WorkLogEditorPage publicId={route.publicId} />
         </Suspense>
       </div>
@@ -155,13 +164,13 @@ function App(): JSX.Element {
   if (taskCreateRoute.isTaskCreate) {
     return (
       <div className="hallmark-app workspace-shell h-screen">
-        <Suspense fallback={<div className="page-loading" role="status">加载中...</div>}>
+        <Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>
           <TaskCreatePage />
         </Suspense>
       </div>
     )
   }
-  return <MainApp />
+  return <OverlayStackProvider><MainApp /></OverlayStackProvider>
 }
 
 export default App

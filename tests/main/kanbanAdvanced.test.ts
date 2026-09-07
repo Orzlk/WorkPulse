@@ -56,7 +56,8 @@ describe('看板高级功能', () => {
   it('keeps the detail drawer closed while dragging a card', () => {
     expect(kanbanPage).toContain('const [draggingTask')
     expect(kanbanPage).toMatch(/onDragStart=\{handleDragStart\}/)
-    expect(kanbanPage).toContain('onDragCancel={() => setDraggingTask(null)}')
+    expect(kanbanPage).toContain('onDragCancel={() => { isDraggingRef.current = false')
+    expect(kanbanPage).toContain('dragRefreshPendingRef.current = false')
     expect(kanbanPage).toContain('<DragOverlay>{draggingTask ?')
   })
 

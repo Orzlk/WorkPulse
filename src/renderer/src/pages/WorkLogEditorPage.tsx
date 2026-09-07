@@ -10,6 +10,8 @@ import { useProjectStore } from '../stores/projectStore'
 import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, syncProjectReference, type ProjectMentionRange } from '../lib/workspaceInteractions'
 import { resolveOrCreateProjectReference } from '../lib/projectMentions'
 import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
+import { loadAllPages } from '../lib/tagPaging'
+import { getLocalDateKey } from '../lib/dateUtils'
 import type { Tag } from '../lib/workspaceTypes'
 
 interface WorkLog {
@@ -89,7 +91,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
     void initTheme()
     void initLanguage()
     void fetchProjects()
-    void window.api.tag.list({ limit: 200, offset: 0 }).then((page) => setTagOptions(page.items)).catch(() => setTagOptions([]))
+    void loadAllPages((pagination) => window.api.tag.list(pagination)).then((items) => setTagOptions(items)).catch(() => setTagOptions([]))
   }, [fetchProjects, initLanguage, initTheme])
 
   useEffect(() => {
@@ -106,7 +108,7 @@ function WorkLogEditorPage({ publicId }: WorkLogEditorPageProps): JSX.Element {
       const nextValues: EditorValues = {
         content: loadedLog.content,
         category: loadedLog.category,
-        date: loadedLog.created_at.slice(0, 10),
+        date: getLocalDateKey(loadedLog.created_at),
         projectId: loadedLog.project_id ?? ''
       }
       initialValuesRef.current = serializeEditorValues(nextValues)

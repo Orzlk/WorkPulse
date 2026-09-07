@@ -9,6 +9,7 @@ import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import type { Repository } from '../lib/workspaceTypes'
 import type { TranslationKey } from '../lib/i18n'
+import { registerNavigationGuard } from '../lib/navigationGuard'
 
 interface RepositoryForm {
   name: string
@@ -80,6 +81,20 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
     if (isEditDirty && !window.confirm(t('workspace.repositoryEditDiscardConfirm'))) return
     setEditingRepository(null)
   }
+
+  useEffect(() => registerNavigationGuard({
+    id: 'repository-editor',
+    priority: 80,
+    request: () => {
+      if (!editingRepository) return true
+      if (savingEdit) return false
+      if (!isEditDirty || window.confirm(t('workspace.repositoryEditDiscardConfirm'))) {
+        setEditingRepository(null)
+        return true
+      }
+      return false
+    }
+  }), [editForm, editingRepository, isEditDirty, savingEdit])
 
   useEffect(() => {
     if (!editingRepository) return

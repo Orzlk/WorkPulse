@@ -93,7 +93,7 @@ describe('项目、收件箱和标签服务', () => {
         { entity_type: 'inbox_item', operation_type: 'create' },
         { entity_type: 'work_log', operation_type: 'create' },
         { entity_type: 'inbox_item', operation_type: 'update' },
-        { entity_type: 'tag_assignment', operation_type: 'attach' }
+        { entity_type: 'tag_assignment', operation_type: 'update' }
       ]))
     const assignment = database.prepare(`
       SELECT entity_public_id, payload
@@ -102,12 +102,15 @@ describe('项目、收件箱和标签服务', () => {
       ORDER BY id
       LIMIT 1
     `).get(`${inbox.public_id}:tag:%`) as { entity_public_id: string; payload: string }
-    const payload = JSON.parse(assignment.payload) as Record<string, string>
-    expect(assignment.entity_public_id).toBe(`${inbox.public_id}:tag:${payload.tag_public_id}`)
+    const payload = JSON.parse(assignment.payload) as { data: Record<string, string>; action: string }
+    expect(assignment.entity_public_id).toBe(`${inbox.public_id}:tag:${payload.data.tag_public_id}`)
     expect(payload).toMatchObject({
-      record_type: 'inbox_item',
-      record_public_id: inbox.public_id,
-      action: 'attach'
+      action: 'update',
+      data: {
+        record_type: 'inbox_item',
+        record_public_id: inbox.public_id,
+        action: 'attach'
+      }
     })
     database.close()
   })

@@ -10,6 +10,7 @@ import {
 } from '../git/gitScanner'
 import type { Page } from '../domain/types'
 import type { Pagination, WorkspaceContext } from '../repositories/contracts'
+import { enqueueOutbox } from '../sync/outbox'
 
 const DEFAULT_LIMIT = 50
 const INITIAL_SCAN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -448,21 +449,13 @@ export class RepositoryService {
     payload: unknown,
     now: string
   ): void {
-    this.database.prepare(`
-      INSERT INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type,
-        payload, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      this.context.workspace_id,
-      entityType,
-      entityPublicId,
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: entityType,
+      publicId: entityPublicId,
       operationType,
-      JSON.stringify(payload),
-      now,
-      now
-    )
+      changedAt: now,
+      data: payload
+    })
   }
 }
 

@@ -5,6 +5,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type Database from 'better-sqlite3'
 
 import type { WorkspaceContext } from '../repositories/contracts'
+import { enqueueOutbox } from '../sync/outbox'
 import { ReportQueryService } from './reportQueryService'
 import type {
   LegacyReportSourceSnapshot,
@@ -82,7 +83,7 @@ export class ReportService {
       return this.database.transaction(() => this.finishReport(created.public_id, content.trim(), new Date().toISOString()))()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI report generation failed'
-      this.database.transaction(() => this.failReport(created.public_id, message, now))()
+      this.database.transaction(() => this.failReport(created.public_id, message, new Date().toISOString()))()
       throw new Error(message)
     }
   }
@@ -280,11 +281,13 @@ export class ReportService {
   }
 
   private enqueueSync(entityPublicId: string, operationType: 'create' | 'update', payload: unknown, now: string): void {
-    this.database.prepare(`
-      INSERT INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at
-      ) VALUES (?, ?, 'report', ?, ?, ?, ?, ?)
-    `).run(randomUUID(), this.context.workspace_id, entityPublicId, operationType, JSON.stringify(payload), now, now)
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: 'report',
+      publicId: entityPublicId,
+      operationType,
+      changedAt: now,
+      data: payload
+    })
   }
 
   private assertWorkspace(): void {

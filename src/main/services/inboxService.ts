@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3'
 
 import type { InboxItem, InboxSuggestion, InboxTarget, Page } from '../domain/types'
 import type { InboxPagination, WorkspaceContext } from '../repositories/contracts'
+import { enqueueOutbox } from '../sync/outbox'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
 import { LocalTagRepository, displayTagName, normalizeTagName } from '../repositories/localTagRepository'
 
@@ -243,19 +244,21 @@ export class InboxService {
     names: string[],
     assign: (tag: ReturnType<LocalTagRepository['create']>) => void
   ): void {
-    for (const name of Array.from(new Set(names.map(normalizeTagName)))) {
+    const normalizedNames = new Map<string, string>()
+    for (const rawName of names) normalizedNames.set(normalizeTagName(rawName), displayTagName(rawName))
+    normalizedNames.forEach((displayName, name) => {
       const existing = this.database.prepare(`
         SELECT public_id FROM tags
         WHERE workspace_id = ? AND path = ? AND deleted_at IS NULL
       `).get(this.context.workspace_id, name) as { public_id: string } | undefined
       const tag = existing
         ? this.tags.get(this.context, existing.public_id)
-        : this.tags.create(this.context, name)
+        : this.tags.create(this.context, displayName)
       if (!tag) throw new Error('Tag not found')
       if (!existing) this.enqueueSync('tag', tag.public_id, 'create', tag)
       assign(tag)
       this.enqueueTagAssignment(recordType, recordPublicId, tag.public_id)
-    }
+    })
   }
 
   private enqueueTagAssignment(
@@ -265,25 +268,20 @@ export class InboxService {
   ): void {
     const operationPublicId = `${recordPublicId}:tag:${tagPublicId}`
     const now = new Date().toISOString()
-    this.database.prepare(`
-      INSERT OR IGNORE INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type,
-        payload, created_at, updated_at
-      ) VALUES (?, ?, 'tag_assignment', ?, 'attach', ?, ?, ?)
-    `).run(
-      operationPublicId,
-      this.context.workspace_id,
-      operationPublicId,
-      JSON.stringify({
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: 'tag_assignment',
+      publicId: operationPublicId,
+      operationType: 'update',
+      changedAt: now,
+      operationId: operationPublicId,
+      data: {
         record_type: recordType,
         entity_type: recordType,
         record_public_id: recordPublicId,
         tag_public_id: tagPublicId,
         action: 'attach'
-      }),
-      now,
-      now
-    )
+      }
+    })
   }
 
   private validateSuggestion(suggestion: InboxSuggestion | null): InboxSuggestion | null {
@@ -328,20 +326,12 @@ export class InboxService {
     payload: unknown
   ): void {
     const now = new Date().toISOString()
-    this.database.prepare(`
-      INSERT INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type,
-        payload, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      this.context.workspace_id,
-      entityType,
-      entityPublicId,
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: entityType,
+      publicId: entityPublicId,
       operationType,
-      JSON.stringify(payload),
-      now,
-      now
-    )
+      changedAt: now,
+      data: payload
+    })
   }
 }

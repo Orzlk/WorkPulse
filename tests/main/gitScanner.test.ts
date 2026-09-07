@@ -223,7 +223,7 @@ describe('GitScanner', () => {
       ORDER BY id LIMIT 1
     `).get() as { entity_public_id: string; payload: string }
     expect(outbox.entity_public_id).toBe(commit.public_id)
-    expect(JSON.parse(outbox.payload)).toMatchObject({ repository_id: repository.public_id })
+    expect(JSON.parse(outbox.payload)).toMatchObject({ data: { repository_id: repository.public_id } })
     expect(service.get(repository.public_id)?.branch).toBeTruthy()
     database.close()
   })

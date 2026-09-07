@@ -43,6 +43,7 @@ const latestReleaseApiUrl = `https://api.github.com/repos/${owner}/${repo}/relea
 const releasePageUrl = `https://github.com/${owner}/${repo}/releases/latest`
 
 export const ONLINE_UPDATES_ENABLED = true
+export const UPDATE_CHECK_TIMEOUT_MS = 10_000
 
 let configured = false
 let updateState: AppUpdateState = {
@@ -69,6 +70,27 @@ function setUpdateState(state: Partial<AppUpdateState>): AppUpdateState {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+export async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = UPDATE_CHECK_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  const callerSignal = init.signal
+  const abortFromCaller = (): void => controller.abort()
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) throw new Error('UPDATE_CHECK_TIMEOUT')
+    throw error
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', abortFromCaller)
+  }
 }
 
 function normalizeVersion(version: string): string {
@@ -118,7 +140,7 @@ async function checkLatestReleaseVersion(): Promise<AppUpdateState> {
   setUpdateState({ status: 'checking', error: undefined, progress: undefined })
 
   try {
-    const response = await fetch(latestReleaseApiUrl, {
+    const response = await fetchWithTimeout(latestReleaseApiUrl, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': `WorkPulse/${app.getVersion()}`

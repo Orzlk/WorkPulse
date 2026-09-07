@@ -3,6 +3,7 @@ import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
 import type { AiProviderName } from './reports/aiProvider'
+import type { TaskChecklistItem, TaskPriority } from './kanban/kanbanTypes'
 import { format, isValid, parseISO } from 'date-fns'
 import { DEFAULT_STATS_DAYS, isValidStatsDays } from './lib/stats'
 
@@ -10,6 +11,31 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const MAX_TAG_NAMES = 50
 const MAX_TAG_NAME_LENGTH = 200
+const MAX_TASK_TITLE_LENGTH = 500
+const MAX_TASK_DESCRIPTION_LENGTH = 10000
+const MAX_WORKLOG_CONTENT_LENGTH = 10000
+const MAX_CATEGORY_LENGTH = 200
+const MAX_POSITION = 1_000_000
+const SETTING_KEYS = new Set([
+  'api_key',
+  'ai_provider',
+  'ai_base_url',
+  'ai_model',
+  'report_language',
+  'report_style',
+  'system_prompt',
+  'report_template',
+  'report_reminders_enabled',
+  'report_reminder_period',
+  'shortcut_quick_log',
+  'shortcut_quick_task',
+  'theme',
+  'app_language',
+  'git_scan_enabled',
+  'git_scan_interval_minutes',
+  'main_window_width',
+  'main_window_height'
+])
 
 export type IpcErrorCode =
   | 'INVALID_ARGUMENT'
@@ -304,18 +330,193 @@ export function parseInboxInput(value: unknown): {
   }
 }
 
+export interface ParsedWorkLogCreateArgs {
+  content: string
+  category: string
+  associations: ParsedWorkItemAssociations
+}
+
+export function parseWorkLogCreateArgs(value: unknown): ParsedWorkLogCreateArgs {
+  const input = object(value, ['content', 'category', 'associations'])
+  return {
+    content: string(input.content, 'content', { max: MAX_WORKLOG_CONTENT_LENGTH }),
+    category: input.category === undefined ? '' : string(input.category, 'category', { allowEmpty: true, max: MAX_CATEGORY_LENGTH }),
+    associations: parseWorkItemAssociations(input.associations)
+  }
+}
+
+export interface ParsedWorkLogUpdateArgs extends ParsedWorkLogCreateArgs {
+  id: number
+  created_at?: string
+}
+
+export function parseWorkLogUpdateArgs(value: unknown): ParsedWorkLogUpdateArgs {
+  const input = object(value, ['id', 'content', 'category', 'created_at', 'associations'])
+  return {
+    id: integerId(input.id, 'worklog id'),
+    content: string(input.content, 'content', { max: MAX_WORKLOG_CONTENT_LENGTH }),
+    category: input.category === undefined ? '' : string(input.category, 'category', { allowEmpty: true, max: MAX_CATEGORY_LENGTH }),
+    created_at: input.created_at === undefined ? undefined : parseTimestamp(input.created_at, 'created_at'),
+    associations: parseWorkItemAssociations(input.associations)
+  }
+}
+
+interface ParsedChecklistItem extends TaskChecklistItem {}
+
+function parseChecklistInput(value: unknown): ParsedChecklistItem[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 100) throw invalid('checklist is invalid')
+  return value.map((item, index) => {
+    const entry = object(item, ['id', 'text', 'completed'])
+    const idValue = entry.id === undefined ? `item-${index + 1}` : string(entry.id, 'checklist id', { max: 100 })
+    if (entry.completed !== undefined && typeof entry.completed !== 'boolean') throw invalid('checklist completed is invalid')
+    return {
+      id: idValue,
+      text: string(entry.text, 'checklist text', { max: 500 }),
+      completed: entry.completed ?? false
+    }
+  })
+}
+
+function parseTaskStatus(value: unknown): 'todo' | 'in_progress' | 'done' | 'draft' {
+  if (!['todo', 'in_progress', 'done', 'draft'].includes(value as string)) throw invalid('task status is invalid')
+  return value as 'todo' | 'in_progress' | 'done' | 'draft'
+}
+
+function parseTaskPriority(value: unknown): TaskPriority {
+  if (!['low', 'medium', 'high'].includes(value as string)) throw invalid('task priority is invalid')
+  return value as TaskPriority
+}
+
+function parseTimestamp(value: unknown, field: string): string {
+  const parsed = string(value, field, { max: 40 })
+  const date = new Date(parsed)
+  if (!Number.isFinite(date.getTime())) throw invalid(`${field} is invalid`)
+  return parsed
+}
+
+export interface ParsedTaskCreateArgs {
+  title: string
+  description: string
+  status: 'todo' | 'draft'
+  createdAt?: string
+  associations: ParsedWorkItemAssociations
+  priority: TaskPriority
+  dueDate: string | null | undefined
+  checklist: ParsedChecklistItem[]
+}
+
+export function parseTaskCreateArgs(value: unknown): ParsedTaskCreateArgs {
+  const input = object(value, ['title', 'description', 'status', 'createdAt', 'associations', 'priority', 'dueDate', 'checklist'])
+  const status = input.status === undefined ? 'todo' : parseTaskStatus(input.status)
+  if (status !== 'todo' && status !== 'draft') throw invalid('task create status is invalid')
+  return {
+    title: string(input.title, 'title', { max: MAX_TASK_TITLE_LENGTH }),
+    description: input.description === undefined ? '' : string(input.description, 'description', { allowEmpty: true, max: MAX_TASK_DESCRIPTION_LENGTH }),
+    status,
+    createdAt: input.createdAt === undefined ? undefined : parseTimestamp(input.createdAt, 'createdAt'),
+    associations: parseWorkItemAssociations(input.associations),
+    priority: input.priority === undefined ? 'medium' : parseTaskPriority(input.priority),
+    dueDate: input.dueDate === null || input.dueDate === undefined ? input.dueDate as string | null | undefined : parseDateOnly(input.dueDate, 'dueDate'),
+    checklist: parseChecklistInput(input.checklist)
+  }
+}
+
+export interface ParsedTaskUpdates {
+  title?: string
+  description?: string
+  status?: 'todo' | 'in_progress' | 'done' | 'draft'
+  board_column?: string
+  position?: number
+  due_date?: string | null
+  priority?: TaskPriority
+  checklist?: ParsedChecklistItem[]
+  project_id?: string | null
+  tag_names?: string[]
+}
+
+export interface ParsedTaskUpdateArgs {
+  id: number
+  updates: ParsedTaskUpdates
+}
+
+export function parseTaskUpdateArgs(value: unknown): ParsedTaskUpdateArgs {
+  const input = object(value, ['id', 'updates'])
+  const updates = object(input.updates, ['title', 'description', 'status', 'board_column', 'position', 'due_date', 'priority', 'checklist', 'project_id', 'tag_names'])
+  const parsed: ParsedTaskUpdates = {}
+  if (updates.title !== undefined) parsed.title = string(updates.title, 'title', { max: MAX_TASK_TITLE_LENGTH })
+  if (updates.description !== undefined) parsed.description = string(updates.description, 'description', { allowEmpty: true, max: MAX_TASK_DESCRIPTION_LENGTH })
+  if (updates.status !== undefined) parsed.status = parseTaskStatus(updates.status)
+  if (updates.board_column !== undefined) parsed.board_column = string(updates.board_column, 'board_column', { max: 100 })
+  if (updates.position !== undefined) {
+    if (!Number.isSafeInteger(updates.position) || (updates.position as number) < 0 || (updates.position as number) > MAX_POSITION) throw invalid('position is invalid')
+    parsed.position = updates.position as number
+  }
+  if (updates.due_date !== undefined) parsed.due_date = updates.due_date === null ? null : parseDateOnly(updates.due_date, 'due_date')
+  if (updates.priority !== undefined) parsed.priority = parseTaskPriority(updates.priority)
+  if (updates.checklist !== undefined) parsed.checklist = parseChecklistInput(updates.checklist)
+  if (updates.project_id !== undefined) parsed.project_id = nullableId(updates.project_id, 'project_id')
+  if (updates.tag_names !== undefined) parsed.tag_names = parseTagNames(updates.tag_names)
+  if (Object.keys(parsed).length === 0) throw invalid('No task fields to update')
+  return { id: integerId(input.id, 'task id'), updates: parsed }
+}
+
+export function parseTaskReorderArgs(value: unknown): {
+  taskIds: number[]
+  boardColumn: string
+  status?: 'todo' | 'in_progress' | 'done' | 'draft'
+  sourceBoardColumn?: string
+  sourceTaskIds: number[]
+  sourceStatus?: 'todo' | 'in_progress' | 'done' | 'draft'
+} {
+  const input = object(value, ['taskIds', 'boardColumn', 'status', 'sourceBoardColumn', 'sourceTaskIds', 'sourceStatus'])
+  const parseIds = (raw: unknown, field: string): number[] => {
+    if (raw === undefined) return []
+    if (!Array.isArray(raw) || raw.length > 1000) throw invalid(`${field} is invalid`)
+    return raw.map((idValue) => integerId(idValue, field))
+  }
+  return {
+    taskIds: parseIds(input.taskIds, 'taskIds'),
+    boardColumn: string(input.boardColumn, 'boardColumn', { max: 100 }),
+    status: input.status === undefined ? undefined : parseTaskStatus(input.status),
+    sourceBoardColumn: input.sourceBoardColumn === undefined ? undefined : string(input.sourceBoardColumn, 'sourceBoardColumn', { max: 100 }),
+    sourceTaskIds: parseIds(input.sourceTaskIds, 'sourceTaskIds'),
+    sourceStatus: input.sourceStatus === undefined ? undefined : parseTaskStatus(input.sourceStatus)
+  }
+}
+
+export function parseSettingUpdateArgs(value: unknown): { key: string; value: string } {
+  const input = object(value, ['key', 'value'])
+  const key = string(input.key, 'setting key', { max: 100 })
+  if (!SETTING_KEYS.has(key)) throw invalid('setting key is invalid')
+  return { key, value: string(input.value, 'setting value', { allowEmpty: true, max: 10000 }) }
+}
+
+export function parseShortcutUpdateArgs(value: unknown): { key: 'shortcut_quick_log' | 'shortcut_quick_task'; value: string } {
+  const input = object(value, ['key', 'value'])
+  if (input.key !== 'shortcut_quick_log' && input.key !== 'shortcut_quick_task') throw invalid('shortcut key is invalid')
+  return { key: input.key, value: string(input.value, 'shortcut value', { max: 200 }) }
+}
+
+function parseDateOnly(value: unknown, field: string): string {
+  const date = string(value, field, { max: 10 })
+  const parsed = parseISO(date)
+  if (!DATE_PATTERN.test(date) || !isValid(parsed) || format(parsed, 'yyyy-MM-dd') !== date) throw invalid(`${field} is invalid`)
+  return date
+}
+
 function parseSuggestion(value: unknown): InboxSuggestion | null | undefined {
   if (value === undefined || value === null) return value
   const input = object(value, ['target', 'title', 'summary', 'project_id', 'tag_names', 'include_in_reports'])
   if (input.target !== 'work_log' && input.target !== 'task' && input.target !== 'ignore') throw invalid('suggestion target is invalid')
-  if (!Array.isArray(input.tag_names) || input.tag_names.some((tag) => typeof tag !== 'string')) throw invalid('suggestion tags are invalid')
+  if (!Array.isArray(input.tag_names) || input.tag_names.length > MAX_TAG_NAMES || input.tag_names.some((tag) => typeof tag !== 'string')) throw invalid('suggestion tags are invalid')
   if (typeof input.include_in_reports !== 'boolean') throw invalid('suggestion include_in_reports is invalid')
   return {
     target: input.target,
     title: string(input.title, 'title', { allowEmpty: true, max: 500 }),
     summary: string(input.summary, 'summary', { allowEmpty: true, max: 4000 }),
     project_id: nullableId(input.project_id, 'suggestion.project_id') ?? null,
-    tag_names: input.tag_names.map((tag) => string(tag, 'tag', { max: 200 })),
+    tag_names: parseTagNames(input.tag_names),
     include_in_reports: input.include_in_reports
   }
 }

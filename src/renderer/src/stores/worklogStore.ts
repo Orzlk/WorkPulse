@@ -22,6 +22,7 @@ interface WorkLogStore {
   tagFilter: string
   projectFilter: string
   lastDeleted: WorkLog | null
+  deletedLogs: WorkLog[]
   pinnedPublicIds: string[]
   fetchLogs: (tagPath?: string, projectPublicId?: string) => Promise<void>
   loadByPublicId: (publicId: string) => Promise<WorkLog | null>
@@ -32,7 +33,7 @@ interface WorkLogStore {
   clearSearch: () => Promise<void>
   addLog: (content: string, category?: string, associations?: WorkItemAssociations) => Promise<WorkLog>
   deleteLog: (id: number) => Promise<void>
-  undoDelete: () => Promise<void>
+  undoDelete: (id?: number) => Promise<void>
   dismissUndo: () => void
   updateLog: (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => Promise<void>
 }
@@ -49,6 +50,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   tagFilter: '',
   projectFilter: '',
   lastDeleted: null,
+  deletedLogs: [],
   pinnedPublicIds: [],
 
   fetchLogs: async (tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
@@ -58,7 +60,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
       const logs = await window.api.worklog.list(PAGE_SIZE, 0, tagPath || undefined, projectPublicId || undefined)
       if (requestGate.isCurrent(requestId)) set({ logs, hasMore: logs.length >= PAGE_SIZE, error: null, pinnedPublicIds: [] })
     } catch (error) {
-      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '加载日志失败' })
+      if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
       if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
@@ -85,7 +87,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
       const more = await window.api.worklog.list(PAGE_SIZE, offset, tagPath || undefined, projectPublicId || undefined)
       if (requestGate.isCurrent(requestId)) set({ logs: [...get().logs, ...more], hasMore: more.length >= PAGE_SIZE, error: null })
     } catch (error) {
-      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '加载更多日志失败' })
+      if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
       if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
@@ -98,7 +100,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
       const logs = await window.api.worklog.search(keyword, tagPath || undefined, projectPublicId || undefined)
       if (requestGate.isCurrent(requestId)) set({ logs, error: null, pinnedPublicIds: [] })
     } catch (error) {
-      if (requestGate.isCurrent(requestId)) set({ error: error instanceof Error ? error.message : '搜索日志失败' })
+      if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
       if (requestGate.isCurrent(requestId)) set({ loading: false })
     }
@@ -144,14 +146,16 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   deleteLog: async (id: number) => {
     const deleted = get().logs.find((l) => l.id === id)
     await window.api.worklog.delete(id)
-    set({ logs: get().logs.filter((l) => l.id !== id), lastDeleted: deleted || null })
+    const deletedLogs = deleted ? [deleted, ...get().deletedLogs.filter((log) => log.id !== id)].slice(0, 10) : get().deletedLogs
+    set({ logs: get().logs.filter((l) => l.id !== id), lastDeleted: deleted ?? get().lastDeleted, deletedLogs })
   },
 
-  undoDelete: async () => {
-    const deleted = get().lastDeleted
+  undoDelete: async (id) => {
+    const deleted = get().deletedLogs.find((log) => log.id === id) ?? (id === undefined ? get().lastDeleted : null)
     if (!deleted) return
     await window.api.worklog.restore(deleted)
-    set({ lastDeleted: null })
+    const deletedLogs = get().deletedLogs.filter((log) => log.id !== deleted.id)
+    set({ lastDeleted: deletedLogs[0] ?? null, deletedLogs })
     // Refresh to get correct ordering
     if (get().searchKeyword) {
       await get().searchLogs(get().searchKeyword, get().tagFilter, get().projectFilter)
@@ -163,7 +167,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   },
 
   dismissUndo: () => {
-    set({ lastDeleted: null })
+    set({ lastDeleted: null, deletedLogs: [] })
   },
 
   updateLog: async (id: number, content: string, category: string, created_at?: string, associations?: WorkItemAssociations) => {

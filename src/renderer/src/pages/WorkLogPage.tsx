@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useWorkLogStore } from '../stores/worklogStore'
-import { groupLogsByDate } from '../lib/dateUtils'
+import { formatTime, groupLogsByDate } from '../lib/dateUtils'
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
 import { extractHashTags, findProjectMention, findTagMention, replaceProjectMention, type ProjectMentionRange } from '../lib/workspaceInteractions'
@@ -26,6 +26,7 @@ import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import { buildTagTree, type TagTreeNode } from '../lib/tagTree'
 import { getMentionMenuPosition, getTextareaCaretPosition, type MentionMenuPosition } from '../lib/mentionMenuPosition'
+import { loadAllPages } from '../lib/tagPaging'
 import { applySelectedTagToComposer } from '../lib/tagComposerDefaults'
 import type { Tag } from '../lib/workspaceTypes'
 
@@ -82,10 +83,10 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
   }
 
   const refreshTagTree = (): Promise<void> =>
-    window.api.tag.list({ limit: 200, offset: 0 })
-      .then((page) => {
-        setTagTree(buildTagTree(page.items))
-        setTagOptions(page.items)
+    loadAllPages((pagination) => window.api.tag.list(pagination))
+      .then((items) => {
+        setTagTree(buildTagTree(items))
+        setTagOptions(items)
       })
       .catch(() => {
         setTagTree([])
@@ -334,14 +335,14 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
       await deleteLog(id)
       await refreshTagTree()
       setDeletingId(null)
-      toast.successWithAction(t('worklog.deleted'), t('worklog.undo'), () => { void handleUndo() })
+      toast.successWithAction(t('worklog.deleted'), t('worklog.undo'), () => { void handleUndo(id) })
     } catch {
       setError(t('worklog.saveError'))
     }
   }
 
-  const handleUndo = async (): Promise<void> => {
-    await undoDelete()
+  const handleUndo = async (id?: number): Promise<void> => {
+    await undoDelete(id)
     toast.success(t('worklog.restored'))
   }
 
@@ -433,7 +434,7 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
         )}
         </div>
       </div>
-      {storeError && <div className="inline-error" role="alert">{storeError}<button type="button" onClick={() => void fetchLogs()}>{t('common.retry')}</button></div>}
+      {storeError && <div className="inline-error" role="alert">{t(storeError as Parameters<typeof t>[0])}<button type="button" onClick={() => void fetchLogs()}>{t('common.retry')}</button></div>}
       {/* Input */}
       <div className="quick-entry-section">
         <div ref={composerRef} className={`quick-entry ${shaking ? 'animate-shake is-error' : ''}`}>
@@ -593,7 +594,7 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
                   >
                     <span className="log-dot" aria-hidden="true" />
                     <div className="log-card-header">
-                      <time className="log-card-time" dateTime={log.created_at}>{log.created_at.slice(0, 16).replace('T', ' ')}</time>
+                      <time className="log-card-time" dateTime={log.created_at}>{formatTime(log.created_at)}</time>
                       {deletingId === log.id ? (
                         <div className="log-delete-confirm" role="group" aria-label={t('worklog.deleteAria')}>
                           <button type="button" onClick={() => void handleDelete(log.id)}>{t('common.confirm')}</button>

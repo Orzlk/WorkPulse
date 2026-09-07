@@ -11,7 +11,15 @@ import {
   parseSearchQueryInput,
   parseInboxListInput,
   parseTagNames,
-  parseWorkItemAssociations
+  parseWorkItemAssociations,
+  parseWorkLogCreateArgs,
+  parseWorkLogUpdateArgs,
+  parseTaskCreateArgs,
+  parseTaskUpdateArgs,
+  parseTaskReorderArgs,
+  parseSettingUpdateArgs,
+  parseShortcutUpdateArgs,
+  parseInboxInput
 } from '../../src/main/ipcContracts'
 
 describe('IPC contract validation', () => {
@@ -105,5 +113,40 @@ describe('IPC contract validation', () => {
     expect(() => parseAiConnectionTestInput({ provider: 'ollama', api_key: 'test-key' })).toThrow('INVALID_ARGUMENT')
     expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: '' })).toThrow('INVALID_ARGUMENT')
     expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: 'test-key', extra: true })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('validates task and work log write payloads at runtime', () => {
+    expect(parseWorkLogCreateArgs({ content: '完成契约校验', category: '开发', associations: {} })).toMatchObject({
+      content: '完成契约校验',
+      category: '开发'
+    })
+    expect(() => parseWorkLogCreateArgs({ content: 123 })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseWorkLogCreateArgs({ content: 'x'.repeat(10001) })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseWorkLogUpdateArgs({ id: '1', content: '日志', category: '' })).toThrow('INVALID_ARGUMENT')
+
+    expect(parseTaskCreateArgs({ title: '任务', description: '说明', status: 'todo', checklist: [] })).toMatchObject({
+      title: '任务',
+      description: '说明',
+      status: 'todo'
+    })
+    expect(() => parseTaskCreateArgs({ title: '' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTaskCreateArgs({ title: '任务', description: 'x'.repeat(10001) })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTaskUpdateArgs({ id: 1, updates: { position: -1 } })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseTaskReorderArgs({ taskIds: ['1'], boardColumn: 'todo' })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('bounds suggestion tags and validates settings and shortcut keys', () => {
+    expect(() => parseInboxInput({
+      content: '整理',
+      ai_suggestion: {
+        target: 'task', title: '', summary: '', project_id: null,
+        tag_names: Array.from({ length: 51 }, () => 'tag'), include_in_reports: true
+      }
+    })).toThrow('INVALID_ARGUMENT')
+    expect(parseSettingUpdateArgs({ key: 'theme', value: 'dark' })).toEqual({ key: 'theme', value: 'dark' })
+    expect(() => parseSettingUpdateArgs({ key: 'unknown_key', value: 'x' })).toThrow('INVALID_ARGUMENT')
+    expect(parseShortcutUpdateArgs({ key: 'shortcut_quick_task', value: 'Ctrl+Shift+T' })).toEqual({ key: 'shortcut_quick_task', value: 'Ctrl+Shift+T' })
+    expect(() => parseShortcutUpdateArgs({ key: 'shortcut_hijack', value: 'x' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseShortcutUpdateArgs({ key: 'shortcut_quick_task', value: 'x'.repeat(201) })).toThrow('INVALID_ARGUMENT')
   })
 })

@@ -6,24 +6,33 @@ import {
   endOfMonth,
   subWeeks,
   subMonths,
-  isToday,
-  isYesterday,
+  subDays,
   parseISO
 } from 'date-fns'
+import { formatInTimeZone } from 'date-fns-tz'
 import { enUS, zhCN } from 'date-fns/locale'
 import type { ResolvedLanguage } from './i18n'
 
-export function formatDate(dateStr: string, language: ResolvedLanguage = 'zh'): string {
-  const date = parseISO(dateStr)
-  if (isToday(date)) return language === 'zh' ? '今天' : 'Today'
-  if (isYesterday(date)) return language === 'zh' ? '昨天' : 'Yesterday'
-  return language === 'zh'
-    ? format(date, 'M月d日 EEEE', { locale: zhCN })
-    : format(date, 'MMM d, EEEE', { locale: enUS })
+export const DEFAULT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+
+export function getLocalDateKey(dateStr: string, timeZone: string = DEFAULT_TIME_ZONE): string {
+  return formatInTimeZone(parseISO(dateStr), timeZone, 'yyyy-MM-dd')
 }
 
-export function formatTime(dateStr: string): string {
-  return format(parseISO(dateStr), 'HH:mm')
+export function formatDate(dateStr: string, language: ResolvedLanguage = 'zh', timeZone: string = DEFAULT_TIME_ZONE): string {
+  const date = parseISO(dateStr)
+  const dateKey = getLocalDateKey(dateStr, timeZone)
+  const todayKey = getLocalDateKey(new Date().toISOString(), timeZone)
+  const yesterdayKey = getLocalDateKey(subDays(new Date(), 1).toISOString(), timeZone)
+  if (dateKey === todayKey) return language === 'zh' ? '今天' : 'Today'
+  if (dateKey === yesterdayKey) return language === 'zh' ? '昨天' : 'Yesterday'
+  return language === 'zh'
+    ? formatInTimeZone(date, timeZone, 'M月d日 EEEE', { locale: zhCN })
+    : formatInTimeZone(date, timeZone, 'MMM d, EEEE', { locale: enUS })
+}
+
+export function formatTime(dateStr: string, timeZone: string = DEFAULT_TIME_ZONE): string {
+  return formatInTimeZone(parseISO(dateStr), timeZone, 'HH:mm')
 }
 
 export function formatDateShort(date: Date): string {
@@ -68,11 +77,12 @@ export function getDateRange(preset: DatePreset): { from: string; to: string; la
 }
 
 export function groupLogsByDate<T extends { created_at: string }>(
-  logs: T[]
+  logs: T[],
+  timeZone: string = DEFAULT_TIME_ZONE
 ): Map<string, T[]> {
   const groups = new Map<string, T[]>()
   for (const log of logs) {
-    const dateKey = log.created_at.slice(0, 10)
+    const dateKey = getLocalDateKey(log.created_at, timeZone)
     const group = groups.get(dateKey) || []
     group.push(log)
     groups.set(dateKey, group)

@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Hash } from 'lucide-react'
 import { useState } from 'react'
 import type { TagTreeNode } from '../lib/tagTree'
+import { useI18n } from '../stores/languageStore'
 
 interface TagTreeSidebarProps {
   id?: string
@@ -19,6 +20,7 @@ interface TagTreeItemProps {
 }
 
 function TagTreeItem({ node, depth, selectedPath, onSelect }: TagTreeItemProps): JSX.Element {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState(true)
   const hasChildren = node.children.length > 0
 
@@ -30,7 +32,7 @@ function TagTreeItem({ node, depth, selectedPath, onSelect }: TagTreeItemProps):
             type="button"
             className="tag-tree-toggle"
             onClick={() => setExpanded((value) => !value)}
-            aria-label={`${expanded ? '收起' : '展开'} ${node.label}`}
+            aria-label={t(expanded ? 'workspace.collapse' : 'workspace.expand', { name: node.label })}
           >
             {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
           </button>

@@ -1,6 +1,7 @@
 import { Children, cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import { findInlineReferences, type InlineReference } from '../lib/workspaceInteractions'
+import { useI18n } from '../stores/languageStore'
 
 interface InteractiveMarkdownProps {
   content: string
@@ -19,6 +20,8 @@ interface InlineRenderContext {
   selectedTagPath?: string
   onProjectClick?: (projectId: string) => void
   onTagClick?: (tagPath: string) => void
+  getTagAriaLabel?: (value: string) => string
+  getProjectAriaLabel?: (value: string) => string
 }
 
 function transformMarkdownUrl(url: string): string {
@@ -43,7 +46,7 @@ function renderInlineText(text: string, context: InlineRenderContext): ReactNode
           key={`${reference.start}-${index}`}
           type="button"
           className={`inline-reference inline-hash-reference ${context.selectedTagPath === reference.value ? 'is-selected' : ''}`}
-          aria-label={`筛选标签 ${reference.value}`}
+          aria-label={context.getTagAriaLabel?.(reference.value)}
           onClick={() => onTagClick(reference.value)}
         >
           {token}
@@ -55,7 +58,7 @@ function renderInlineText(text: string, context: InlineRenderContext): ReactNode
           key={`${reference.start}-${index}`}
           type="button"
           className={`inline-reference inline-project-reference ${context.selectedProjectId === context.projectId ? 'is-selected' : ''}`}
-          aria-label={`筛选项目 ${reference.value}`}
+          aria-label={context.getProjectAriaLabel?.(reference.value)}
           onClick={() => onProjectClick(context.projectId as string)}
         >
           {token}
@@ -95,13 +98,16 @@ export function InteractiveMarkdown({
   onProjectClick,
   onTagClick
 }: InteractiveMarkdownProps): JSX.Element {
+  const { t } = useI18n()
   const context: InlineRenderContext = {
     projectId,
     projectName,
     selectedProjectId,
     selectedTagPath,
     onProjectClick,
-    onTagClick
+    onTagClick,
+    getTagAriaLabel: (value) => t('workspace.filterTag', { name: value }),
+    getProjectAriaLabel: (value) => t('workspace.filterProject', { name: value })
   }
   const components: Components = {
     p: createBlockRenderer('p', context),

@@ -1,10 +1,9 @@
-import { randomUUID } from 'node:crypto'
-
 import type Database from 'better-sqlite3'
 
 import type { Page, Tag } from '../domain/types'
 import type { Pagination, WorkspaceContext } from '../repositories/contracts'
 import { LocalTagRepository } from '../repositories/localTagRepository'
+import { enqueueOutbox } from '../sync/outbox'
 
 export class TagService {
   private readonly tags: LocalTagRepository
@@ -58,11 +57,13 @@ export class TagService {
 
   private enqueue(operationType: 'create' | 'update', tag: Tag): void {
     const now = new Date().toISOString()
-    this.database.prepare(`
-      INSERT INTO sync_operations (
-        public_id, workspace_id, entity_type, entity_public_id, operation_type, payload, created_at, updated_at
-      ) VALUES (?, ?, 'tag', ?, ?, ?, ?, ?)
-    `).run(randomUUID(), this.context.workspace_id, tag.public_id, operationType, JSON.stringify(tag), now, now)
+    enqueueOutbox(this.database, this.context.workspace_id, {
+      entity: 'tag',
+      publicId: tag.public_id,
+      operationType,
+      changedAt: now,
+      data: tag
+    })
   }
 
   private assertWorkspace(): void {

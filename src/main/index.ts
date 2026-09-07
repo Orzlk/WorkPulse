@@ -13,6 +13,7 @@ import { buildTaskCreateQuery, buildTaskCreateTitleBarOverlay, shouldPromptTaskC
 import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
 import { ReportService } from './reports/reportService'
+import { parseShortcutUpdateArgs } from './ipcContracts'
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'workpulse-attachment',
@@ -508,8 +509,9 @@ function registerTaskCreateIpc(): void {
 // --- IPC: shortcut update ---
 
 function registerShortcutIpc(): void {
-  ipcMain.handle('shortcut:update', (_event, key: 'shortcut_quick_log' | 'shortcut_quick_task', value: string) => {
-    const overrides = key === 'shortcut_quick_log' ? { log: value } : { task: value }
+  ipcMain.handle('shortcut:update', (_event, key: unknown, value: unknown) => {
+    const input = parseShortcutUpdateArgs({ key, value })
+    const overrides = input.key === 'shortcut_quick_log' ? { log: input.value } : { task: input.value }
     const results = reregisterGlobalShortcuts(overrides)
     const success = results.log && results.task
 
@@ -518,7 +520,7 @@ function registerShortcutIpc(): void {
       return false
     }
 
-    setSetting(key, value)
+    setSetting(input.key, input.value)
     buildMenu()
     if (tray) tray.setContextMenu(buildTrayMenu())
     return true

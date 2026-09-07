@@ -471,6 +471,11 @@ body {
 .quick-create-footer-actions { display: flex; align-items: center; gap: 8px; }
 .quick-create-content-label { display: block; padding: 10px 16px 0; color: var(--ink-muted); font-size: 12px; }
 .kanban-layout { min-width: 0; }
+.kanban-columns { grid-template-columns: repeat(var(--kanban-column-count, 1), minmax(220px, 1fr)); }
+.kanban-column-border--todo { border-color: var(--rule-strong); }
+.kanban-column-border--progress { border-color: var(--oxblood); }
+.kanban-column-border--done { border-color: var(--forest); }
+.kanban-column-border--custom { border-color: var(--gold); }
 .kanban-drafts-content { min-width: 0; }
 .global-search-status { padding: 10px 16px; color: var(--ink-muted); font-size: 12px; }
 .search-result-content { display: grid; gap: 3px; min-width: 0; }

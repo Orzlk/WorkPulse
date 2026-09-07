@@ -49,6 +49,11 @@ export function displayTagName(value: string): string {
   return display
 }
 
+/** Escape user input before placing it in a SQLite LIKE pattern. */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[!%_]/g, (character) => `!${character}`)
+}
+
 function toTag(row: Record<string, unknown>): Tag {
   const path = row.path as string
   return {

@@ -28,6 +28,7 @@
   --ui-color-info: #4d7cff;
   --ui-color-info-soft: #eef2ff;
   --ui-color-success: #168a55;
+  --ui-color-success-soft: #effaf4;
   --ui-color-warning: #b76b00;
   --ui-color-danger: #c94040;
   --ui-color-danger-soft: #fff0f0;
@@ -92,6 +93,7 @@
   --ui-color-info: #9eb6ff;
   --ui-color-info-soft: #252c48;
   --ui-color-success: #65d99b;
+  --ui-color-success-soft: #173d2b;
   --ui-color-warning: #f4b85b;
   --ui-color-danger: #f08b8b;
   --ui-color-danger-soft: #432326;
@@ -717,6 +719,56 @@
   border-color: var(--ui-color-primary) !important;
 }
 
+/* Transitional aliases keep older Tailwind utility names on the same semantic palette. */
+.hallmark-app .text-blue-500,
+.hallmark-app .text-blue-600,
+.hallmark-app .dark\:text-blue-400,
+.hallmark-app .hover\:text-blue-500:hover {
+  color: var(--ui-color-focus) !important;
+}
+
+.hallmark-app .bg-blue-50,
+.hallmark-app .bg-blue-100,
+.hallmark-app .dark\:bg-blue-900\/40,
+.hallmark-app .dark\:bg-blue-950\/30,
+.hallmark-app .hover\:bg-blue-50:hover,
+.hallmark-app .dark\:hover\:bg-blue-950\/30:hover {
+  background-color: var(--ui-color-primary-soft) !important;
+}
+
+.hallmark-app .focus\:border-blue-400:focus {
+  border-color: var(--ui-color-border-strong) !important;
+}
+
+.hallmark-app .border-violet-400 {
+  border-color: var(--ui-color-text-subtle) !important;
+}
+
+.hallmark-app .text-red-500,
+.hallmark-app .text-red-600,
+.hallmark-app .text-red-700,
+.hallmark-app .dark\:text-red-300 {
+  color: var(--ui-color-danger) !important;
+}
+
+.hallmark-app .bg-red-50,
+.hallmark-app .dark\:bg-red-950\/30 {
+  background-color: var(--ui-color-danger-soft) !important;
+}
+
+.hallmark-app .text-green-500,
+.hallmark-app .text-green-600,
+.hallmark-app .text-green-700,
+.hallmark-app .dark\:text-green-300,
+.hallmark-app .dark\:text-green-400 {
+  color: var(--ui-color-success) !important;
+}
+
+.hallmark-app .bg-green-50,
+.hallmark-app .dark\:bg-green-950 {
+  background-color: var(--ui-color-success-soft) !important;
+}
+
 /* Menus, dialogs and empty states share one elevation scale. */
 .hallmark-app .global-search,
 .hallmark-app .quick-create-panel,
@@ -736,6 +788,44 @@
   border-color: var(--ui-color-border);
   box-shadow: var(--ui-shadow-lg), 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 14%, transparent);
 }
+
+.hallmark-app .global-search-result.is-active {
+  background: var(--ui-color-selection-soft);
+  color: var(--ui-color-selection-strong);
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: -2px;
+}
+
+.toast-notification {
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-sm);
+  box-shadow: var(--ui-shadow-lg);
+  font-size: 13px;
+}
+
+.toast-success {
+  border-color: color-mix(in srgb, var(--ui-color-success) 28%, var(--ui-color-border));
+  background: var(--ui-color-success-soft, #effaf4);
+  color: var(--ui-color-success);
+}
+
+.toast-error {
+  border-color: color-mix(in srgb, var(--ui-color-danger) 28%, var(--ui-color-border));
+  background: var(--ui-color-danger-soft);
+  color: var(--ui-color-danger);
+}
+
+.toast-icon { width: 16px; height: 16px; flex: none; }
+.toast-icon-success { color: var(--ui-color-success); }
+.toast-icon-error { color: var(--ui-color-danger); }
+.toast-action { color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.toast-close { margin-left: auto; padding: 2px; border: 0; background: transparent; color: var(--ui-color-text-muted); cursor: pointer; }
+.toast-close:hover, .toast-close:focus-visible { color: var(--ui-color-text); }
 
 .hallmark-app .inbox-capture:focus-within {
   border-color: var(--ui-color-border);

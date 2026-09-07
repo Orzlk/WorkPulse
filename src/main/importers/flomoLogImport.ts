@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, resolve, sep } from 'node:path'
+import { formatInTimeZone } from 'date-fns-tz'
 
 import {
   MAX_ATTACHMENT_BYTES,
@@ -8,6 +9,27 @@ import {
   type SavedAttachment
 } from '../attachments/attachmentStorage'
 import type { FlomoMemo } from './flomoHtmlImporter'
+
+export const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024
+export const DEFAULT_IMPORT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+
+export function assertImportFileSize(size: number): void {
+  if (!Number.isFinite(size) || size < 0 || size > MAX_IMPORT_FILE_BYTES) {
+    throw new Error(`IMPORT_TOO_LARGE: import file must be no larger than ${MAX_IMPORT_FILE_BYTES} bytes`)
+  }
+}
+
+export function buildImportKey(content: string, category: string, createdAt?: string, timeZone = DEFAULT_IMPORT_TIME_ZONE): string {
+  let localDate = ''
+  if (createdAt) {
+    try {
+      localDate = formatInTimeZone(new Date(createdAt), timeZone, 'yyyy-MM-dd')
+    } catch {
+      localDate = createdAt.slice(0, 10)
+    }
+  }
+  return `${content.trim()}\u0000${category.trim()}\u0000${localDate}`
+}
 
 export interface FlomoLogWriter {
   addWorkLog: (
@@ -59,14 +81,12 @@ export function importFlomoMemos(
   let attachmentsImported = 0
   let attachmentsSkipped = 0
   const existingLogs = options && writer.listWorkLogs ? writer.listWorkLogs() : []
+  const existingKeys = new Set(existingLogs.map((log) => buildImportKey(normalizeImageReferences(log.content), log.category, log.created_at)))
   const pending: Array<{ content: string; category: string; taskId: null; createdAt: string; associations: { tagNames: string[] } }> = []
 
   for (const memo of memos) {
-    const isDuplicate = writer.workLogExists(memo.content, '', memo.createdAt) || existingLogs.some((log) => (
-      log.category === '' &&
-      log.created_at.slice(0, 10) === memo.createdAt.slice(0, 10) &&
-      normalizeImageReferences(log.content) === normalizeImageReferences(memo.content)
-    ))
+    const isDuplicate = existingKeys.has(buildImportKey(normalizeImageReferences(memo.content), '', memo.createdAt)) ||
+      (!writer.listWorkLogs && writer.workLogExists(memo.content, '', memo.createdAt))
     if (isDuplicate) {
       skipped++
       continue
@@ -77,7 +97,7 @@ export function importFlomoMemos(
     imported++
     attachmentsImported += attachmentResult.imported
     attachmentsSkipped += attachmentResult.skipped
-    existingLogs.push({ content: attachmentResult.content, category: '', created_at: memo.createdAt })
+    existingKeys.add(buildImportKey(normalizeImageReferences(attachmentResult.content), '', memo.createdAt))
   }
 
   if (writer.addWorkLogsBatch) writer.addWorkLogsBatch(pending)

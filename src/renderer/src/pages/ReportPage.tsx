@@ -4,6 +4,7 @@ import { AlertCircle, Check, ChevronDown, ChevronUp, Clock3, Copy, Download, Eye
 import ReactMarkdown from 'react-markdown'
 import { useToast } from '../components/Toast'
 import { buildReportExportName, getHistoryReportState, getLatestCompleteReportAnchor, getReportGenerationError, getRetryReportRequest, hasReportPreviewData, isReportScopeAll, toggleReportScope, type WorkflowReportType } from '../lib/reportWorkflow'
+import { findReportByPublicId } from '../lib/reportNavigation'
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
@@ -22,10 +23,10 @@ interface Preview {
   type: WorkflowReportType; display_start: string; display_end_inclusive: string; project_count: number; repository_count: number
   work_log_count: number; task_count: number; inbox_count: number; git_commit_count: number; unorganized_inbox_count: number
 }
-interface Props { projectId: string | null; onProjectChange: (projectId: string | null) => void; onOpenInbox: () => void; onOpenStats?: () => void }
+interface Props { projectId: string | null; focusReportId?: string | null; onReportFocusHandled?: () => void; onProjectChange: (projectId: string | null) => void; onOpenInbox: () => void; onOpenStats?: () => void }
 
 const EMPTY_PREVIEW: Preview = { type: 'weekly', display_start: '', display_end_inclusive: '', project_count: 0, repository_count: 0, work_log_count: 0, task_count: 0, inbox_count: 0, git_commit_count: 0, unorganized_inbox_count: 0 }
-function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Props): JSX.Element {
+function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectChange, onOpenInbox, onOpenStats }: Props): JSX.Element {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const toast = useToast()
   const { t } = useI18n()
@@ -44,6 +45,7 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
   const [content, setContent] = useState('')
   const [error, setError] = useState('')
   const [history, setHistory] = useState<Report[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
   const [viewing, setViewing] = useState<Report | null>(null)
   const [active, setActive] = useState<Report | null>(null)
@@ -51,11 +53,14 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
   const [copied, setCopied] = useState(false)
   const timers = useRef<number[]>([])
   const activeStreamId = useRef<string | null>(null)
+  const generationId = useRef(0)
+  const translateRef = useRef(t)
+  translateRef.current = t
   const request = useMemo(() => ({ type, anchorDate, timeZone, projectIds, repositoryIds }), [anchorDate, projectIds, repositoryIds, timeZone, type])
 
   const clearTimers = (): void => { timers.current.forEach(window.clearTimeout); timers.current = [] }
   const loadHistory = async (): Promise<void> => {
-    try { setHistory(await window.api.report.list(100) as Report[]) } catch { toast.error(t('report.historyLoadFailed')) }
+    try { setHistory(await window.api.report.list(100) as Report[]) } catch { toast.error(t('report.historyLoadFailed')) } finally { setHistoryLoaded(true) }
   }
   const checkKey = async (): Promise<void> => { if (!await window.api.settings.get('api_key')) setStatus('no_key') }
 
@@ -83,7 +88,7 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
         return
       }
       setStage('failed')
-      setError(event.code === 'cancelled' ? t('common.cancel') : t('report.error.unknown'))
+      setError(event.code === 'cancelled' ? translateRef.current('common.cancel') : translateRef.current('report.error.unknown'))
       setStatus('error')
     })
     return () => {
@@ -91,9 +96,26 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
       clearTimers()
       const requestId = activeStreamId.current
       if (requestId) void window.api.report.cancel(requestId)
+      generationId.current += 1
       activeStreamId.current = null
     }
   }, [fetchProjects, fetchRepositories])
+  useEffect(() => {
+    if (!focusReportId || !historyLoaded) return
+    const report = findReportByPublicId(history, focusReportId)
+    if (report) {
+      const state = getHistoryReportState(report)
+      setViewing(report)
+      setActive(report)
+      setContent(report.content)
+      setStatus(state.status === 'error' ? 'error' : state.status === 'ready' ? 'success' : 'generating')
+      setError(state.errorMessage ?? '')
+      setStage(state.status === 'error' ? 'failed' : 'idle')
+      setEditing(false)
+      setHistoryOpen(true)
+    }
+    onReportFocusHandled?.()
+  }, [focusReportId, history, historyLoaded, onReportFocusHandled])
   useEffect(() => {
     let closed = false
     setPreviewLoading(true)
@@ -114,9 +136,21 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
       setStatus('no_data'); setStage('idle'); return
     }
     const inputRequest = 'anchorDate' in input ? input : request
+    const previousRequestId = activeStreamId.current
+    generationId.current += 1
+    const currentGeneration = generationId.current
+    if (previousRequestId) {
+      try { await window.api.report.cancel(previousRequestId) } catch { /* 新请求仍可继续 */ }
+      activeStreamId.current = null
+    }
     setStatus('generating'); setError(''); setViewing(null); setActive(null); setContent(''); setStage('reading')
     try {
-      activeStreamId.current = await window.api.report.startStream(inputRequest)
+      const nextStreamId = await window.api.report.startStream(inputRequest)
+      if (currentGeneration !== generationId.current) {
+        await window.api.report.cancel(nextStreamId)
+        return
+      }
+      activeStreamId.current = nextStreamId
     } catch (cause) {
       activeStreamId.current = null
       clearTimers(); setStage('failed'); setError(t(`report.error.${getReportGenerationError(cause)}`)); setStatus('error')
@@ -125,11 +159,16 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
   const cancelGeneration = async (): Promise<void> => {
     const requestId = activeStreamId.current
     if (!requestId) return
+    generationId.current += 1
+    activeStreamId.current = null
+    clearTimers()
+    setStage('failed')
+    setError(t('common.cancel'))
+    setStatus('error')
     try {
       await window.api.report.cancel(requestId)
     } catch {
-      setError(t('common.cancel'))
-      setStatus('error')
+      setError(t('report.error.unknown'))
     }
   }
   const retryActiveReport = (): void => {
@@ -173,6 +212,11 @@ function ReportPage({ projectId, onProjectChange, onOpenInbox, onOpenStats }: Pr
       </section>
       <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-700 dark:bg-zinc-900/60" aria-live="polite"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t('report.previewTitle')}</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{previewLoading ? t('report.previewLoading') : `${preview.display_start || '—'} ${t('common.to')} ${preview.display_end_inclusive || '—'}`}</p></div><span className="text-xs text-zinc-500">{t('report.previewTimezone', { timeZone })}</span></div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"><Metric label={t('report.previewProjects')} value={preview.project_count} /><Metric label={t('report.previewRepositories')} value={preview.repository_count} /><Metric label={t('report.previewLogs')} value={preview.work_log_count} /><Metric label={t('report.previewTasks')} value={preview.task_count} /><Metric label={t('report.previewInbox')} value={preview.inbox_count} /><Metric label={t('report.previewGit')} value={preview.git_commit_count} /></div>{preview.unorganized_inbox_count > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><span className="flex items-center gap-2"><AlertCircle className="h-4 w-4" aria-hidden="true" />{t('report.unorganizedReminder', { count: preview.unorganized_inbox_count })}</span><button type="button" onClick={onOpenInbox} className="min-h-9 rounded-md px-2 font-medium underline underline-offset-4 focus:outline-none focus:ring-2 focus:ring-amber-600">{t('report.openInbox')}</button></div>}<p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{t('report.inboxReminder')}</p></section>
       <button type="button" onClick={() => status === 'generating' ? void cancelGeneration() : void generate()} disabled={status === 'no_key' || previewLoading} className="ui-button ui-button--primary px-5 text-sm">{status === 'generating' ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}{status === 'generating' ? t('common.cancel') : t('report.generate')}</button>
+      {status === 'generating' && <div className="mt-4 flex flex-wrap items-center gap-3 text-sm" role="status" aria-live="polite">
+        <span className={stage === 'reading' || stage === 'generating' ? 'font-medium text-emerald-700 dark:text-emerald-300' : 'text-zinc-500'}>1. {t('report.stage.reading')}</span>
+        <span aria-hidden="true" className="text-zinc-400">→</span>
+        <span className={stage === 'generating' ? 'font-medium text-emerald-700 dark:text-emerald-300' : 'text-zinc-500'}>2. {t('report.stage.generating')}</span>
+      </div>}
     </>}
     {status === 'generating' && content && <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-live="polite"><div className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-600 dark:text-zinc-300"><LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t('report.generating')}</div><div className="prose prose-zinc max-w-none dark:prose-invert" role="article"><ReactMarkdown>{content}</ReactMarkdown></div></section>}
     {status === 'no_key' && !isHistory && <Notice tone="warning" title={t('report.noKeyTitle')} detail={t('report.noKeySubtitle')} />}

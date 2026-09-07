@@ -10,6 +10,7 @@ import { TaskDetailDrawer } from '../components/TaskDetailDrawer'
 import type { AsyncStatus, Project, ProjectActivityItem } from '../lib/workspaceTypes'
 import type { KanbanColumn, KanbanTask, TaskUpdates } from '../lib/kanbanTypes'
 import { PROJECT_COLOR_OPTIONS } from '../lib/projectColors'
+import { registerNavigationGuard } from '../lib/navigationGuard'
 
 function ProjectColorPicker({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
   const { t } = useI18n()
@@ -100,6 +101,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     editDescription !== selectedProject.description ||
     editColor !== selectedProject.color
   ))
+  const isCreateDirty = createOpen && Boolean(name.trim() || description.trim() || color !== PROJECT_COLOR_OPTIONS[0].value)
 
   const requestCloseProject = (): boolean => {
     if (savingEdit) return false
@@ -108,6 +110,23 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     setEditing(false)
     return true
   }
+
+  const requestCloseCreate = (): boolean => {
+    if (!isCreateDirty) return true
+    if (!window.confirm(t('workspace.projectEditDiscardConfirm'))) return false
+    setCreateOpen(false)
+    return true
+  }
+
+  useEffect(() => registerNavigationGuard({
+    id: 'projects-editor',
+    priority: 80,
+    request: () => {
+      if (createOpen) return requestCloseCreate()
+      if (selectedProjectId) return requestCloseProject()
+      return true
+    }
+  }), [createOpen, editColor, editDescription, editName, editing, isCreateDirty, isProjectEditDirty, savingEdit, selectedProjectId])
 
   useEffect(() => { void fetch() }, [])
 
@@ -130,6 +149,31 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [])
+
+  useEffect(() => {
+    if (!projectMenuId) return
+    const menuSelector = '.project-menu-panel[role="menu"]'
+    const focusFirstItem = (): void => {
+      document.querySelector<HTMLElement>(`${menuSelector} [role="menuitem"]`)?.focus()
+    }
+    const handleMenuKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      const menu = document.querySelector<HTMLElement>(menuSelector)
+      if (!menu) return
+      const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      if (items.length === 0) return
+      event.preventDefault()
+      const currentIndex = items.indexOf(document.activeElement as HTMLElement)
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      items[(currentIndex + delta + items.length) % items.length].focus()
+    }
+    const frame = requestAnimationFrame(focusFirstItem)
+    document.addEventListener('keydown', handleMenuKeyDown)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', handleMenuKeyDown)
+    }
+  }, [projectMenuId])
 
   useEffect(() => {
     if (!selectedProjectId) return
@@ -337,7 +381,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
         >
           <Ellipsis aria-hidden="true" />
         </button>
-        {projectMenuId === project.public_id && <div className="project-menu-panel" role="menu">
+        {projectMenuId === project.public_id && <div className="project-menu-panel" role="menu" aria-label={t('workspace.projectMenu', { name: project.name })}>
           <button type="button" role="menuitem" onClick={() => openProjectEditor(project)}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button>
           <button type="button" role="menuitem" className="danger-action" onClick={() => void handleDeleteProject(project)}><Trash2 aria-hidden="true" />{t('workspace.deleteProject')}</button>
         </div>}
@@ -353,14 +397,14 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     {items.length === 0 && status !== 'running' && <div className="empty-state"><FolderKanban aria-hidden="true" /><p>{t('workspace.noProjects')}</p></div>}
     {items.length < total && <button className="load-more" onClick={() => void loadMore()} disabled={status === 'running'}>{t('workspace.loadMore')}</button>}
 
-    {createOpen && <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateOpen(false) }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="project-create-title" className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreateOpen(false) } }}>
+    {createOpen && <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseCreate() }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="project-create-title" className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestCloseCreate() } }}>
         <h2 id="project-create-title" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('workspace.newProject')}</h2>
         <label className="mt-4 block text-xs font-medium text-zinc-500">{t('workspace.projectName')}<input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void submit()} placeholder={t('workspace.projectNamePlaceholder')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
-        <label className="mt-3 block text-xs font-medium text-zinc-500">{t('workspace.projectDescription')}<input value={description} onChange={(event) => setDescription(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void submit()} placeholder={t('workspace.optional')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
+        <label className="mt-3 block text-xs font-medium text-zinc-500">{t('workspace.projectDescription')}<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('workspace.optional')} rows={3} className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
         <div className="project-color-field mt-3"><span className="text-xs font-medium text-zinc-500">{t('workspace.color')}</span><ProjectColorPicker value={color} onChange={setColor} /></div>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className="ui-button text-xs" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</button>
+          <button type="button" className="ui-button text-xs" onClick={requestCloseCreate}>{t('common.cancel')}</button>
           <button type="button" className="ui-button ui-button--primary text-xs" onClick={() => void submit()} disabled={!name.trim()}><Plus className="h-3.5 w-3.5" />{t('common.create')}</button>
         </div>
       </div>

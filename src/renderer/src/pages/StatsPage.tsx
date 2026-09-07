@@ -232,7 +232,7 @@ function StatsPage({ onOpenReports }: { onOpenReports?: () => void }): JSX.Eleme
 
   const loadStats = (): void => {
     setError(null)
-    void window.api.stats.get(90).then(setStats).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t('common.loading')))
+    void window.api.stats.get(90).then(setStats).catch(() => setError(t('report.previewFailed')))
   }
 
   useEffect(() => { loadStats() }, [])

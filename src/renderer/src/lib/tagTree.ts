@@ -19,20 +19,23 @@ export function buildTagTree(tags: TagTreeSource[]): TagTreeNode[] {
 
   for (const tag of tags) {
     const segments = tag.path.split('/').map((segment) => segment.trim()).filter(Boolean)
+    const displaySegments = tag.name.split('/').map((segment) => segment.trim()).filter(Boolean)
     let path = ''
     segments.forEach((segment, index) => {
       path = path ? `${path}/${segment}` : segment
       if (!nodes.has(path)) {
         nodes.set(path, {
           path,
-          label: segment,
+          label: displaySegments[index] ?? segment,
           public_id: null,
           usage_count: 0,
           children: []
         })
       }
+      const node = nodes.get(path)!
+      if (displaySegments[index]) node.label = displaySegments[index]
       if (index === segments.length - 1) {
-        const leaf = nodes.get(path)!
+        const leaf = node
         leaf.public_id = tag.public_id
         leaf.usage_count += tag.usage_count ?? 0
       }

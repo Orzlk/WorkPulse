@@ -65,4 +65,16 @@ describe('tag display case', () => {
     expect(listed).toHaveLength(1)
     expect(listed[0].name).toBe('React/Hooks')
   })
+
+  it('treats LIKE wildcard characters in tag filters as literal text', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-tag-like-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+
+    addWorkLog('百分号标签', '', null, undefined, { tagNames: ['foo%'] })
+    addWorkLog('其他标签', '', null, undefined, { tagNames: ['foobar'] })
+
+    expect(getWorkLogs(50, 0, 'foo%').map((log) => log.content)).toEqual(['百分号标签'])
+  })
 })

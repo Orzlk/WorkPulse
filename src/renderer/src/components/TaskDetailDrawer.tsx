@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { extractHashTags } from '../lib/workspaceInteractions'
 import { useI18n } from '../stores/languageStore'
 import type { KanbanColumn, KanbanTask, TaskPriority, TaskUpdates } from '../lib/kanbanTypes'
+import { useOverlayStack } from './OverlayStack'
 
 interface TaskDetailDrawerProps {
   task: KanbanTask
@@ -39,6 +40,7 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
   }))
   const drawerRef = useRef<HTMLElement>(null)
   const requestCloseRef = useRef<() => void>(() => undefined)
+  const overlayStack = useOverlayStack()
 
   const currentSnapshot = JSON.stringify({ title, description, priority, dueDate, projectId, tags, checklist })
   const isDirty = currentSnapshot !== savedSnapshot
@@ -66,6 +68,13 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     onClose()
   }
   requestCloseRef.current = requestClose
+
+  useEffect(() => overlayStack.register({
+    id: `task-detail-${task.public_id}`,
+    priority: 100,
+    dirty: isDirty,
+    requestClose
+  }), [isDirty, overlayStack, task.public_id])
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
@@ -132,7 +141,7 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
         <label className="block text-xs font-medium text-zinc-500">{t('kanban.moveTo')}<select value={task.board_column} onChange={(event) => void handleMove(event.target.value)} disabled={saving} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800"><option value="draft">{t('kanban.drafts')}</option>{columns.map((column) => <option key={column.column_key} value={column.column_key}>{columnName(column.column_key)}</option>)}</select></label>
         <label className="block text-xs font-medium text-zinc-500">{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800"><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label>
         <label className="block text-xs font-medium text-zinc-500">{t('workspace.tags')}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder={t('workspace.tagsPlaceholder')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800" /></label>
-        <section className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/60"><div className="flex items-center justify-between text-xs font-medium text-zinc-500"><span>{t('kanban.checklist')}</span><span>{checklist.filter((item) => item.completed).length}/{checklist.length}</span></div><div className="mt-2 space-y-2">{checklist.map((item) => <label key={item.id} className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"><input type="checkbox" checked={item.completed} onChange={(event) => setChecklist((items) => items.map((current) => current.id === item.id ? { ...current, completed: event.target.checked } : current))} /><span className={item.completed ? 'line-through text-zinc-400' : ''}>{item.text}</span><button type="button" onClick={() => setChecklist((items) => items.filter((current) => current.id !== item.id))} className="ml-auto text-zinc-300 hover:text-red-500" aria-label={t('kanban.removeChecklist')}><Trash2 className="h-3.5 w-3.5" /></button></label>)}</div><div className="mt-3 flex gap-2"><input value={checklistDraft} onChange={(event) => setChecklistDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && addChecklistItem()} placeholder={t('kanban.checklistPlaceholder')} className="min-w-0 flex-1 rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" /><button type="button" onClick={addChecklistItem} className="rounded bg-white px-2 text-zinc-400 hover:text-blue-500 dark:bg-zinc-900" aria-label={t('kanban.addChecklist')}><Plus className="h-3.5 w-3.5" /></button></div></section>
+        <section className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/60"><div className="flex items-center justify-between text-xs font-medium text-zinc-500"><span>{t('kanban.checklist')}</span><span>{checklist.filter((item) => item.completed).length}/{checklist.length}</span></div><div className="mt-2 space-y-2">{checklist.map((item) => <div key={item.id} className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"><input type="checkbox" checked={item.completed} onChange={(event) => setChecklist((items) => items.map((current) => current.id === item.id ? { ...current, completed: event.target.checked } : current))} aria-label={item.text} /><span className={item.completed ? 'line-through text-zinc-400' : ''}>{item.text}</span><button type="button" onClick={() => setChecklist((items) => items.filter((current) => current.id !== item.id))} className="ml-auto text-zinc-300 hover:text-red-500" aria-label={t('kanban.removeChecklist')}><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div><div className="mt-3 flex gap-2"><input value={checklistDraft} onChange={(event) => setChecklistDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && addChecklistItem()} placeholder={t('kanban.checklistPlaceholder')} aria-label={t('kanban.checklistPlaceholder')} className="min-w-0 flex-1 rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" /><button type="button" onClick={addChecklistItem} className="rounded bg-white px-2 text-zinc-400 hover:text-blue-500 dark:bg-zinc-900" aria-label={t('kanban.addChecklist')}><Plus className="h-3.5 w-3.5" /></button></div></section>
       </div>
       <footer className="flex items-center justify-between border-t border-zinc-200 px-5 py-4 dark:border-zinc-700"><div className="flex items-center gap-3"><button type="button" onClick={() => void onDelete(task.id)} className="inline-flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" />{t('kanban.deleteTask')}</button>{task.status === 'done' && <button type="button" onClick={() => void onReopen(task.id)} className="text-xs font-medium text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300">{t('kanban.cancelComplete')}</button>}</div><div className="flex gap-2"><button type="button" onClick={requestClose} className="rounded-lg px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">{t('common.cancel')}</button><button type="button" onClick={() => void handleSave().catch(() => undefined)} disabled={saving || !title.trim() || !isDirty} className="ui-button ui-button--primary text-xs"><Check className="h-3.5 w-3.5" />{saving ? t('common.saving') : t('common.save')}</button></div></footer>
     </aside>
