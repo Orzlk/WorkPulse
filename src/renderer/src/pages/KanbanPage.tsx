@@ -43,9 +43,10 @@ function DroppableColumn({ id, children }: { id: string; children: React.ReactNo
   return <div ref={setNodeRef} className={`min-h-[120px] rounded-xl transition-colors ${isOver ? 'bg-zinc-100/80 dark:bg-zinc-800/80' : ''}`}>{children}</div>
 }
 
-function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: KanbanTask; onConfirm: (content: string) => void; onCancel: () => void; onOnlyComplete: () => void }): JSX.Element {
+function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: KanbanTask; onConfirm: (content: string) => Promise<void>; onCancel: () => Promise<void>; onOnlyComplete: () => Promise<void> }): JSX.Element {
   const { t } = useI18n()
   const [content, setContent] = useState(() => t('kanban.completeLogDefault', { title: task.title }))
+  const [submitting, setSubmitting] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef(onCancel)
   cancelRef.current = onCancel
@@ -71,16 +72,26 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
     document.addEventListener('keydown', handleKeyDown, true)
     return () => document.removeEventListener('keydown', handleKeyDown, true)
   }, [])
+  const submit = async (action: () => Promise<void>): Promise<void> => {
+    if (submitting) return
+    setSubmitting(true)
+    try { await action() } finally { setSubmitting(false) }
+  }
+  const confirm = async (): Promise<void> => {
+    if (submitting) return
+    setSubmitting(true)
+    try { await onConfirm(content) } finally { setSubmitting(false) }
+  }
   return createPortal(
-    <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+    <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !submitting && void submit(onCancel)}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="complete-task-title" className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
         <h3 id="complete-task-title" className="mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('kanban.completeTitle')}</h3>
         <p className="mb-4 text-sm text-zinc-500">{t('kanban.completePrompt')}</p>
-        <textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={3} aria-label={t('kanban.completePrompt')} className="mb-4 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-600 dark:bg-zinc-800" />
+        <textarea disabled={submitting} autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={3} aria-label={t('kanban.completePrompt')} className="mb-4 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-600 dark:bg-zinc-800" />
         <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={onCancel} className="ui-button ui-button--ghost">{t('common.cancel')}</button>
-          <button type="button" onClick={() => onConfirm(content)} className="ui-button ui-button--primary">{t('kanban.completeSubmit')}</button>
-          <button type="button" onClick={onOnlyComplete} className="ui-button ui-button--secondary">{t('kanban.completeOnly')}</button>
+          <button type="button" disabled={submitting} onClick={() => void submit(onCancel)} className="ui-button ui-button--ghost">{t('common.cancel')}</button>
+          <button type="button" disabled={submitting} onClick={() => void confirm()} className="ui-button ui-button--primary">{submitting ? t('workspace.saving') : t('kanban.completeSubmit')}</button>
+          <button type="button" disabled={submitting} onClick={() => void submit(onOnlyComplete)} className="ui-button ui-button--secondary">{submitting ? t('workspace.saving') : t('kanban.completeOnly')}</button>
         </div>
       </div>
     </div>,
@@ -202,8 +213,8 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
       toast.error(t('kanban.moveFailed'))
     }
   }
-  const handleComplete = async (content: string): Promise<void> => { if (!pendingComplete) return; const completedMove = pendingComplete; try { await completeTask(completedMove.task.id, content); await persistMove(completedMove); setPendingComplete(null); toast.successWithAction(t('kanban.completedToast'), t('kanban.undoComplete'), () => { void handleUndoComplete(completedMove) }) } catch { setLocalTasks(tasks as KanbanTask[]); toast.error(t('kanban.moveFailed')) } }
-  const handleCompleteOnly = async (): Promise<void> => { if (!pendingComplete) return; const completedMove = pendingComplete; try { await completeTaskOnly(completedMove.task.id); await persistMove(completedMove); setPendingComplete(null); toast.successWithAction(t('kanban.completedOnlyToast'), t('kanban.undoComplete'), () => { void handleUndoComplete(completedMove) }) } catch { setLocalTasks(tasks as KanbanTask[]); toast.error(t('kanban.moveFailed')) } }
+  const handleComplete = async (content: string): Promise<void> => { if (!pendingComplete) return; const completedMove = pendingComplete; try { await completeTask(completedMove.task.id, content); await persistMove(completedMove); setPendingComplete(null); toast.successWithAction(t('kanban.completedToast'), t('kanban.undoComplete'), () => { void handleUndoComplete(completedMove) }) } catch { await fetchTasks(); toast.error(t('kanban.moveFailed')) } }
+  const handleCompleteOnly = async (): Promise<void> => { if (!pendingComplete) return; const completedMove = pendingComplete; try { await completeTaskOnly(completedMove.task.id); await persistMove(completedMove); setPendingComplete(null); toast.successWithAction(t('kanban.completedOnlyToast'), t('kanban.undoComplete'), () => { void handleUndoComplete(completedMove) }) } catch { await fetchTasks(); toast.error(t('kanban.moveFailed')) } }
   const handleCancelComplete = async (): Promise<void> => { setPendingComplete(null); await fetchTasks() }
   const handleReopen = async (id: number): Promise<void> => {
     const move = prepareMove(id, 'todo')
@@ -240,7 +251,7 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
       </div>
       <DragOverlay>{draggingTask ? <TaskCardOverlay task={draggingTask} /> : null}</DragOverlay>
       {activeTask && <TaskDetailDrawer task={activeTask} columns={columns} projects={projects} onClose={() => setActiveTask(null)} onSave={handleUpdate} onMove={async (id, target) => { await handleMove(id, target); setActiveTask(null) }} onReopen={handleReopen} onDelete={handleDelete} columnName={columnName} />}
-      {pendingComplete && <CompleteDialog task={pendingComplete.task} onConfirm={(content) => void handleComplete(content)} onCancel={() => void handleCancelComplete()} onOnlyComplete={() => void handleCompleteOnly()} />}
+      {pendingComplete && <CompleteDialog task={pendingComplete.task} onConfirm={handleComplete} onCancel={handleCancelComplete} onOnlyComplete={handleCompleteOnly} />}
     </DndContext>
   )
 }

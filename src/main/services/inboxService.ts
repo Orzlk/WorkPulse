@@ -7,6 +7,12 @@ import type { InboxPagination, WorkspaceContext } from '../repositories/contract
 import { enqueueOutbox } from '../sync/outbox'
 import { LocalInboxRepository } from '../repositories/localInboxRepository'
 import { LocalTagRepository, displayTagName, normalizeTagName } from '../repositories/localTagRepository'
+import { MAX_TASK_TITLE_LENGTH } from '../ipcContracts'
+
+export function deriveInboxTaskTitle(content: string): string {
+  const firstNonEmptyLine = content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''
+  return firstNonEmptyLine.slice(0, MAX_TASK_TITLE_LENGTH)
+}
 
 export interface CreateInboxInput {
   content: string
@@ -146,7 +152,7 @@ export class InboxService {
         : this.createTask(item, suggestion)
       const updated = this.inbox.update(this.context, publicId, {
         state: 'confirmed',
-        include_in_reports: suggestion.include_in_reports
+        include_in_reports: false
       })
       if (!updated) throw new Error('Inbox item not found')
       this.enqueueSync('inbox_item', publicId, 'update', updated)
@@ -181,7 +187,7 @@ export class InboxService {
     this.assignTags(
       'work_log',
       row.public_id,
-      suggestion.tag_names,
+      this.mergeInboxTags(item.public_id, suggestion.tag_names),
       (tag) => this.tags.assignToWorkLog(this.context, row.id, tag)
     )
     this.enqueueSync('work_log', row.public_id, 'create', {
@@ -220,7 +226,7 @@ export class InboxService {
         ?, ?, ?, ?, ?, ?
       ) RETURNING id, public_id
     `).get(
-      suggestion.title || item.content,
+      deriveInboxTaskTitle(item.content),
       item.content,
       position.next,
       this.context.workspace_id,
@@ -235,12 +241,12 @@ export class InboxService {
     this.assignTags(
       'task',
       row.public_id,
-      suggestion.tag_names,
+      this.mergeInboxTags(item.public_id, suggestion.tag_names),
       (tag) => this.tags.assignToTask(this.context, row.id, tag)
     )
     this.enqueueSync('task', row.public_id, 'create', {
       public_id: row.public_id,
-      title: suggestion.title || item.content,
+      title: deriveInboxTaskTitle(item.content),
       description: item.content,
       project_id: suggestion.project_id
     })
@@ -268,6 +274,24 @@ export class InboxService {
       assign(tag)
       this.enqueueTagAssignment(recordType, recordPublicId, tag.public_id)
     })
+  }
+
+  private mergeInboxTags(publicId: string, additionalNames: string[]): string[] {
+    const sourceNames = this.database.prepare(`
+      SELECT COALESCE(tags.display_path, tags.name, tags.path) AS name
+      FROM inbox_tags
+      INNER JOIN inbox_items ON inbox_items.id = inbox_tags.inbox_item_id
+      INNER JOIN tags ON tags.id = inbox_tags.tag_id
+      WHERE inbox_items.workspace_id = ? AND inbox_items.public_id = ?
+        AND tags.workspace_id = ? AND tags.deleted_at IS NULL
+      ORDER BY tags.path ASC
+    `).all(this.context.workspace_id, publicId, this.context.workspace_id) as Array<{ name: string }>
+    const merged = new Map<string, string>()
+    for (const name of [...sourceNames.map((row) => row.name), ...additionalNames]) {
+      const display = displayTagName(name)
+      merged.set(normalizeTagName(display), display)
+    }
+    return Array.from(merged.values())
   }
 
   private enqueueTagAssignment(

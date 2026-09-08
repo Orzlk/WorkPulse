@@ -976,12 +976,18 @@ function assertTaskStatus(status: string): asserts status is Task['status'] {
 export function completeTask(id: number, logContent: string): Task | null {
   const metadata = getWriteMetadata()
   const publicId = db.transaction(() => {
+    const current = db.prepare(`
+      SELECT public_id, status
+      FROM tasks
+      WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+    `).get(id, metadata.workspaceId) as { public_id: string; status: Task['status'] } | undefined
+    if (!current) return null
+    if (current.status === 'done') return current.public_id
     const updated = db.prepare(`UPDATE tasks SET status = 'done', board_column = 'done', completed_at = COALESCE(completed_at, ?), updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`).run(metadata.timestamp, metadata.timestamp, metadata.userId, id, metadata.workspaceId)
     if (!updated.changes) return null
-    const task = db.prepare('SELECT public_id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').get(id, metadata.workspaceId) as { public_id: string }
     if (logContent.trim()) insertWorkLog({ content: logContent.trim(), category: '', taskId: id }, { ...metadata, publicId: randomUUID() })
-    enqueueEntitySync('task', task.public_id, { status: 'done', board_column: 'done', completed_at: metadata.timestamp }, metadata.workspaceId, metadata.timestamp)
-    return task.public_id
+    enqueueEntitySync('task', current.public_id, { status: 'done', board_column: 'done', completed_at: metadata.timestamp }, metadata.workspaceId, metadata.timestamp)
+    return current.public_id
   })()
   return publicId ? getTaskByPublicId(publicId) : null
 }

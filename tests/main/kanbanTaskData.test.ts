@@ -99,6 +99,18 @@ describe('看板任务数据', () => {
     expect(getDatabase().prepare('SELECT task_id, content FROM work_logs WHERE task_id = ? AND deleted_at IS NULL').get(task.id)).toEqual({ task_id: task.id, content: '完成说明' })
   })
 
+  it('does not create a second completion log when completion is retried', async () => {
+    electronUserDataPath = createTemporaryDirectory()
+    await initDatabase()
+    const task = addTask('幂等完成任务')
+
+    completeTask(task.id, '完成说明')
+    completeTask(task.id, '完成说明')
+
+    expect(getDatabase().prepare('SELECT COUNT(*) AS count FROM work_logs WHERE task_id = ? AND deleted_at IS NULL').get(task.id))
+      .toEqual({ count: 1 })
+  })
+
   it('rejects unknown kanban columns instead of hiding a task', async () => {
     electronUserDataPath = createTemporaryDirectory()
     await initDatabase()

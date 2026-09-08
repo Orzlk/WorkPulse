@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const root = resolve(__dirname, '../..')
 const page = readFileSync(resolve(root, 'src/renderer/src/pages/InboxPage.tsx'), 'utf8')
+const kanban = readFileSync(resolve(root, 'src/renderer/src/pages/KanbanPage.tsx'), 'utf8')
 const store = readFileSync(resolve(root, 'src/renderer/src/stores/inboxStore.ts'), 'utf8')
 const service = readFileSync(resolve(root, 'src/main/services/inboxService.ts'), 'utf8')
 const ipc = readFileSync(resolve(root, 'src/main/ipc.ts'), 'utf8')
@@ -32,5 +33,13 @@ describe('Inbox capture and delete workflow', () => {
     expect(preload).toContain("ipcRenderer.invoke('inbox:delete'")
     expect(declaration).toContain('delete: (publicId: string) => Promise<InboxItem | null>')
     expect(i18n).toContain("'workspace.deleteInbox'")
+  })
+
+  it('keeps completion pending while an asynchronous confirmation is saving', () => {
+    expect(kanban).toContain('onConfirm: (content: string) => Promise<void>')
+    expect(kanban).toContain('await onConfirm(content)')
+    expect(kanban).toContain('disabled={submitting}')
+    expect(kanban).toContain("t('workspace.saving')")
+    expect(kanban).toContain('await fetchTasks()')
   })
 })

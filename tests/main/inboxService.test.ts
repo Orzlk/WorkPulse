@@ -9,7 +9,7 @@ import type { WorkspaceContext } from '../../src/main/repositories/contracts'
 import { LocalInboxRepository } from '../../src/main/repositories/localInboxRepository'
 import { LocalProjectRepository } from '../../src/main/repositories/localProjectRepository'
 import { LocalTagRepository } from '../../src/main/repositories/localTagRepository'
-import { InboxService } from '../../src/main/services/inboxService'
+import { deriveInboxTaskTitle, InboxService } from '../../src/main/services/inboxService'
 import { ProjectService } from '../../src/main/services/projectService'
 import { SearchService } from '../../src/main/services/searchService'
 
@@ -118,22 +118,56 @@ describe('项目、收件箱和标签服务', () => {
   it('没有 AI 建议时允许人工转为任务并保留收件箱内容', () => {
     const { database, context } = createDatabase()
     const inboxService = new InboxService(database, context)
-    const inbox = inboxService.create({ content: '人工整理成一个待办任务' })
+    const content = `\n  人工整理成一个待办任务\n补充说明\n\n${'超长标题'.repeat(200)}`
+    const inbox = inboxService.create({ content, tag_names: ['#来源标签'] })
 
     const confirmed = inboxService.confirm(inbox.public_id, {
       target: 'task',
       project_id: null,
-      tag_names: []
+      tag_names: ['#人工标签']
     })
 
     expect(confirmed.target).toBe('task')
     expect(database.prepare('SELECT title, description, status FROM tasks').get()).toEqual({
       title: '人工整理成一个待办任务',
-      description: '人工整理成一个待办任务',
+      description: content,
       status: 'todo'
     })
-    expect(database.prepare('SELECT state FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
-      .toEqual({ state: 'confirmed' })
+    expect(database.prepare('SELECT path FROM tags ORDER BY path').all()).toEqual([
+      { path: '人工标签' },
+      { path: '来源标签' }
+    ])
+    expect(database.prepare('SELECT state, include_in_reports FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
+      .toEqual({ state: 'confirmed', include_in_reports: 0 })
+    database.close()
+  })
+
+  it('uses the first non-empty inbox line as a bounded task title', () => {
+    expect(deriveInboxTaskTitle(`\n\n  第一行标题  \n第二行保留在描述中`)).toBe('第一行标题')
+    expect(deriveInboxTaskTitle('长'.repeat(501))).toBe('长'.repeat(500))
+  })
+
+  it('combines source and AI suggestion tags when confirming a work log', () => {
+    const { database, context } = createDatabase()
+    const inboxService = new InboxService(database, context)
+    const inbox = inboxService.create({
+      content: '完整日志内容\n第二行细节',
+      tag_names: ['#来源标签'],
+      ai_suggestion: {
+        target: 'work_log', title: '摘要标题', summary: '', project_id: null,
+        tag_names: ['#AI标签', '#来源标签'], include_in_reports: true
+      }
+    })
+
+    inboxService.confirm(inbox.public_id)
+
+    expect(database.prepare('SELECT content FROM work_logs').get()).toEqual({ content: '完整日志内容\n第二行细节' })
+    expect(database.prepare('SELECT display_path FROM tags ORDER BY path').all()).toEqual([
+      { display_path: 'AI标签' },
+      { display_path: '来源标签' }
+    ])
+    expect(database.prepare('SELECT include_in_reports FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
+      .toEqual({ include_in_reports: 0 })
     database.close()
   })
 

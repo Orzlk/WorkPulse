@@ -140,6 +140,27 @@ describe('ReportQueryService', () => {
     database.close()
   })
 
+  it('does not collect a confirmed inbox source when its converted target is reportable', () => {
+    const database = createDatabase()
+    const ids = seed(database)
+    const { workspace_id, user_id } = context(database)
+    database.prepare(`
+      INSERT INTO work_logs (public_id, workspace_id, project_id, content, category, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, '已转换日志', '', ?, ?, '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z')
+    `).run(randomUUID(), workspace_id, ids.alpha, user_id, user_id)
+    database.prepare(`
+      INSERT INTO inbox_items (public_id, workspace_id, project_id, content, status, state, include_in_reports, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, '已转换来源', 'organized', 'confirmed', 0, ?, ?, '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z')
+    `).run(randomUUID(), workspace_id, ids.alpha, user_id, user_id)
+
+    const alpha = new ReportQueryService(database, context(database)).buildSnapshot(request()).projects
+      .find((project) => project.public_id === ids.alphaPublicId)
+
+    expect(alpha?.work_logs.map((log) => log.content)).toEqual(['已转换日志'])
+    expect(alpha?.inbox_items).toEqual([])
+    database.close()
+  })
+
   it('previews organized and unorganized inbox counts without sending unorganized records to AI', () => {
     const database = createDatabase()
     const ids = seed(database)
