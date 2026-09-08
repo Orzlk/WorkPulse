@@ -79,7 +79,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const translateRef = useRef(t)
   translateRef.current = t
   const request = useMemo(() => ({ type, anchorDate, timeZone, projectIds, repositoryIds }), [anchorDate, projectIds, repositoryIds, timeZone, type])
-  const content = viewing ? viewContent : generationContent
+  const content = editing || viewing ? viewContent : generationContent
 
   const clearTimers = (): void => { timers.current.forEach(window.clearTimeout); timers.current = [] }
   const loadHistory = async (): Promise<void> => {
@@ -127,7 +127,18 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   useEffect(() => {
     if (!focusReportId || !historyLoaded) return
     const report = findReportByPublicId(history, focusReportId)
-    if (report) {
+    if (!report) {
+      onReportFocusHandled?.()
+      return
+    }
+    void (async () => {
+      const requestId = activeStreamId.current
+      generationId.current += 1
+      activeStreamId.current = null
+      clearTimers()
+      if (requestId) {
+        try { await window.api.report.cancel(requestId) } catch { /* 聚焦历史失败不应阻止查看 */ }
+      }
       const state = getHistoryReportState(report)
       setViewing(report)
       setActive(report)
@@ -137,8 +148,8 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
       setStage(state.status === 'error' ? 'failed' : 'idle')
       setEditing(false)
       setHistoryOpen(true)
-    }
-    onReportFocusHandled?.()
+      onReportFocusHandled?.()
+    })()
   }, [focusReportId, history, historyLoaded, onReportFocusHandled])
   useEffect(() => {
     let closed = false
@@ -295,7 +306,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
     {status === 'no_data' && !isHistory && <Notice tone="neutral" title={t('report.noDataTitle')} detail={t('report.noDataSubtitle')} />}
     {!hasSourceData && !previewLoading && status === 'idle' && !isHistory && <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('report.previewEmpty')}</p>}
     {status === 'success' && content && <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800" role="group" aria-label={t('report.viewMode')}><button type="button" aria-pressed={!editing} onClick={() => { if (requestDiscardEdit()) setEditing(false) }} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${!editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Eye className="h-4 w-4" aria-hidden="true" />{t('report.preview')}</button><button type="button" aria-pressed={editing} onClick={() => setEditing(true)} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Pencil className="h-4 w-4" aria-hidden="true" />{t('report.edit')}</button></div>{active && <span className="text-xs text-zinc-500">{t('report.version', { version: active.version })}</span>}</div>{editing ? <textarea aria-label={t('report.edit')} value={content} onChange={(event) => setViewContent(event.target.value)} className="min-h-[360px] w-full rounded-lg border border-zinc-300 bg-white p-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" /> : <div className="prose prose-zinc max-w-none dark:prose-invert" role="article"><ReactMarkdown>{content}</ReactMarkdown></div>}<div className="mt-5 flex flex-wrap gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-700"><button type="button" onClick={copy} className="ui-button text-sm">{copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}{copied ? t('report.copiedState') : t('report.copy')}</button><button type="button" onClick={async () => { const report = viewing ?? active; if (report && await window.api.export.report(content, buildReportExportName(report))) toast.success(t('report.exported')) }} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Download className="h-4 w-4" aria-hidden="true" />{t('common.export')}</button>{editing && <button type="button" onClick={save} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Save className="h-4 w-4" aria-hidden="true" />{t('report.saveCurrentVersion')}</button>}{!isHistory && <button type="button" onClick={() => void generate()} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><RefreshCw className="h-4 w-4" aria-hidden="true" />{t('report.regenerate')}</button>}</div></section>}
-    {!isHistory && <section className="border-t border-zinc-200 pt-5 dark:border-zinc-700"><button type="button" onClick={() => setHistoryOpen((value) => !value)} aria-expanded={historyOpen} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:text-zinc-200"><Clock3 className="h-4 w-4" aria-hidden="true" />{t('report.history')}<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-normal dark:bg-zinc-800">{history.length}</span>{historyOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}</button>{historyOpen && <div className="mt-3 space-y-2">{history.map((report) => <button key={report.public_id} type="button" onClick={() => openHistoryReport(report)} className="flex w-full items-start justify-between gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left hover:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"><span className="min-w-0"><span className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200"><FileText className="h-4 w-4" aria-hidden="true" />{report.type === 'weekly' ? t('report.weekly') : t('report.monthly')} · {report.display_start} {t('common.to')} {report.display_end_inclusive}<Badge status={report.status} t={t} /></span><span className="mt-1 block truncate text-xs text-zinc-500">{t('report.historyScope', { projects: displayScope(report.project_scope, projects, t('report.allProjects')), repositories: displayScope(report.repository_scope, repositories, t('report.allRepositories')) })}</span></span><span className="shrink-0 text-right text-xs text-zinc-500">{t('report.version', { version: report.version })}<br />{formatTime(report.generated_at, timeZone)}</span></button>)}</div>}</section>}
+    {!isHistory && <section className="border-t border-zinc-200 pt-5 dark:border-zinc-700"><button type="button" onClick={() => setHistoryOpen((value) => !value)} aria-expanded={historyOpen} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:text-zinc-200"><Clock3 className="h-4 w-4" aria-hidden="true" />{t('report.history')}<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-normal dark:bg-zinc-800">{history.length}</span>{historyOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}</button>{historyOpen && <div className="mt-3 space-y-2">{history.map((report) => <button key={report.public_id} type="button" onClick={() => void openHistoryReport(report)} className="flex w-full items-start justify-between gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left hover:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"><span className="min-w-0"><span className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200"><FileText className="h-4 w-4" aria-hidden="true" />{report.type === 'weekly' ? t('report.weekly') : t('report.monthly')} · {report.display_start} {t('common.to')} {report.display_end_inclusive}<Badge status={report.status} t={t} /></span><span className="mt-1 block truncate text-xs text-zinc-500">{t('report.historyScope', { projects: displayScope(report.project_scope, projects, t('report.allProjects')), repositories: displayScope(report.repository_scope, repositories, t('report.allRepositories')) })}</span></span><span className="shrink-0 text-right text-xs text-zinc-500">{t('report.version', { version: report.version })}<br />{formatTime(report.generated_at, timeZone)}</span></button>)}</div>}</section>}
   </div>
 }
 
