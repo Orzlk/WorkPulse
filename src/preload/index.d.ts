@@ -324,7 +324,7 @@ export interface API {
     get: (publicId: string) => Promise<InboxItem | null>
     create: (input: Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>) => Promise<InboxItem>
     update: (publicId: string, input: Partial<Omit<InboxItem, 'public_id' | 'state' | 'created_at' | 'updated_at'>>) => Promise<InboxItem | null>
-    organize: (publicId: string) => Promise<{ target: string; target_public_id: string | null }>
+    organize: (publicId: string, options?: { target: 'work_log' | 'task' | 'ignore'; project_id?: string | null; tag_names?: string[]; title?: string; include_in_reports?: boolean }) => Promise<{ target: string; target_public_id: string | null }>
     aiOrganize: (input?: { public_ids?: string[]; limit?: number }) => Promise<{ processed: number; updated: number; failed: number; items: InboxItem[] }>
     ignore: (publicId: string) => Promise<InboxItem | null>
     archive: (publicId: string) => Promise<InboxItem | null>

@@ -1,6 +1,7 @@
 import { getReportAnchorDate } from './reportPeriod'
 
 export type WorkflowReportType = 'weekly' | 'monthly'
+export type ReportPreset = 'current' | 'previous'
 export type ReportGenerationError = 'no_key' | 'timeout' | 'invalid_response' | 'unknown'
 
 export interface RetryReportRequest {
@@ -49,6 +50,12 @@ export function getLatestCompleteReportAnchor(
   const localDay = new Date(`${localDate}T00:00:00.000Z`).getUTCDay()
   const daysSinceMonday = (localDay + 6) % 7
   return shiftCalendarDate(localDate, -(daysSinceMonday + 1))
+}
+
+export function getReportPresetAnchor(type: WorkflowReportType, preset: ReportPreset, timeZone: string, now: Date = new Date()): string {
+  return preset === 'previous'
+    ? getLatestCompleteReportAnchor(type, timeZone, now)
+    : getReportAnchorDate(timeZone, now)
 }
 
 export function buildReportExportName(report: ExportableReport): string {

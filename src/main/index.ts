@@ -14,6 +14,7 @@ import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
 import { ReportService } from './reports/reportService'
 import { parseShortcutUpdateArgs } from './ipcContracts'
+import { showWindowForShortcut } from './window/windowVisibility'
 import { collectAttachmentNames, removeUnreferencedAttachments } from './attachments/attachmentArchive'
 import { createDatabaseExport } from './database/transfer'
 
@@ -53,11 +54,9 @@ function getMainWindow(): BrowserWindow | null {
 
 function sendToRenderer(channel: string): void {
   const win = getMainWindow()
-  if (win) {
-    if (!win.isVisible()) win.show()
-    win.focus()
-    win.webContents.send(channel)
-  }
+  if (!win) return
+  showWindowForShortcut(win)
+  win.webContents.send(channel)
 }
 
 // --- Shortcuts ---

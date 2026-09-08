@@ -21,6 +21,14 @@ export interface InboxConfirmation {
   target_public_id: string | null
 }
 
+export interface ManualInboxConfirmation {
+  target: InboxTarget
+  project_id?: string | null
+  tag_names?: string[]
+  title?: string
+  include_in_reports?: boolean
+}
+
 export class InboxService {
   private readonly inbox: LocalInboxRepository
   private readonly tags: LocalTagRepository
@@ -113,14 +121,15 @@ export class InboxService {
     return remove()
   }
 
-  confirm(publicId: string): InboxConfirmation {
+  confirm(publicId: string, manual?: ManualInboxConfirmation): InboxConfirmation {
     this.assertWorkspace()
     const confirm = this.database.transaction(() => {
       const item = this.inbox.get(this.context, publicId)
       if (!item) throw new Error('Inbox item not found')
       if (item.state !== 'unorganized') throw new Error('Inbox item is already organized')
-      if (!item.ai_suggestion) throw new Error('Inbox suggestion is required')
-      const suggestion = this.validateSuggestion(item.ai_suggestion)
+      const suggestion = manual
+        ? this.validateManualConfirmation(item, manual)
+        : this.validateSuggestion(item.ai_suggestion)
       if (!suggestion) throw new Error('Inbox suggestion is required')
       if (suggestion.target === 'ignore') {
         const ignored = this.inbox.update(this.context, publicId, {
@@ -296,6 +305,20 @@ export class InboxService {
       summary: suggestion.summary,
       tag_names: Array.from(new Set(suggestion.tag_names.map(displayTagName))),
       include_in_reports: Boolean(suggestion.include_in_reports)
+    }
+  }
+
+  private validateManualConfirmation(item: InboxItem, input: ManualInboxConfirmation): InboxSuggestion {
+    if (!['work_log', 'task', 'ignore'].includes(input.target)) throw new Error('Inbox target is invalid')
+    const projectId = input.project_id === undefined ? item.project_id : input.project_id
+    this.assertProject(projectId ?? null)
+    return {
+      target: input.target,
+      title: input.title?.trim() || item.content,
+      summary: '',
+      project_id: projectId ?? null,
+      tag_names: Array.from(new Set((input.tag_names ?? []).map(displayTagName))),
+      include_in_reports: input.include_in_reports ?? item.include_in_reports
     }
   }
 

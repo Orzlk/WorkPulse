@@ -272,7 +272,7 @@ function StatsPage({ onOpenReports }: { onOpenReports?: () => void }): JSX.Eleme
       <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={[{ label: t('nav.stats'), current: true }]} title={t('nav.stats')} />
       <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'reports', label: t('nav.report'), onClick: onOpenReports }, { id: 'stats', label: t('nav.stats'), active: true }]} />
       {/* Stat Cards */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={Flame}
           label={t('stats.streak')}

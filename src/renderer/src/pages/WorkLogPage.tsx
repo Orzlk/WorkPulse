@@ -39,7 +39,6 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [openMenuId, setOpenMenuId] = useState<number | null>(null)
-  const [categorySuggestions, setCategorySuggestions] = useState<string[]>([])
   const [projectMention, setProjectMention] = useState<ProjectMentionRange | null>(null)
   const [tagMention, setTagMention] = useState<ProjectMentionRange | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
@@ -97,7 +96,6 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
     void fetchLogs()
     void fetchProjects()
     void refreshTagTree()
-    window.api.worklog.categories().then(setCategorySuggestions).catch(() => setCategorySuggestions([]))
     inputRef.current?.focus()
   }, [])
 
@@ -667,9 +665,6 @@ function WorkLogPage({ focusPublicId, onFocusHandled, onOpenInbox }: { focusPubl
 
         </main>
       </div>
-      <datalist id="worklog-category-suggestions">
-        {categorySuggestions.map((category) => <option key={category} value={`#${category}`} />)}
-      </datalist>
     </div>
   )
 }

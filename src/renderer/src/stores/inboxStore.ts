@@ -24,7 +24,7 @@ interface InboxStore {
   select: (publicId: string | null) => void
   create: (input: InboxInput) => Promise<InboxItem>
   suggestAi: (input?: { public_ids?: string[]; limit?: number }) => Promise<{ processed: number; updated: number; failed: number }>
-  organize: (publicId: string) => Promise<void>
+  organize: (publicId: string, options?: { target: 'work_log' | 'task' | 'ignore'; project_id?: string | null; tag_names?: string[]; title?: string; include_in_reports?: boolean }) => Promise<void>
   ignore: (publicId: string) => Promise<void>
   remove: (publicId: string) => Promise<void>
 }
@@ -90,8 +90,8 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     set({ items: page.items, total: page.total, status: 'success', selectedId: null })
     return { processed: result.processed, updated: result.updated, failed: result.failed }
   },
-  organize: async (publicId) => {
-    await window.api.inbox.organize(publicId)
+  organize: async (publicId, options) => {
+    await window.api.inbox.organize(publicId, options)
     await get().fetch()
     set({ selectedId: null })
   },

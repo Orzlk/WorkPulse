@@ -70,6 +70,7 @@ import {
   parseTaskUpdateArgs,
   parseTaskReorderArgs,
   parseSettingUpdateArgs,
+  parseInboxOrganizeArgs,
   toIpcContractError
 } from './ipcContracts'
 import { createDatabaseExport, mergeDatabaseImport, previewDatabaseImport } from './database/transfer'
@@ -292,7 +293,9 @@ export function registerIpcHandlers(): void {
     return services().inbox.create({ ...item, content: item.content! })
   }))
   ipcMain.handle('inbox:update', guarded((publicId: unknown, input: unknown) => services().inbox.update(id(publicId, 'inbox id'), parseInboxInput(input))))
-  ipcMain.handle('inbox:organize', guarded((publicId: unknown) => services().inbox.confirm(id(publicId, 'inbox id'))))
+  ipcMain.handle('inbox:organize', guarded((publicId: unknown, options: unknown) => {
+    return services().inbox.confirm(id(publicId, 'inbox id'), parseInboxOrganizeArgs(options))
+  }))
   ipcMain.handle('inbox:ignore', guarded((publicId: unknown) => services().inbox.ignore(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:archive', guarded((publicId: unknown) => services().inbox.archive(id(publicId, 'inbox id'))))
   ipcMain.handle('inbox:delete', guarded((publicId: unknown) => services().inbox.softDelete(id(publicId, 'inbox id'))))

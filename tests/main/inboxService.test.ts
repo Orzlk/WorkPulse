@@ -115,6 +115,28 @@ describe('项目、收件箱和标签服务', () => {
     database.close()
   })
 
+  it('没有 AI 建议时允许人工转为任务并保留收件箱内容', () => {
+    const { database, context } = createDatabase()
+    const inboxService = new InboxService(database, context)
+    const inbox = inboxService.create({ content: '人工整理成一个待办任务' })
+
+    const confirmed = inboxService.confirm(inbox.public_id, {
+      target: 'task',
+      project_id: null,
+      tag_names: []
+    })
+
+    expect(confirmed.target).toBe('task')
+    expect(database.prepare('SELECT title, description, status FROM tasks').get()).toEqual({
+      title: '人工整理成一个待办任务',
+      description: '人工整理成一个待办任务',
+      status: 'todo'
+    })
+    expect(database.prepare('SELECT state FROM inbox_items WHERE public_id = ?').get(inbox.public_id))
+      .toEqual({ state: 'confirmed' })
+    database.close()
+  })
+
   it('标签关联失败时回滚目标实体、收件箱状态和新增 outbox 操作', () => {
     const { database, context } = createDatabase()
     const inboxService = new InboxService(database, context)

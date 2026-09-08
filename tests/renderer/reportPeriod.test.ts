@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { getReportAnchorDate, getReportDisplayPeriod } from '../../src/renderer/src/lib/reportPeriod'
+import { getReportPresetAnchor } from '../../src/renderer/src/lib/reportWorkflow'
 
 describe('report display period', () => {
   it('converts UTC half-open boundaries to local inclusive calendar dates', () => {
@@ -19,5 +20,13 @@ describe('report display period', () => {
   it('uses the negative timezone calendar date at month boundaries', () => {
     expect(getReportAnchorDate('America/New_York', new Date('2026-02-01T04:30:00.000Z'))).toBe('2026-01-31')
     expect(getReportAnchorDate('America/New_York', new Date('2026-03-01T04:30:00.000Z'))).toBe('2026-02-28')
+  })
+
+  it('provides current and previous period anchors for quick switching', () => {
+    const now = new Date('2026-09-09T03:00:00.000Z')
+    expect(getReportPresetAnchor('weekly', 'current', 'Asia/Shanghai', now)).toBe('2026-09-09')
+    expect(getReportPresetAnchor('weekly', 'previous', 'Asia/Shanghai', now)).toBe('2026-09-06')
+    expect(getReportPresetAnchor('monthly', 'current', 'Asia/Shanghai', now)).toBe('2026-09-09')
+    expect(getReportPresetAnchor('monthly', 'previous', 'Asia/Shanghai', now)).toBe('2026-08-01')
   })
 })

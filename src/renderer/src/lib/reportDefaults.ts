@@ -1,0 +1,6 @@
+export {
+  DEFAULT_REPORT_TEMPLATE,
+  DEFAULT_REPORT_TEMPLATE_EN,
+  DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_SYSTEM_PROMPT_EN
+} from '../../../shared/reportDefaults'

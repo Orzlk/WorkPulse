@@ -19,7 +19,8 @@ import {
   parseTaskReorderArgs,
   parseSettingUpdateArgs,
   parseShortcutUpdateArgs,
-  parseInboxInput
+  parseInboxInput,
+  parseInboxOrganizeArgs
 } from '../../src/main/ipcContracts'
 
 describe('IPC contract validation', () => {
@@ -148,5 +149,9 @@ describe('IPC contract validation', () => {
     expect(parseShortcutUpdateArgs({ key: 'shortcut_quick_task', value: 'Ctrl+Shift+T' })).toEqual({ key: 'shortcut_quick_task', value: 'Ctrl+Shift+T' })
     expect(() => parseShortcutUpdateArgs({ key: 'shortcut_hijack', value: 'x' })).toThrow('INVALID_ARGUMENT')
     expect(() => parseShortcutUpdateArgs({ key: 'shortcut_quick_task', value: 'x'.repeat(201) })).toThrow('INVALID_ARGUMENT')
+    expect(parseInboxOrganizeArgs({ target: 'task', project_id: null, tag_names: ['#人工'] }))
+      .toEqual({ target: 'task', project_id: null, tag_names: ['人工'] })
+    expect(() => parseInboxOrganizeArgs({ target: 'task', tag_names: Array.from({ length: 51 }, () => 'tag') }))
+      .toThrow('INVALID_ARGUMENT')
   })
 })

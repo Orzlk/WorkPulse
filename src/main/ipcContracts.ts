@@ -1,4 +1,4 @@
-import type { InboxState, InboxSuggestion } from './domain/types'
+import type { InboxState, InboxSuggestion, InboxTarget } from './domain/types'
 import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
@@ -524,6 +524,31 @@ function parseSuggestion(value: unknown): InboxSuggestion | null | undefined {
 export function parseInboxState(value: unknown): InboxState {
   if (!['unorganized', 'confirmed', 'ignored', 'archived'].includes(value as string)) throw invalid('inbox state is invalid')
   return value as InboxState
+}
+
+export interface InboxOrganizeInput {
+  target: InboxTarget
+  project_id?: string | null
+  tag_names?: string[]
+  title?: string
+  include_in_reports?: boolean
+}
+
+export function parseInboxOrganizeArgs(value: unknown): InboxOrganizeInput | undefined {
+  if (value === undefined || value === null) return undefined
+  const input = object(value, ['target', 'project_id', 'tag_names', 'title', 'include_in_reports'])
+  if (input.target !== 'work_log' && input.target !== 'task' && input.target !== 'ignore') throw invalid('inbox target is invalid')
+  if (input.project_id !== undefined && input.project_id !== null && typeof input.project_id !== 'string') throw invalid('inbox project_id is invalid')
+  if (input.tag_names !== undefined && (!Array.isArray(input.tag_names) || input.tag_names.length > MAX_TAG_NAMES || input.tag_names.some((tag) => typeof tag !== 'string'))) throw invalid('inbox tags are invalid')
+  if (input.title !== undefined && typeof input.title !== 'string') throw invalid('inbox title is invalid')
+  if (input.include_in_reports !== undefined && typeof input.include_in_reports !== 'boolean') throw invalid('inbox include_in_reports is invalid')
+  return {
+    target: input.target,
+    project_id: input.project_id as string | null | undefined,
+    tag_names: input.tag_names === undefined ? undefined : parseTagNames(input.tag_names),
+    title: input.title === undefined ? undefined : string(input.title, 'inbox title', { allowEmpty: true, max: 500 }),
+    include_in_reports: input.include_in_reports as boolean | undefined
+  }
 }
 
 export function toIpcContractError(error: unknown): IpcContractError {

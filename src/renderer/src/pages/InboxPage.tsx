@@ -57,6 +57,17 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
     try { await organize(publicId); toast.success(t('workspace.organized')) } catch { toast.error(t('workspace.organizeFailed')) }
   }
 
+  const handleManualOrganize = async (publicId: string, target: 'task' | 'work_log'): Promise<void> => {
+    const item = items.find((candidate) => candidate.public_id === publicId)
+    if (!item) return
+    try {
+      await organize(publicId, { target, project_id: item.project_id, tag_names: [] })
+      toast.success(t('workspace.organized'))
+    } catch {
+      toast.error(t('workspace.organizeFailed'))
+    }
+  }
+
   const handleIgnore = async (publicId: string): Promise<void> => {
     try { await ignore(publicId); toast.success(t('workspace.ignored')) } catch { toast.error(t('workspace.ignoreFailed')) }
   }
@@ -147,7 +158,7 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
             <p className="workspace-kicker">{t('workspace.recordDetails')}</p><p className="drawer-content">{selected.content}</p>
             <div className="drawer-meta"><span>{t('workspace.project')}: {projects.find((item) => item.public_id === selected.project_id)?.name ?? t('workspace.unassigned')}</span></div>
             {selected.ai_suggestion ? <section className="ai-suggestion"><div><Sparkles aria-hidden="true" /><h3>{t('workspace.aiSuggestion')}: {selected.ai_suggestion.target === 'task' ? t('workspace.sourceTask') : selected.ai_suggestion.target === 'work_log' ? t('workspace.sourceLog') : t('workspace.ignore')}</h3></div><p>{selected.ai_suggestion.summary}</p><p>{selected.ai_suggestion.tag_names.map((tag) => `#${tag}`).join(' ')}</p></section> : <p className="drawer-note">{t('workspace.noAiSuggestion')}</p>}
-            {selected.state === 'unorganized' ? <div className="drawer-actions"><button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button><button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div> : <div className="drawer-actions"><p className="drawer-note">{inboxFilterLabelsForState(selected.state, t)}</p><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div>}
+            {selected.state === 'unorganized' ? <div className="drawer-actions">{selected.ai_suggestion ? <button className="primary-action" onClick={() => void handleOrganize(selected.public_id)}><Check aria-hidden="true" />{t('workspace.confirmOrganize')}</button> : <><button className="primary-action" onClick={() => void handleManualOrganize(selected.public_id, 'task')}><Check aria-hidden="true" />{t('workspace.manualTask')}</button><button onClick={() => void handleManualOrganize(selected.public_id, 'work_log')}><Check aria-hidden="true" />{t('workspace.manualWorkLog')}</button></>}<button onClick={() => void handleIgnore(selected.public_id)}><Archive aria-hidden="true" />{t('workspace.ignore')}</button><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div> : <div className="drawer-actions"><p className="drawer-note">{inboxFilterLabelsForState(selected.state, t)}</p><button className="danger-action" onClick={() => void handleDelete(selected.public_id)}><Trash2 aria-hidden="true" />{t('workspace.deleteInbox')}</button></div>}
           </> : <div className="drawer-placeholder"><Sparkles aria-hidden="true" /><p>{t('workspace.selectRecord')}</p></div>}
         </aside>
       </div>
