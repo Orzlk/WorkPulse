@@ -2,7 +2,7 @@ import type { InboxState, InboxSuggestion, InboxTarget } from './domain/types'
 import type { Pagination } from './repositories/contracts'
 import type { ReportRequest } from './reports/reportTypes'
 import type { CreateRepositoryInput, UpdateRepositoryInput } from './services/repositoryService'
-import type { AiProviderName } from './reports/aiProvider'
+import { getAiProviderPreset, type AiAuthMode, type AiProtocol, type AiProviderName } from '../shared/aiProviderConfig'
 import type { TaskChecklistItem, TaskPriority } from './kanban/kanbanTypes'
 import { format, isValid, parseISO } from 'date-fns'
 import { DEFAULT_STATS_DAYS, isValidStatsDays } from './lib/stats'
@@ -21,6 +21,9 @@ const SETTING_KEYS = new Set([
   'ai_provider',
   'ai_base_url',
   'ai_model',
+  'ai_protocol',
+  'ai_auth_mode',
+  'ai_custom_headers',
   'report_language',
   'report_style',
   'system_prompt',
@@ -249,16 +252,84 @@ export interface ParsedAiConnectionTestInput {
   api_key: string
   base_url: string
   model: string
+  protocol: AiProtocol
+  auth_mode: AiAuthMode
+  custom_headers: Record<string, string>
 }
 
 export function parseAiConnectionTestInput(value: unknown): ParsedAiConnectionTestInput {
-  const input = object(value, ['provider', 'api_key', 'base_url', 'model'])
-  if (!['openai', 'anthropic', 'deepseek'].includes(input.provider as string)) throw invalid('provider is invalid')
+  const input = object(value, ['provider', 'api_key', 'base_url', 'model', 'protocol', 'auth_mode', 'custom_headers'])
+  const provider = input.provider as string
+  const preset = getAiProviderPreset(provider)
+  if (!preset) throw invalid('provider is invalid')
+  const protocol = input.protocol === undefined ? preset.protocol : input.protocol
+  if (protocol !== 'openai-chat' && protocol !== 'openai-responses' && protocol !== 'anthropic-messages') throw invalid('protocol is invalid')
+  const authMode = input.auth_mode === undefined ? preset.authMode : input.auth_mode
+  if (authMode !== 'bearer' && authMode !== 'x-api-key' && authMode !== 'none') throw invalid('auth_mode is invalid')
+  const apiKey = string(input.api_key, 'api_key', { allowEmpty: true, max: 4096 })
+  if (authMode !== 'none' && !apiKey) throw invalid('api_key is required')
+  const customHeaders = parseCustomHeaders(input.custom_headers)
   return {
-    provider: input.provider as AiProviderName,
-    api_key: string(input.api_key, 'api_key', { max: 4096 }),
+    provider: provider as AiProviderName,
+    api_key: apiKey,
     base_url: optionalString(input.base_url, 'base_url', 2048) ?? '',
-    model: optionalString(input.model, 'model', 200) ?? ''
+    model: optionalString(input.model, 'model', 200) ?? '',
+    protocol,
+    auth_mode: authMode,
+    custom_headers: customHeaders
+  }
+}
+
+export interface ParsedAiModelListInput {
+  provider: AiProviderName
+  api_key: string
+  base_url: string
+  protocol: AiProtocol
+  auth_mode: AiAuthMode
+  custom_headers: Record<string, string>
+}
+
+export function parseAiModelListInput(value: unknown): ParsedAiModelListInput {
+  const input = object(value, ['provider', 'api_key', 'base_url', 'protocol', 'auth_mode', 'custom_headers'])
+  const provider = input.provider as string
+  const preset = getAiProviderPreset(provider)
+  if (!preset) throw invalid('provider is invalid')
+  const protocol = input.protocol === undefined ? preset.protocol : input.protocol
+  if (protocol !== 'openai-chat' && protocol !== 'openai-responses' && protocol !== 'anthropic-messages') throw invalid('protocol is invalid')
+  const authMode = input.auth_mode === undefined ? preset.authMode : input.auth_mode
+  if (authMode !== 'bearer' && authMode !== 'x-api-key' && authMode !== 'none') throw invalid('auth_mode is invalid')
+  const apiKey = input.api_key === undefined ? '' : string(input.api_key, 'api_key', { allowEmpty: true, max: 4096 })
+  if (authMode !== 'none' && !apiKey) throw invalid('api_key is required')
+  return {
+    provider: provider as AiProviderName,
+    api_key: apiKey,
+    base_url: optionalString(input.base_url, 'base_url', 2048) ?? '',
+    protocol,
+    auth_mode: authMode,
+    custom_headers: parseCustomHeaders(input.custom_headers)
+  }
+}
+
+function parseCustomHeaders(value: unknown): Record<string, string> {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid('custom_headers is invalid')
+  const entries = Object.entries(value)
+  if (entries.length > 20) throw invalid('too many custom headers')
+  const headers: Record<string, string> = {}
+  for (const [name, headerValue] of entries) {
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name) || name.length > 100) throw invalid('custom header name is invalid')
+    if (/^(authorization|x-api-key|content-type|x-opencode-session|user-agent)$/i.test(name)) throw invalid('custom header is reserved')
+    if (typeof headerValue !== 'string' || headerValue.length > 2000) throw invalid('custom header value is invalid')
+    headers[name] = headerValue
+  }
+  return headers
+}
+
+export function parseAiCustomHeadersSetting(value: string): Record<string, string> {
+  try {
+    return parseCustomHeaders(JSON.parse(value))
+  } catch {
+    throw invalid('custom headers are invalid')
   }
 }
 

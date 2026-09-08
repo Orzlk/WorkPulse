@@ -1,15 +1,29 @@
 import { randomUUID } from 'node:crypto'
+import {
+  buildAiEndpoint,
+  buildAiModelsEndpoint,
+  createAiProviderConfig,
+  getAiProviderPreset,
+  validateAiProviderConfig,
+  type AiAuthMode,
+  type AiProtocol,
+  type AiProviderConfig,
+  type AiProviderName
+} from '../../shared/aiProviderConfig'
+
+export type { AiAuthMode, AiProtocol, AiProviderConfig, AiProviderName } from '../../shared/aiProviderConfig'
 
 export const AI_PROVIDER_RESPONSE_ERROR = 'AI provider response is invalid'
 const WORKPULSE_USER_AGENT = 'WorkPulse/0.0.1'
 
-export type AiProviderName = 'openai' | 'anthropic' | 'deepseek'
-
 export interface AiConnectionTestInput {
   provider: AiProviderName
-  apiKey: string
-  baseUrl: string
-  model: string
+  apiKey: string | null
+  baseUrl?: string
+  model?: string
+  protocol?: AiProtocol
+  authMode?: AiAuthMode
+  customHeaders?: Record<string, string>
 }
 
 export interface AiConnectionTestResult {
@@ -25,16 +39,38 @@ export interface AiConnectionTestDependencies {
   timeoutMs?: number
 }
 
+export interface AiModelListInput {
+  provider: AiProviderName
+  apiKey: string | null
+  baseUrl?: string
+  model?: string
+  protocol?: AiProtocol
+  authMode?: AiAuthMode
+  customHeaders?: Record<string, string>
+}
+
+export interface AiModelListResult {
+  ok: boolean
+  provider: AiProviderName
+  models: string[]
+  latency_ms: number
+  error?: string
+}
+
 export interface ProviderMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
 
 export interface ProviderRequest {
-  apiKey: string
+  apiKey?: string | null
   baseUrl: string
   model: string
   messages: ProviderMessage[]
+  protocol?: AiProtocol
+  authMode?: AiAuthMode
+  customHeaders?: Record<string, string>
+  config?: AiProviderConfig
   sessionId?: string
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -90,6 +126,21 @@ function anthropicContent(data: unknown): string {
   return requireContent((first as { text?: unknown }).text)
 }
 
+function responsesContent(data: unknown): string {
+  if (!data || typeof data !== 'object') throw responseError()
+  const response = data as { output_text?: unknown; output?: unknown }
+  if (typeof response.output_text === 'string' && response.output_text.trim()) return response.output_text
+  if (!Array.isArray(response.output)) throw responseError()
+  const content = response.output
+    .filter((item): item is { type?: unknown; content?: unknown } => Boolean(item) && typeof item === 'object')
+    .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+    .filter((item): item is { type?: unknown; text?: unknown } => Boolean(item) && typeof item === 'object')
+    .filter((item) => item.type === 'output_text' && typeof item.text === 'string')
+    .map((item) => item.text as string)
+    .join('')
+  return requireContent(content)
+}
+
 export function extractAiStreamText(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const value = data as { choices?: unknown; type?: unknown; delta?: unknown }
@@ -107,6 +158,9 @@ export function extractAiStreamText(data: unknown): string {
   }
   if (value.type === 'content_block_delta' && value.delta && typeof value.delta === 'object' && typeof (value.delta as { text?: unknown }).text === 'string') {
     return (value.delta as { text: string }).text
+  }
+  if (value.type === 'response.output_text.delta' && typeof (value as { delta?: unknown }).delta === 'string') {
+    return (value as { delta: string }).delta
   }
   return ''
 }
@@ -166,22 +220,9 @@ async function request(
   const requestBody = input.onChunk && body && typeof body === 'object'
     ? { ...(body as Record<string, unknown>), stream: true }
     : body
-  const requestHeaders = (() => {
-    try {
-      const hostname = new URL(url).hostname
-      if (hostname !== 'opencode.ai' && !hostname.endsWith('.opencode.ai')) return headers
-    } catch {
-      return headers
-    }
-    return {
-      ...headers,
-      'User-Agent': WORKPULSE_USER_AGENT,
-      'x-opencode-session': input.sessionId ?? randomUUID()
-    }
-  })()
   const response = await fetchImpl(url, {
     method: 'POST',
-    headers: requestHeaders,
+    headers,
     body: JSON.stringify(requestBody),
     signal: input.signal
   }) as unknown as ProviderResponse
@@ -193,87 +234,256 @@ async function request(
   return parse(await readResponse(response))
 }
 
-export function callOpenAI(input: ProviderRequest): Promise<string> {
-  const url = input.baseUrl
-    ? `${input.baseUrl.replace(/\/+$/, '')}/chat/completions`
-    : 'https://api.openai.com/v1/chat/completions'
-  return request(input, url, {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${input.apiKey}`
-  }, {
-    model: input.model || 'gpt-4o-mini',
+function isOpenCodeEndpoint(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname
+    return hostname === 'opencode.ai' || hostname.endsWith('.opencode.ai')
+  } catch {
+    return false
+  }
+}
+
+function resolveConfig(input: ProviderRequest, presetId: AiProviderName): AiProviderConfig {
+  if (input.config) return input.config
+  const preset = getAiProviderPreset(presetId)
+  if (!preset) {
+    const custom = createAiProviderConfig('custom-openai')
+    return {
+      ...custom,
+      protocol: input.protocol ?? custom.protocol,
+      authMode: input.authMode ?? custom.authMode,
+      baseUrl: input.baseUrl || custom.baseUrl,
+      model: input.model || custom.model,
+      customHeaders: input.customHeaders ?? {}
+    }
+  }
+  return {
+    ...preset,
+    presetId: preset.id,
+    displayName: preset.id,
+    protocol: input.protocol ?? preset.protocol,
+    authMode: input.authMode ?? preset.authMode,
+    baseUrl: input.baseUrl || preset.baseUrl,
+    model: input.model || preset.model,
+    customHeaders: input.customHeaders ?? {}
+  }
+}
+
+function providerHeaders(input: ProviderRequest, config: AiProviderConfig, url: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...config.customHeaders,
+    'Content-Type': 'application/json'
+  }
+  if (config.authMode === 'bearer' && input.apiKey) headers.Authorization = `Bearer ${input.apiKey}`
+  if (config.authMode === 'x-api-key' && input.apiKey) headers['x-api-key'] = input.apiKey
+  if (config.protocol === 'anthropic-messages') headers['anthropic-version'] = '2023-06-01'
+  if (isOpenCodeEndpoint(url)) {
+    headers['User-Agent'] = WORKPULSE_USER_AGENT
+    headers['x-opencode-session'] = input.sessionId ?? randomUUID()
+  }
+  return headers
+}
+
+function parseModelIds(data: unknown): string[] {
+  if (!data || typeof data !== 'object') throw responseError()
+  const payload = data as { data?: unknown; models?: unknown }
+  const items = Array.isArray(payload.data) ? payload.data : payload.models
+  if (!Array.isArray(items)) throw responseError()
+
+  const ids = items.map((item) => {
+    if (typeof item === 'string') return item
+    if (!item || typeof item !== 'object') return null
+    const value = item as { id?: unknown; name?: unknown; model?: unknown; key?: unknown }
+    const candidate = value.id ?? value.name ?? value.model ?? value.key
+    return typeof candidate === 'string' ? candidate : null
+  }).filter((id): id is string => Boolean(id?.trim())).map((id) => id.trim())
+  return Array.from(new Set(ids)).slice(0, 500)
+}
+
+function buildOllamaTagsEndpoint(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl)
+    url.pathname = '/api/tags'
+    url.search = ''
+    return url.toString().replace(/\/+$/, '')
+  } catch {
+    return ''
+  }
+}
+
+async function requestModelList(input: ProviderRequest, url: string, headers: Record<string, string>): Promise<string[]> {
+  const fetchImpl = input.fetchImpl ?? fetch
+  const response = await fetchImpl(url, {
+    method: 'GET',
+    headers,
+    signal: input.signal
+  }) as unknown as ProviderResponse
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`AI model list request failed: ${response.status} - ${error}`)
+  }
+  try {
+    return parseModelIds(await response.json())
+  } catch {
+    throw responseError()
+  }
+}
+
+export async function listAiModels(
+  input: AiModelListInput,
+  dependencies: AiConnectionTestDependencies = {}
+): Promise<AiModelListResult> {
+  const preset = getAiProviderPreset(input.provider)
+  const presetConfig = createAiProviderConfig(preset?.id ?? 'custom-openai')
+  const config: AiProviderConfig = {
+    ...presetConfig,
+    protocol: input.protocol ?? preset?.protocol ?? 'openai-chat',
+    authMode: input.authMode ?? preset?.authMode ?? 'bearer',
+    baseUrl: input.baseUrl?.trim() || preset?.baseUrl || '',
+    model: input.model?.trim() || preset?.model || '',
+    customHeaders: input.customHeaders ?? {}
+  }
+  const validationError = validateAiProviderConfig({ ...config, model: config.model || 'model-list' }, input.apiKey)
+  const startedAt = Date.now()
+  if (validationError) {
+    return { ok: false, provider: input.provider, models: [], latency_ms: 0, error: validationError }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), dependencies.timeoutMs ?? 10_000)
+  const request: ProviderRequest = {
+    apiKey: input.apiKey,
+    baseUrl: config.baseUrl,
+    model: config.model || 'model-list',
+    messages: [],
+    config,
+    signal: controller.signal,
+    fetchImpl: dependencies.fetchImpl
+  }
+  const url = buildAiModelsEndpoint(config.baseUrl)
+
+  try {
+    if (!url) throw new Error('Base URL is required')
+    const headers = providerHeaders(request, config, url)
+    let models: string[]
+    try {
+      models = await requestModelList(request, url, headers)
+    } catch (error) {
+      if (input.provider !== 'ollama') throw error
+      const fallbackUrl = buildOllamaTagsEndpoint(config.baseUrl)
+      if (!fallbackUrl || fallbackUrl === url) throw error
+      models = await requestModelList(request, fallbackUrl, headers)
+    }
+    return {
+      ok: true,
+      provider: input.provider,
+      models,
+      latency_ms: Math.max(0, Date.now() - startedAt)
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      provider: input.provider,
+      models: [],
+      latency_ms: Math.max(0, Date.now() - startedAt),
+      error: controller.signal.aborted
+        ? 'AI provider request timed out'
+        : sanitizeError(error, [input.apiKey, ...Object.values(config.customHeaders)])
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function callAiProvider(input: ProviderRequest): Promise<string> {
+  const config = input.config ?? resolveConfig(input, 'custom-openai')
+  const validationError = validateAiProviderConfig(config, input.apiKey)
+  if (validationError) return Promise.reject(new Error(validationError))
+  const url = buildAiEndpoint(config.baseUrl, config.protocol)
+  if (!url) return Promise.reject(new Error('Base URL is required'))
+
+  if (config.protocol === 'anthropic-messages') {
+    const system = input.messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n')
+    const messages = input.messages
+      .filter((message) => message.role !== 'system')
+      .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }))
+    return request(input, url, providerHeaders(input, config, url), {
+      model: config.model,
+      max_tokens: 2000,
+      system,
+      messages
+    }, anthropicContent)
+  }
+
+  if (config.protocol === 'openai-responses') {
+    return request(input, url, providerHeaders(input, config, url), {
+      model: config.model,
+      input: input.messages,
+      temperature: 0.7,
+      max_output_tokens: 2000
+    }, responsesContent)
+  }
+
+  return request(input, url, providerHeaders(input, config, url), {
+    model: config.model,
     messages: input.messages,
     temperature: 0.7,
     max_tokens: 2000
   }, chatContent)
+}
+
+export function callOpenAI(input: ProviderRequest): Promise<string> {
+  return callAiProvider({ ...input, config: input.config ?? resolveConfig(input, 'openai') })
 }
 
 export function callAnthropic(input: ProviderRequest): Promise<string> {
-  const systemMsg = input.messages.find((message) => message.role === 'system')
-  const userMsg = input.messages.find((message) => message.role === 'user')
-  const url = input.baseUrl
-    ? `${input.baseUrl.replace(/\/+$/, '')}/v1/messages`
-    : 'https://api.anthropic.com/v1/messages'
-  return request(input, url, {
-    'Content-Type': 'application/json',
-    'x-api-key': input.apiKey,
-    'anthropic-version': '2023-06-01'
-  }, {
-    model: input.model || 'claude-sonnet-4-20250514',
-    max_tokens: 2000,
-    system: systemMsg?.content || '',
-    messages: [{ role: 'user', content: userMsg?.content || '' }]
-  }, anthropicContent)
+  return callAiProvider({ ...input, config: input.config ?? resolveConfig(input, 'anthropic') })
 }
 
 export function callDeepSeek(input: ProviderRequest): Promise<string> {
-  const url = input.baseUrl
-    ? `${input.baseUrl.replace(/\/+$/, '')}/chat/completions`
-    : 'https://api.deepseek.com/chat/completions'
-  return request(input, url, {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${input.apiKey}`
-  }, {
-    model: input.model || 'deepseek-chat',
-    messages: input.messages,
-    temperature: 0.7,
-    max_tokens: 2000
-  }, chatContent)
+  return callAiProvider({ ...input, config: input.config ?? resolveConfig(input, 'deepseek') })
 }
 
-function defaultModel(provider: AiProviderName): string {
-  if (provider === 'anthropic') return 'claude-sonnet-4-20250514'
-  if (provider === 'deepseek') return 'deepseek-chat'
-  return 'gpt-4o-mini'
-}
-
-function sanitizeError(error: unknown, apiKey: string): string {
+function sanitizeError(error: unknown, secrets: Array<string | null | undefined> = []): string {
   const raw = error instanceof Error ? error.message : 'AI provider request failed'
-  const withoutKey = apiKey ? raw.split(apiKey).join('[REDACTED]') : raw
-  return withoutKey.slice(0, 500) || 'AI provider request failed'
+  const withoutSecrets = secrets
+    .filter((secret): secret is string => Boolean(secret))
+    .reduce((message, secret) => message.split(secret).join('[REDACTED]'), raw)
+  return withoutSecrets.slice(0, 500) || 'AI provider request failed'
 }
 
 export async function testAiConnection(
   input: AiConnectionTestInput,
   dependencies: AiConnectionTestDependencies = {}
 ): Promise<AiConnectionTestResult> {
-  const model = input.model || defaultModel(input.provider)
+  const preset = getAiProviderPreset(input.provider)
+  const presetConfig = createAiProviderConfig(preset?.id ?? 'custom-openai')
+  const config: AiProviderConfig = {
+    ...presetConfig,
+    protocol: input.protocol ?? preset?.protocol ?? 'openai-chat',
+    authMode: input.authMode ?? preset?.authMode ?? 'bearer',
+    baseUrl: input.baseUrl?.trim() || preset?.baseUrl || '',
+    model: input.model?.trim() || preset?.model || '',
+    customHeaders: input.customHeaders ?? {}
+  }
+  const model = config.model
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), dependencies.timeoutMs ?? 10_000)
   const startedAt = Date.now()
   const request: ProviderRequest = {
     apiKey: input.apiKey,
-    baseUrl: input.baseUrl,
+    baseUrl: config.baseUrl,
     model,
     messages: [{ role: 'user', content: 'Reply with OK only.' }],
+    config,
     signal: controller.signal,
     fetchImpl: dependencies.fetchImpl
   }
 
   try {
-    if (input.provider === 'anthropic') await callAnthropic(request)
-    else if (input.provider === 'deepseek') await callDeepSeek(request)
-    else await callOpenAI(request)
+    const validationError = validateAiProviderConfig(config, input.apiKey)
+    if (validationError) throw new Error(validationError)
+    await callAiProvider(request)
     return {
       ok: true,
       provider: input.provider,
@@ -286,7 +496,9 @@ export async function testAiConnection(
       provider: input.provider,
       model,
       latency_ms: Math.max(0, Date.now() - startedAt),
-      error: controller.signal.aborted ? 'AI provider request timed out' : sanitizeError(error, input.apiKey)
+      error: controller.signal.aborted
+        ? 'AI provider request timed out'
+        : sanitizeError(error, [input.apiKey, ...Object.values(config.customHeaders)])
     }
   } finally {
     clearTimeout(timeout)

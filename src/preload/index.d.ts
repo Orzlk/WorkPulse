@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { AiAuthMode, AiProtocol, AiProviderName } from '../shared/aiProviderConfig'
 
 interface WorkLog {
   id: number
@@ -161,8 +162,16 @@ interface SavedAttachment {
 
 interface AiConnectionTestResult {
   ok: boolean
-  provider: 'openai' | 'anthropic' | 'deepseek'
+  provider: AiProviderName
   model: string
+  latency_ms: number
+  error?: string
+}
+
+interface AiModelListResult {
+  ok: boolean
+  provider: AiProviderName
+  models: string[]
   latency_ms: number
   error?: string
 }
@@ -312,7 +321,23 @@ export interface API {
     update: (publicId: string, input: { content: string }) => Promise<PeriodReport | null>
   }
   ai: {
-    testConnection: (input: { provider: 'openai' | 'anthropic' | 'deepseek'; api_key: string; base_url?: string; model?: string }) => Promise<AiConnectionTestResult>
+    testConnection: (input: {
+      provider: AiProviderName
+      api_key: string
+      base_url?: string
+      model?: string
+      protocol?: AiProtocol
+      auth_mode?: AiAuthMode
+      custom_headers?: Record<string, string>
+    }) => Promise<AiConnectionTestResult>
+    listModels: (input: {
+      provider: AiProviderName
+      api_key?: string
+      base_url?: string
+      protocol?: AiProtocol
+      auth_mode?: AiAuthMode
+      custom_headers?: Record<string, string>
+    }) => Promise<AiModelListResult>
   }
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => Promise<Page<Project>>

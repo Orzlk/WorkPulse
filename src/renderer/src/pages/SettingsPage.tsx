@@ -21,7 +21,7 @@ import {
 import { useToast } from '../components/Toast'
 import { useThemeStore } from '../stores/themeStore'
 import { useI18n, useLanguageStore } from '../stores/languageStore'
-import type { AppLanguage, ResolvedLanguage } from '../lib/i18n'
+import type { AppLanguage, ResolvedLanguage, TranslationKey } from '../lib/i18n'
 import { isClearDataConfirmationValid } from '../lib/clearDataConfirmation'
 import { DEFAULT_REPORT_TEMPLATE, DEFAULT_REPORT_TEMPLATE_EN, DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT_EN } from '../lib/reportDefaults'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
@@ -29,6 +29,13 @@ import { DatabaseTransferCard } from '../components/DatabaseTransferCard'
 import { WorkLogTransferCard } from '../components/WorkLogTransferCard'
 import { useOverlayStack } from '../components/OverlayStack'
 import workpulseLogo from '../assets/workpulse-logo.png'
+import {
+  AI_PROVIDER_PRESETS,
+  getAiProviderPreset,
+  type AiAuthMode,
+  type AiProtocol,
+  type AiProviderName
+} from '../../../shared/aiProviderConfig'
 
 // Convert a KeyboardEvent to an Electron-style accelerator string
 function eventToAccelerator(e: KeyboardEvent): string | null {
@@ -97,10 +104,14 @@ interface Props {
 }
 
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
-type AiProvider = 'openai' | 'anthropic' | 'deepseek'
 type AiTestState =
   | { status: 'idle' | 'testing' }
   | { status: 'success'; latencyMs: number; model: string }
+  | { status: 'error'; message: string }
+
+type AiModelListState =
+  | { status: 'idle' | 'loading' }
+  | { status: 'success'; count: number }
   | { status: 'error'; message: string }
 
 type SettingsFieldStatus = 'saving' | 'saved' | 'error'
@@ -117,6 +128,40 @@ interface AppUpdateState {
 }
 
 type SettingsSectionId = 'ai' | 'data' | 'shortcuts' | 'appearance' | 'updates'
+
+interface CustomHeaderRow {
+  id: string
+  name: string
+  value: string
+}
+
+const aiProviderLabelKeys: Record<AiProviderName, TranslationKey> = {
+  openai: 'settings.providerOpenAI',
+  anthropic: 'settings.providerAnthropic',
+  deepseek: 'settings.providerDeepSeek',
+  'opencode-go': 'settings.providerOpenCodeGo',
+  openrouter: 'settings.providerOpenRouter',
+  ollama: 'settings.providerOllama',
+  'lm-studio': 'settings.providerLmStudio',
+  'custom-openai': 'settings.providerCustomOpenAI',
+  'custom-anthropic': 'settings.providerCustomAnthropic'
+}
+
+function newCustomHeaderId(): string {
+  return `header-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function parseCustomHeaderRows(value: string | null): CustomHeaderRow[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return Object.entries(parsed)
+      .filter(([name, headerValue]) => typeof headerValue === 'string' && name.trim())
+      .map(([name, headerValue]) => ({ id: newCustomHeaderId(), name, value: headerValue as string }))
+  } catch {
+    return []
+  }
+}
 
 function getDefaultSystemPrompt(language: ResolvedLanguage): string {
   return language === 'zh' ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_EN
@@ -136,9 +181,15 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [hasKey, setHasKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [provider, setProvider] = useState<AiProvider>('openai')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [model, setModel] = useState('')
+  const [provider, setProvider] = useState<AiProviderName>('openai')
+  const [protocol, setProtocol] = useState<AiProtocol>('openai-chat')
+  const [authMode, setAuthMode] = useState<AiAuthMode>('bearer')
+  const [baseUrl, setBaseUrl] = useState(getAiProviderPreset('openai')?.baseUrl ?? '')
+  const [model, setModel] = useState(getAiProviderPreset('openai')?.model ?? '')
+  const [aiModels, setAiModels] = useState<string[]>([])
+  const [modelListState, setModelListState] = useState<AiModelListState>({ status: 'idle' })
+  const [customHeaders, setCustomHeaders] = useState<CustomHeaderRow[]>([])
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [aiTestState, setAiTestState] = useState<AiTestState>({ status: 'idle' })
   const [reportLanguage, setReportLanguage] = useState(resolvedLanguage === 'zh' ? '中文' : 'English')
   const [style, setStyle] = useState(t('settings.styleConcise'))
@@ -211,12 +262,25 @@ function SettingsPage({ onBack }: Props): JSX.Element {
       setApiKey(key)
       setHasKey(true)
     }
-    const p = await window.api.settings.get('ai_provider')
-    if (p === 'openai' || p === 'anthropic' || p === 'deepseek') setProvider(p)
-    const b = await window.api.settings.get('ai_base_url')
-    if (b) setBaseUrl(b)
-    const m = await window.api.settings.get('ai_model')
-    if (m) setModel(m)
+    const [p, b, m, savedProtocol, savedAuthMode, savedHeaders] = await Promise.all([
+      window.api.settings.get('ai_provider'),
+      window.api.settings.get('ai_base_url'),
+      window.api.settings.get('ai_model'),
+      window.api.settings.get('ai_protocol'),
+      window.api.settings.get('ai_auth_mode'),
+      window.api.settings.get('ai_custom_headers')
+    ])
+    const preset = getAiProviderPreset(p ?? undefined) ?? getAiProviderPreset('openai')!
+    setProvider(preset.id)
+    setProtocol(savedProtocol === 'openai-chat' || savedProtocol === 'openai-responses' || savedProtocol === 'anthropic-messages'
+      ? savedProtocol
+      : preset.protocol)
+    setAuthMode(savedAuthMode === 'bearer' || savedAuthMode === 'x-api-key' || savedAuthMode === 'none'
+      ? savedAuthMode
+      : preset.authMode)
+    setBaseUrl(b || preset.baseUrl)
+    setModel(m || preset.model)
+    setCustomHeaders(parseCustomHeaderRows(savedHeaders))
     const l = await window.api.settings.get('report_language')
     if (l) {
       setReportLanguage(l)
@@ -325,26 +389,50 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     </span>
   }
 
-  const handleProviderChange = async (value: AiProvider): Promise<void> => {
-    const previous = provider
+  const handleProviderChange = async (value: AiProviderName): Promise<void> => {
+    const previous = { provider, protocol, authMode, baseUrl, model }
+    const preset = getAiProviderPreset(value)!
     setProvider(value)
+    setProtocol(preset.protocol)
+    setAuthMode(preset.authMode)
+    setBaseUrl(preset.baseUrl)
+    setModel(preset.model)
+    setAiModels([])
+    setModelListState({ status: 'idle' })
+    setAiTestState({ status: 'idle' })
     try {
       await window.api.settings.set('ai_provider', value)
+      await window.api.settings.set('ai_protocol', preset.protocol)
+      await window.api.settings.set('ai_auth_mode', preset.authMode)
+      await saveSetting('ai_base_url', preset.baseUrl)
+      await saveSetting('ai_model', preset.model)
     } catch {
-      setProvider(previous)
+      setProvider(previous.provider)
+      setProtocol(previous.protocol)
+      setAuthMode(previous.authMode)
+      setBaseUrl(previous.baseUrl)
+      setModel(previous.model)
       toast.error(t('settings.saveFailed'))
     }
   }
 
   const handleAiConnectionTest = async (): Promise<void> => {
-    if (!apiKey.trim() || aiTestState.status === 'testing') return
+    if ((authMode !== 'none' && !apiKey.trim()) || aiTestState.status === 'testing') return
     setAiTestState({ status: 'testing' })
     try {
+      const headers = Object.fromEntries(
+        customHeaders
+          .map((header) => [header.name.trim(), header.value] as const)
+          .filter(([name]) => name.length > 0)
+      )
       const result = await window.api.ai.testConnection({
         provider,
         api_key: apiKey.trim(),
         base_url: baseUrl.trim() || undefined,
-        model: model.trim() || undefined
+        model: model.trim() || undefined,
+        protocol,
+        auth_mode: authMode,
+        custom_headers: headers
       })
       if (result.ok) {
         setAiTestState({ status: 'success', latencyMs: result.latency_ms, model: result.model })
@@ -356,12 +444,85 @@ function SettingsPage({ onBack }: Props): JSX.Element {
     }
   }
 
+  const handleListModels = async (): Promise<void> => {
+    if ((authMode !== 'none' && !apiKey.trim()) || modelListState.status === 'loading') return
+    setModelListState({ status: 'loading' })
+    try {
+      const headers = Object.fromEntries(
+        customHeaders
+          .map((header) => [header.name.trim(), header.value] as const)
+          .filter(([name]) => name.length > 0)
+      )
+      const result = await window.api.ai.listModels({
+        provider,
+        api_key: apiKey.trim(),
+        base_url: baseUrl.trim() || undefined,
+        protocol,
+        auth_mode: authMode,
+        custom_headers: headers
+      })
+      if (!result.ok) {
+        setModelListState({ status: 'error', message: result.error || t('settings.modelsLoadFailed', { message: '' }) })
+        return
+      }
+      setAiModels(result.models)
+      setModelListState({ status: 'success', count: result.models.length })
+    } catch {
+      setModelListState({ status: 'error', message: t('settings.modelsLoadFailed', { message: '' }) })
+    }
+  }
+
   const handleBaseUrlBlur = async (): Promise<void> => {
     await saveFieldSetting('baseUrl', () => saveSetting('ai_base_url', baseUrl))
   }
 
   const handleModelBlur = async (): Promise<void> => {
     await saveFieldSetting('model', () => saveSetting('ai_model', model))
+  }
+
+  const handleProtocolChange = async (value: AiProtocol): Promise<void> => {
+    const previous = protocol
+    setProtocol(value)
+    setAiModels([])
+    setModelListState({ status: 'idle' })
+    setAiTestState({ status: 'idle' })
+    await saveFieldSetting('protocol', async () => {
+      try {
+        await window.api.settings.set('ai_protocol', value)
+      } catch (error) {
+        setProtocol(previous)
+        throw error
+      }
+    })
+  }
+
+  const handleAuthModeChange = async (value: AiAuthMode): Promise<void> => {
+    const previous = authMode
+    setAuthMode(value)
+    setAiModels([])
+    setModelListState({ status: 'idle' })
+    setAiTestState({ status: 'idle' })
+    await saveFieldSetting('authMode', async () => {
+      try {
+        await window.api.settings.set('ai_auth_mode', value)
+      } catch (error) {
+        setAuthMode(previous)
+        throw error
+      }
+    })
+  }
+
+  const serializeCustomHeaders = (rows: CustomHeaderRow[]): string => JSON.stringify(
+    Object.fromEntries(rows.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value]))
+  )
+
+  const saveCustomHeaders = async (rows: CustomHeaderRow[]): Promise<void> => {
+    await saveFieldSetting('customHeaders', () => window.api.settings.set('ai_custom_headers', serializeCustomHeaders(rows)))
+  }
+
+  const updateCustomHeader = (id: string, field: 'name' | 'value', value: string): void => {
+    setCustomHeaders((current) => current.map((row) => row.id === id ? { ...row, [field]: value } : row))
+    clearFieldSaveStatus('customHeaders')
   }
 
   const handleLanguageChange = async (value: string): Promise<void> => {
@@ -658,66 +819,206 @@ function SettingsPage({ onBack }: Props): JSX.Element {
             </div>
 
             {/* AI Provider */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.aiProvider')}</label>
+            <div className="settings-ai-provider-card mb-4">
+              <div className="settings-ai-provider-card-heading">
+                <div>
+                  <label htmlFor="ai-provider" className="block text-sm font-medium text-zinc-800 dark:text-zinc-100">{t('settings.aiProvider')}</label>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('settings.providerHelp')}</p>
+                </div>
+                <span className="settings-ai-provider-badge">{t(aiProviderLabelKeys[provider])}</span>
+              </div>
               <select
+                id="ai-provider"
                 value={provider}
                 onChange={(e) => {
                   const value = e.target.value
-                  if (value === 'openai' || value === 'anthropic' || value === 'deepseek') void handleProviderChange(value)
+                  if (AI_PROVIDER_PRESETS.some((preset) => preset.id === value)) void handleProviderChange(value as AiProviderName)
                 }}
-                className="px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
+                className="mt-3 w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
               >
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="deepseek">DeepSeek</option>
+                {AI_PROVIDER_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{t(aiProviderLabelKeys[preset.id])}</option>
+                ))}
               </select>
             </div>
 
-            {/* Base URL */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.baseUrl')}</label>
-              <p className="text-xs text-zinc-400 mb-2">
-                {t('settings.baseUrlHelp')}
-              </p>
-              <input
-                type="text"
-                value={baseUrl}
-                onChange={(e) => { setBaseUrl(e.target.value); clearFieldSaveStatus('baseUrl') }}
-                onBlur={handleBaseUrlBlur}
-                placeholder={provider === 'openai' ? 'https://api.openai.com' : provider === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.anthropic.com'}
-                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
-              />
-              {settingsFieldStatus('baseUrl')}
-            </div>
-            {/* Model */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.modelName')}</label>
-              <p className="text-xs text-zinc-400 mb-2">
-                {t('settings.modelHelp')}
-              </p>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => { setModel(e.target.value); clearFieldSaveStatus('model') }}
-                onBlur={handleModelBlur}
-                placeholder={provider === 'openai' ? 'gpt-4o-mini' : provider === 'deepseek' ? 'deepseek-chat' : 'claude-sonnet-4-20250514'}
-                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
-              />
-              {settingsFieldStatus('model')}
+            <div className="settings-ai-core-fields grid gap-4 md:grid-cols-2">
+              {/* Base URL */}
+              <div className="settings-ai-field mb-4">
+                <label htmlFor="ai-base-url" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.baseUrl')}</label>
+                <p className="settings-ai-field-help text-xs text-zinc-400 mb-2">{t('settings.baseUrlHelp')}</p>
+                <input
+                  id="ai-base-url"
+                  type="url"
+                  value={baseUrl}
+                  maxLength={2048}
+                  onChange={(e) => { setBaseUrl(e.target.value); setAiModels([]); setModelListState({ status: 'idle' }); setAiTestState({ status: 'idle' }); clearFieldSaveStatus('baseUrl') }}
+                  onBlur={handleBaseUrlBlur}
+                  placeholder={getAiProviderPreset(provider)?.baseUrl || 'https://api.example.com/v1'}
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
+                />
+                {settingsFieldStatus('baseUrl')}
+              </div>
+              {/* Model */}
+              <div className="settings-ai-field mb-4">
+                <label htmlFor="ai-model" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.modelName')}</label>
+                <p className="settings-ai-field-help text-xs text-zinc-400 mb-2">{t('settings.modelHelp')}</p>
+                <div className="settings-model-picker">
+                  <input
+                    id="ai-model"
+                    list="ai-model-options"
+                    type="text"
+                    value={model}
+                    maxLength={200}
+                    onChange={(e) => { setModel(e.target.value); setAiTestState({ status: 'idle' }); clearFieldSaveStatus('model') }}
+                    onBlur={handleModelBlur}
+                    placeholder={getAiProviderPreset(provider)?.model || 'model-name'}
+                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
+                  />
+                  <datalist id="ai-model-options">
+                    {aiModels.map((item) => <option key={item} value={item} />)}
+                  </datalist>
+                  <button
+                    type="button"
+                    className="ui-icon-button settings-model-picker-refresh"
+                    aria-label={t('settings.refreshModels')}
+                    title={t('settings.refreshModels')}
+                    disabled={(authMode !== 'none' && !apiKey.trim()) || modelListState.status === 'loading'}
+                    onClick={() => { void handleListModels() }}
+                  >
+                    <RefreshCw className={modelListState.status === 'loading' ? 'animate-spin' : ''} aria-hidden="true" />
+                  </button>
+                </div>
+                <div className={`settings-model-list-status${modelListState.status === 'error' ? ' is-error' : modelListState.status === 'success' ? ' is-success' : ''}`} aria-live="polite">
+                  {modelListState.status === 'loading' && t('settings.loadingModels')}
+                  {modelListState.status === 'success' && modelListState.count > 0 && t('settings.modelsLoaded', { count: modelListState.count })}
+                  {modelListState.status === 'success' && modelListState.count === 0 && t('settings.modelsEmpty')}
+                  {modelListState.status === 'error' && t('settings.modelsLoadFailed', { message: modelListState.message })}
+                </div>
+                {settingsFieldStatus('model')}
+              </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+            <div className="settings-ai-advanced mb-4">
+              <button
+                type="button"
+                className="settings-ai-advanced-toggle"
+                aria-expanded={advancedOpen}
+                onClick={() => setAdvancedOpen((open) => !open)}
+              >
+                <span>{t('settings.advancedOptions')}</span>
+                <span aria-hidden="true">{advancedOpen ? '−' : '+'}</span>
+              </button>
+              {advancedOpen && (
+                <div className="settings-ai-advanced-content">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label htmlFor="ai-protocol" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.protocol')}</label>
+                      <select
+                        id="ai-protocol"
+                        value={protocol}
+                        onChange={(e) => { void handleProtocolChange(e.target.value as AiProtocol) }}
+                        className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="openai-chat">{t('settings.protocolOpenAiChat')}</option>
+                        <option value="openai-responses">{t('settings.protocolOpenAiResponses')}</option>
+                        <option value="anthropic-messages">{t('settings.protocolAnthropicMessages')}</option>
+                      </select>
+                      {settingsFieldStatus('protocol')}
+                    </div>
+                    <div>
+                      <label htmlFor="ai-auth-mode" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('settings.authMode')}</label>
+                      <select
+                        id="ai-auth-mode"
+                        value={authMode}
+                        onChange={(e) => { void handleAuthModeChange(e.target.value as AiAuthMode) }}
+                        className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="bearer">{t('settings.authBearer')}</option>
+                        <option value="x-api-key">{t('settings.authApiKey')}</option>
+                        <option value="none">{t('settings.authNone')}</option>
+                      </select>
+                      {settingsFieldStatus('authMode')}
+                    </div>
+                  </div>
+
+                  <div className="settings-ai-headers">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{t('settings.customHeaders')}</h3>
+                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('settings.customHeadersHelp')}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="settings-secondary-button shrink-0"
+                        onClick={() => {
+                          const next = [...customHeaders, { id: newCustomHeaderId(), name: '', value: '' }]
+                          setCustomHeaders(next)
+                          void saveCustomHeaders(next)
+                        }}
+                      >
+                        {t('settings.addHeader')}
+                      </button>
+                    </div>
+                    {customHeaders.length === 0 ? (
+                      <p className="mt-3 text-xs text-zinc-400">{t('settings.noCustomHeaders')}</p>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {customHeaders.map((header) => (
+                          <div className="settings-ai-header-row" key={header.id}>
+                            <input
+                              type="text"
+                              value={header.name}
+                              maxLength={100}
+                              placeholder={t('settings.headerName')}
+                              aria-label={t('settings.headerName')}
+                              onChange={(e) => updateCustomHeader(header.id, 'name', e.target.value)}
+                              onBlur={() => { void saveCustomHeaders(customHeaders) }}
+                              className="min-w-0 flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
+                            />
+                            <input
+                              type="password"
+                              value={header.value}
+                              maxLength={2000}
+                              placeholder={t('settings.headerValue')}
+                              aria-label={t('settings.headerValue')}
+                              onChange={(e) => updateCustomHeader(header.id, 'value', e.target.value)}
+                              onBlur={() => { void saveCustomHeaders(customHeaders) }}
+                              className="min-w-0 flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 bg-white dark:bg-zinc-800 dark:text-zinc-100 font-mono"
+                            />
+                            <button
+                              type="button"
+                              className="ui-icon-button text-zinc-400 hover:text-red-500"
+                              aria-label={t('settings.removeHeader')}
+                              onClick={() => {
+                                const next = customHeaders.filter((item) => item.id !== header.id)
+                                setCustomHeaders(next)
+                                void saveCustomHeaders(next)
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {settingsFieldStatus('customHeaders')}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="settings-ai-test mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
               <button
                 type="button"
                 onClick={() => { void handleAiConnectionTest() }}
-                disabled={!apiKey.trim() || aiTestState.status === 'testing'}
+                disabled={(authMode !== 'none' && !apiKey.trim()) || aiTestState.status === 'testing'}
                 className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 <RefreshCw className={`h-4 w-4 ${aiTestState.status === 'testing' ? 'animate-spin' : ''}`} aria-hidden="true" />
                 {aiTestState.status === 'testing' ? t('settings.aiTestTesting') : t('settings.aiTestConnection')}
               </button>
-              {!apiKey.trim() && <span className="text-xs text-zinc-400">{t('settings.aiTestMissingKey')}</span>}
+              {authMode === 'none' ? <span className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.noApiKeyRequired')}</span> : !apiKey.trim() && <span className="text-xs text-zinc-400">{t('settings.aiTestMissingKey')}</span>}
               {aiTestState.status === 'success' && (
                 <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                   <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />

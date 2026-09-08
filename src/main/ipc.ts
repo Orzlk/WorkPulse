@@ -35,7 +35,14 @@ import {
   workLogExists,
   type KanbanColumn
 } from './db'
-import { deleteStoredApiKey, getStoredApiKey, setStoredApiKey } from './secureSettings'
+import {
+  deleteStoredAiCustomHeaders,
+  deleteStoredApiKey,
+  getStoredAiCustomHeaders,
+  getStoredApiKey,
+  setStoredAiCustomHeaders,
+  setStoredApiKey
+} from './secureSettings'
 import { tMain } from './i18n'
 import { getDatabase, getDefaultWorkspaceContext } from './db'
 import { ProjectService } from './services/projectService'
@@ -44,7 +51,7 @@ import { TagService } from './services/tagService'
 import { SearchService } from './services/searchService'
 import { RepositoryService } from './services/repositoryService'
 import { ReportService } from './reports/reportService'
-import { testAiConnection } from './reports/aiProvider'
+import { listAiModels, testAiConnection } from './reports/aiProvider'
 import { generateInboxSuggestion } from './ai'
 import { saveAttachment, stageAttachmentsForClear } from './attachments/attachmentStorage'
 import { MAX_ARCHIVE_BYTES, readAttachmentArchive, type AttachmentArchiveEntry } from './attachments/attachmentArchive'
@@ -59,6 +66,8 @@ import {
   parseReportRequest,
   parseStatsDays,
   parseAiConnectionTestInput,
+  parseAiModelListInput,
+  parseAiCustomHeadersSetting,
   parseAttachmentInput,
   parseInboxAiInput,
   parseRepositoryCreateInput,
@@ -270,7 +279,22 @@ export function registerIpcHandlers(): void {
       provider: value.provider,
       apiKey: value.api_key,
       baseUrl: value.base_url,
-      model: value.model
+      model: value.model,
+      protocol: value.protocol,
+      authMode: value.auth_mode,
+      customHeaders: value.custom_headers
+    })
+  }))
+
+  ipcMain.handle('ai:listModels', guarded((input: unknown) => {
+    const value = parseAiModelListInput(input)
+    return listAiModels({
+      provider: value.provider,
+      apiKey: value.api_key || null,
+      baseUrl: value.base_url,
+      protocol: value.protocol,
+      authMode: value.auth_mode,
+      customHeaders: value.custom_headers
     })
   }))
 
@@ -538,6 +562,9 @@ export function registerIpcHandlers(): void {
     if (key === 'api_key') {
       return getStoredApiKey()
     }
+    if (key === 'ai_custom_headers') {
+      return JSON.stringify(getStoredAiCustomHeaders())
+    }
     return getSetting(key)
   }))
 
@@ -547,12 +574,20 @@ export function registerIpcHandlers(): void {
       setStoredApiKey(input.value)
       return
     }
+    if (input.key === 'ai_custom_headers') {
+      setStoredAiCustomHeaders(parseAiCustomHeadersSetting(input.value))
+      return
+    }
     setSetting(input.key, input.value)
   }))
 
   ipcMain.handle('settings:delete', guarded((key: string) => {
     if (key === 'api_key') {
       deleteStoredApiKey()
+      return
+    }
+    if (key === 'ai_custom_headers') {
+      deleteStoredAiCustomHeaders()
       return
     }
     deleteSetting(key)

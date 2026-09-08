@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { API } from './index.d'
+import type { AiAuthMode, AiProtocol, AiProviderName } from '../shared/aiProviderConfig'
 
 type QuickCreateType = 'log' | 'task'
 type TaskCreateDraft = { content: string; projectId: string; priority: 'low' | 'medium' | 'high'; route?: string }
@@ -219,8 +220,16 @@ interface SavedAttachment {
 
 interface AiConnectionTestResult {
   ok: boolean
-  provider: 'openai' | 'anthropic' | 'deepseek'
+  provider: AiProviderName
   model: string
+  latency_ms: number
+  error?: string
+}
+
+interface AiModelListResult {
+  ok: boolean
+  provider: AiProviderName
+  models: string[]
   latency_ms: number
   error?: string
 }
@@ -318,8 +327,24 @@ const api = {
       ipcRenderer.invoke('report:update', publicId, input) as Promise<PeriodReport | null>
   },
   ai: {
-    testConnection: (input: { provider: 'openai' | 'anthropic' | 'deepseek'; api_key: string; base_url?: string; model?: string }) =>
-      ipcRenderer.invoke('ai:testConnection', input) as Promise<AiConnectionTestResult>
+    testConnection: (input: {
+      provider: AiProviderName
+      api_key: string
+      base_url?: string
+      model?: string
+      protocol?: AiProtocol
+      auth_mode?: AiAuthMode
+      custom_headers?: Record<string, string>
+    }) =>
+      ipcRenderer.invoke('ai:testConnection', input) as Promise<AiConnectionTestResult>,
+    listModels: (input: {
+      provider: AiProviderName
+      api_key?: string
+      base_url?: string
+      protocol?: AiProtocol
+      auth_mode?: AiAuthMode
+      custom_headers?: Record<string, string>
+    }) => ipcRenderer.invoke('ai:listModels', input) as Promise<AiModelListResult>
   },
   project: {
     list: (pagination?: { limit?: number; offset?: number }) => ipcRenderer.invoke('project:list', pagination) as Promise<Page<Project>>,

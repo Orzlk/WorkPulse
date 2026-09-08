@@ -6,6 +6,7 @@ import {
   parsePagination,
   parseReportRequest,
   parseAiConnectionTestInput,
+  parseAiModelListInput,
   parseRepositoryCreateInput,
   parseRepositoryUpdateInput,
   parseSearchQueryInput,
@@ -109,11 +110,36 @@ describe('IPC contract validation', () => {
       provider: 'openai',
       api_key: 'test-key',
       base_url: 'https://provider.test/v1',
-      model: 'test-model'
+      model: 'test-model',
+      protocol: 'openai-chat',
+      auth_mode: 'bearer',
+      custom_headers: {}
     })
-    expect(() => parseAiConnectionTestInput({ provider: 'ollama', api_key: 'test-key' })).toThrow('INVALID_ARGUMENT')
+    expect(parseAiConnectionTestInput({ provider: 'ollama', api_key: '' })).toMatchObject({
+      provider: 'ollama',
+      auth_mode: 'none',
+      protocol: 'openai-chat'
+    })
+    expect(() => parseAiConnectionTestInput({ provider: 'unknown', api_key: 'test-key' })).toThrow('INVALID_ARGUMENT')
     expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: '' })).toThrow('INVALID_ARGUMENT')
+    expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: 'test-key', custom_headers: { Authorization: 'bad' } })).toThrow('INVALID_ARGUMENT')
     expect(() => parseAiConnectionTestInput({ provider: 'openai', api_key: 'test-key', extra: true })).toThrow('INVALID_ARGUMENT')
+  })
+
+  it('validates AI model list input and allows local providers without keys', () => {
+    expect(parseAiModelListInput({
+      provider: 'ollama',
+      base_url: 'http://127.0.0.1:11434/v1'
+    })).toMatchObject({
+      provider: 'ollama',
+      api_key: '',
+      base_url: 'http://127.0.0.1:11434/v1',
+      auth_mode: 'none'
+    })
+    expect(() => parseAiModelListInput({ provider: 'openai', base_url: 'https://provider.test/v1' }))
+      .toThrow('INVALID_ARGUMENT')
+    expect(() => parseAiModelListInput({ provider: 'openai', api_key: 'key', extra: true }))
+      .toThrow('INVALID_ARGUMENT')
   })
 
   it('validates task and work log write payloads at runtime', () => {

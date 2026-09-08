@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   AI_PROVIDER_RESPONSE_ERROR,
+  callAiProvider,
   callAnthropic,
   callDeepSeek,
   callOpenAI,
@@ -88,6 +89,61 @@ describe('AI provider response validation', () => {
 
     expect(headers?.get('x-opencode-session')).toMatch(/^[0-9a-f-]{36}$/)
   })
+
+  it('支持 OpenAI Responses 协议并使用规范 endpoint 与请求体', async () => {
+    let requestedUrl = ''
+    let requestedBody: Record<string, unknown> | undefined
+    const result = await callAiProvider({
+      apiKey: 'test-key',
+      messages: request.messages,
+      config: {
+        presetId: 'custom-openai',
+        displayName: '兼容服务',
+        protocol: 'openai-responses',
+        authMode: 'bearer',
+        baseUrl: 'https://provider.test/v1',
+        model: 'responses-model',
+        customHeaders: {}
+      },
+      baseUrl: 'https://provider.test/v1',
+      model: 'responses-model',
+      fetchImpl: async (url, init) => {
+        requestedUrl = String(url)
+        requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return response({ output_text: 'Responses 正常' })
+      }
+    })
+
+    expect(result).toBe('Responses 正常')
+    expect(requestedUrl).toBe('https://provider.test/v1/responses')
+    expect(requestedBody).toMatchObject({ model: 'responses-model', input: request.messages })
+  })
+
+  it('允许本地无认证连接并保留自定义请求头', async () => {
+    let headers: Headers | undefined
+    await callAiProvider({
+      apiKey: null,
+      messages: request.messages,
+      config: {
+        presetId: 'ollama',
+        displayName: 'Ollama',
+        protocol: 'openai-chat',
+        authMode: 'none',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.2',
+        customHeaders: { 'X-Client-Name': 'WorkPulse' }
+      },
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'llama3.2',
+      fetchImpl: async (_url, init) => {
+        headers = new Headers(init?.headers)
+        return response({ choices: [{ message: { content: '本地正常' } }] })
+      }
+    })
+
+    expect(headers?.get('x-client-name')).toBe('WorkPulse')
+    expect(headers?.get('authorization')).toBeNull()
+  })
 })
 
 describe('AI provider connection test', () => {
@@ -125,6 +181,27 @@ describe('AI provider connection test', () => {
     expect(result.ok).toBe(false)
     expect(result.error).not.toContain('secret-test-key')
     expect(result.error?.length).toBeLessThanOrEqual(500)
+  })
+
+  it('does not expose custom header secrets in connection errors', async () => {
+    const result = await testAiConnection({
+      provider: 'custom-openai',
+      apiKey: null,
+      baseUrl: 'https://provider.test/v1',
+      model: 'test-model',
+      authMode: 'none',
+      customHeaders: { 'X-Workspace-Token': 'header-secret' }
+    }, {
+      fetchImpl: async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+        text: async () => 'invalid header-secret'
+      } as Response)
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).not.toContain('header-secret')
   })
 
   it('returns a timeout result when the provider does not respond', async () => {

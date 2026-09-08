@@ -913,6 +913,170 @@
   color: var(--ui-color-danger);
 }
 
+.hallmark-app .settings-ai-provider-card,
+.hallmark-app .settings-ai-advanced,
+.hallmark-app .settings-ai-test {
+  border-color: var(--ui-color-border);
+  background: var(--ui-color-surface);
+}
+
+.hallmark-app .settings-ai-provider-card {
+  padding: 14px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+}
+
+.hallmark-app .settings-ai-core-fields .settings-ai-field {
+  min-width: 0;
+}
+
+.hallmark-app .settings-model-picker {
+  position: relative;
+}
+
+.hallmark-app .settings-model-picker > input {
+  padding-right: 46px;
+}
+
+.hallmark-app .settings-model-picker-refresh {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+}
+
+.hallmark-app .settings-model-picker-refresh:hover {
+  transform: translateY(-50%);
+}
+
+.hallmark-app .settings-model-picker-refresh svg {
+  width: 16px;
+  height: 16px;
+}
+
+.hallmark-app .settings-model-list-status {
+  min-height: 18px;
+  margin-top: 5px;
+  color: var(--ui-color-text-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hallmark-app .settings-model-list-status.is-error {
+  color: var(--ui-color-danger);
+}
+
+.hallmark-app .settings-model-list-status.is-success {
+  color: var(--ui-color-success);
+}
+
+@media (min-width: 768px) {
+  .hallmark-app .settings-ai-core-fields .settings-ai-field-help {
+    min-height: 40px;
+  }
+}
+
+.hallmark-app .settings-ai-provider-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hallmark-app .settings-ai-provider-badge {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--ui-color-primary) 30%, var(--ui-color-border));
+  border-radius: 999px;
+  background: var(--ui-color-primary-soft);
+  color: var(--ui-color-focus);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.hallmark-app .settings-ai-advanced {
+  overflow: hidden;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+}
+
+.hallmark-app .settings-ai-advanced-toggle {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-color-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hallmark-app .settings-ai-advanced-toggle:hover,
+.hallmark-app .settings-ai-advanced-toggle:focus-visible {
+  background: var(--ui-color-primary-soft);
+}
+
+.hallmark-app .settings-ai-advanced-toggle:focus-visible {
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: -2px;
+}
+
+.hallmark-app .settings-ai-advanced-content {
+  padding: 14px;
+  border-top: 1px solid var(--ui-color-border);
+}
+
+.hallmark-app .settings-ai-headers {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ui-color-border);
+}
+
+.hallmark-app .settings-ai-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hallmark-app .settings-ai-header-row .ui-icon-button {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.hallmark-app .settings-ai-header-row .ui-icon-button:focus-visible {
+  outline: 2px solid var(--ui-color-focus);
+  outline-offset: 1px;
+}
+
+@media (max-width: 560px) {
+  .hallmark-app .settings-ai-provider-card-heading {
+    flex-direction: column;
+  }
+
+  .hallmark-app .settings-ai-header-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .hallmark-app .settings-ai-header-row input {
+    flex-basis: calc(50% - 4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hallmark-app *,
   .hallmark-app *::before,

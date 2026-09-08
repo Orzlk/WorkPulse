@@ -1,6 +1,15 @@
 import { getSetting } from './db'
-import { getStoredApiKey } from './secureSettings'
+import { getStoredAiCustomHeaders, getStoredApiKey } from './secureSettings'
 import { getResolvedLanguage, tMain } from './i18n'
+import {
+  createAiProviderConfig,
+  configRequiresApiKey,
+  getAiProviderPreset,
+  validateAiProviderConfig,
+  type AiAuthMode,
+  type AiProtocol,
+  type AiProviderConfig
+} from '../shared/aiProviderConfig'
 import type { ReportPeriod, ReportType } from './lib/period'
 import type { ReportSourceSnapshot } from './reports/reportTypes'
 import {
@@ -8,7 +17,7 @@ import {
   type PeriodReportOptions,
   type PeriodReportProvider
 } from './reports/periodReportAi'
-import { callAnthropic, callDeepSeek, callOpenAI } from './reports/aiProvider'
+import { callAiProvider, type ProviderRequest } from './reports/aiProvider'
 import { buildInboxSuggestionPrompt, parseInboxSuggestion, type InboxAiReferences } from './inbox/inboxAi'
 import type { InboxSuggestion } from './domain/types'
 import {
@@ -34,21 +43,52 @@ interface ReportTaskContext {
   completed_at?: string | null
 }
 
+function configuredAiProviderConfig(): AiProviderConfig {
+  const configuredId = getSetting('ai_provider') || 'openai'
+  const preset = getAiProviderPreset(configuredId) ?? getAiProviderPreset('openai')!
+  const presetConfig = createAiProviderConfig(preset.id)
+  const protocol = getSetting('ai_protocol')
+  const authMode = getSetting('ai_auth_mode')
+  return {
+    ...presetConfig,
+    presetId: preset.id,
+    displayName: configuredId,
+    protocol: protocol === 'openai-chat' || protocol === 'openai-responses' || protocol === 'anthropic-messages'
+      ? protocol as AiProtocol
+      : preset.protocol,
+    authMode: authMode === 'bearer' || authMode === 'x-api-key' || authMode === 'none'
+      ? authMode as AiAuthMode
+      : preset.authMode,
+    baseUrl: getSetting('ai_base_url') || preset.baseUrl,
+    model: getSetting('ai_model') || preset.model,
+    customHeaders: getStoredAiCustomHeaders()
+  }
+}
+
+function configuredAiRequest(messages: Message[], signal?: AbortSignal, onChunk?: (chunk: string) => void): ProviderRequest {
+  const config = configuredAiProviderConfig()
+  const apiKey = getStoredApiKey()
+  if (configRequiresApiKey(config) && !apiKey?.trim()) throw new Error(tMain('apiKeyMissing'))
+  const validationError = validateAiProviderConfig(config, apiKey)
+  if (validationError) throw new Error(validationError)
+  return {
+    apiKey,
+    baseUrl: config.baseUrl,
+    model: config.model,
+    config,
+    messages,
+    signal,
+    onChunk
+  }
+}
+
 export async function generateReport(
   logs: { content: string; created_at: string }[],
   dateFrom: string,
   dateTo: string,
   tasks: ReportTaskContext[] = []
 ): Promise<string> {
-  const apiKey = getStoredApiKey()
-  if (!apiKey) {
-    throw new Error(tMain('apiKeyMissing'))
-  }
-
   const resolvedLanguage = getResolvedLanguage()
-  const provider = getSetting('ai_provider') || 'openai'
-  const baseUrl = getSetting('ai_base_url') || ''
-  const model = getSetting('ai_model') || ''
   const language = getSetting('report_language') || (resolvedLanguage === 'zh' ? '中文' : 'English')
   const style = getSetting('report_style') || (resolvedLanguage === 'zh' ? '简洁专业' : 'Concise professional')
   const customPrompt = getSetting('system_prompt') || (resolvedLanguage === 'zh' ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_EN)
@@ -75,13 +115,7 @@ export async function generateReport(
     { role: 'user', content: userMessage }
   ]
 
-  if (provider === 'anthropic') {
-    return callAnthropic({ apiKey, baseUrl, model, messages })
-  }
-  if (provider === 'deepseek') {
-    return callDeepSeek({ apiKey, baseUrl, model, messages })
-  }
-  return callOpenAI({ apiKey, baseUrl, model, messages })
+  return callAiProvider(configuredAiRequest(messages))
 }
 
 export async function generatePeriodReportContent(
@@ -113,23 +147,11 @@ export async function generatePeriodReportContent(
 }
 
 async function callConfiguredPeriodProvider(systemPrompt: string, userPrompt: string, signal: AbortSignal, onChunk?: (chunk: string) => void): Promise<string> {
-  const apiKey = getStoredApiKey()
-  if (!apiKey) throw new Error(tMain('apiKeyMissing'))
-  const provider = getSetting('ai_provider') || 'openai'
-  const baseUrl = getSetting('ai_base_url') || ''
-  const model = getSetting('ai_model') || ''
   const messages: Message[] = [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
-  if (provider === 'anthropic') return callAnthropic({ apiKey, baseUrl, model, messages, signal, onChunk })
-  if (provider === 'deepseek') return callDeepSeek({ apiKey, baseUrl, model, messages, signal, onChunk })
-  return callOpenAI({ apiKey, baseUrl, model, messages, signal, onChunk })
+  return callAiProvider(configuredAiRequest(messages, signal, onChunk))
 }
 
 export async function generateInboxSuggestion(content: string, references: InboxAiReferences, signal?: AbortSignal): Promise<InboxSuggestion> {
-  const apiKey = getStoredApiKey()
-  if (!apiKey) throw new Error(tMain('apiKeyMissing'))
-  const provider = getSetting('ai_provider') || 'openai'
-  const baseUrl = getSetting('ai_base_url') || ''
-  const model = getSetting('ai_model') || ''
   const messages: Message[] = [
     {
       role: 'system',
@@ -137,12 +159,7 @@ export async function generateInboxSuggestion(content: string, references: Inbox
     },
     { role: 'user', content: buildInboxSuggestionPrompt(content, references) }
   ]
-  const request = { apiKey, baseUrl, model, messages, signal }
-  const raw = provider === 'anthropic'
-    ? await callAnthropic(request)
-    : provider === 'deepseek'
-      ? await callDeepSeek(request)
-      : await callOpenAI(request)
+  const raw = await callAiProvider(configuredAiRequest(messages, signal))
   return parseInboxSuggestion(raw, {
     projectIds: references.projects.map((project) => project.public_id)
   })
