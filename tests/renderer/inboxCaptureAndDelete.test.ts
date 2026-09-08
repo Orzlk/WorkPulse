@@ -37,8 +37,10 @@ describe('Inbox capture and delete workflow', () => {
 
   it('keeps completion pending while an asynchronous confirmation is saving', () => {
     expect(kanban).toContain('onConfirm: (content: string) => Promise<void>')
-    expect(kanban).toContain('await onConfirm(content)')
+    expect(kanban).toContain('submit(() => onConfirm(content))')
     expect(kanban).toContain('disabled={submitting}')
+    expect(kanban).toContain('submittingRef.current')
+    expect(kanban).toContain('if (!submittingRef.current)')
     expect(kanban).toContain("t('workspace.saving')")
     expect(kanban).toContain('await fetchTasks()')
   })

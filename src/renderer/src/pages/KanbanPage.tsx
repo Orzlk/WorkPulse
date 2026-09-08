@@ -47,13 +47,18 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
   const { t } = useI18n()
   const [content, setContent] = useState(() => t('kanban.completeLogDefault', { title: task.title }))
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef(onCancel)
   cancelRef.current = onCancel
   useEffect(() => {
     dialogRef.current?.focus()
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelRef.current() }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!submittingRef.current) void cancelRef.current()
+      }
       if (event.key !== 'Tab') return
       const dialog = dialogRef.current
       if (!dialog) return
@@ -73,14 +78,13 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
     return () => document.removeEventListener('keydown', handleKeyDown, true)
   }, [])
   const submit = async (action: () => Promise<void>): Promise<void> => {
-    if (submitting) return
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
-    try { await action() } finally { setSubmitting(false) }
+    try { await action() } finally { submittingRef.current = false; setSubmitting(false) }
   }
   const confirm = async (): Promise<void> => {
-    if (submitting) return
-    setSubmitting(true)
-    try { await onConfirm(content) } finally { setSubmitting(false) }
+    await submit(() => onConfirm(content))
   }
   return createPortal(
     <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !submitting && void submit(onCancel)}>
