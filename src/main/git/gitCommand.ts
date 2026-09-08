@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_TIMEOUT_MS = 15_000
+export const MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024
 const LOG_FORMAT = '--format=\u001e%H\u001f%an\u001f%ae\u001f%cI\u001f%s'
 const ISO_BOUNDARY_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
@@ -16,6 +17,9 @@ export class GitReadError extends Error {
 function toGitReadError(error: unknown): GitReadError {
   const candidate = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string }
   if (candidate.code === 'ENOENT') return new GitReadError('Git 不可用，请安装 Git 后重试')
+  if (candidate.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || String(candidate.message ?? '').includes('maxBuffer')) {
+    return new GitReadError('Git 输出过大，请缩小扫描范围后重试')
+  }
   if (candidate.code === 'ETIMEDOUT' || candidate.killed || candidate.signal === 'SIGTERM') {
     return new GitReadError('Git 读取超时，请检查仓库状态后重试')
   }
@@ -65,7 +69,7 @@ export class GitCommand implements GitCommandExecutor {
         cwd,
         timeout: this.timeoutMs,
         windowsHide: true,
-        maxBuffer: 8 * 1024 * 1024
+        maxBuffer: MAX_GIT_OUTPUT_BYTES
       })
       return stdout
     } catch (error) {
