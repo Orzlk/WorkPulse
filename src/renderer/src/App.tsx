@@ -165,7 +165,7 @@ function App(): JSX.Element {
     return (
       <div className="hallmark-app workspace-shell h-screen">
         <Suspense fallback={<div className="page-loading" role="status">{t('common.loading')}</div>}>
-          <TaskCreatePage />
+          <TaskCreatePage draft={taskCreateRoute.draft} />
         </Suspense>
       </div>
     )

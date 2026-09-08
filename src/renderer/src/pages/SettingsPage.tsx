@@ -27,6 +27,7 @@ import { DEFAULT_REPORT_TEMPLATE, DEFAULT_REPORT_TEMPLATE_EN, DEFAULT_SYSTEM_PRO
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { DatabaseTransferCard } from '../components/DatabaseTransferCard'
 import { WorkLogTransferCard } from '../components/WorkLogTransferCard'
+import { useOverlayStack } from '../components/OverlayStack'
 import workpulseLogo from '../assets/workpulse-logo.png'
 
 // Convert a KeyboardEvent to an Electron-style accelerator string
@@ -158,6 +159,8 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [clearDataInput, setClearDataInput] = useState('')
   const [clearingData, setClearingData] = useState(false)
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('ai')
+  const clearDataTriggerRef = useRef<HTMLButtonElement>(null)
+  const overlayStack = useOverlayStack()
   const toast = useToast()
   const { theme, setTheme } = useThemeStore()
   const styleOptions = [
@@ -489,6 +492,17 @@ function SettingsPage({ onBack }: Props): JSX.Element {
 
   const clearDataLanguage: 'zh' | 'en' = resolvedLanguage === 'zh' ? 'zh' : 'en'
   const canConfirmClearData = isClearDataConfirmationValid(clearDataInput, clearDataLanguage)
+  const requestCloseClearData = (): boolean => {
+    if (clearingData) return false
+    setClearDataOpen(false)
+    setClearDataInput('')
+    window.requestAnimationFrame(() => clearDataTriggerRef.current?.focus())
+    return true
+  }
+  useEffect(() => {
+    if (!clearDataOpen) return
+    return overlayStack.register({ id: 'clear-data-confirmation', priority: 200, requestClose: requestCloseClearData })
+  }, [clearDataOpen, clearingData, overlayStack])
 
   const handleClearData = async (): Promise<void> => {
     if (!canConfirmClearData || clearingData) return
@@ -560,6 +574,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
               <nav className="settings-sidebar-nav">
                 {settingsSections.map((section) => (
                   <button
+                    ref={clearDataTriggerRef}
                     key={section.id}
                     type="button"
                     className={`settings-sidebar-button ${activeSection === section.id ? 'is-selected' : ''}`}
@@ -1043,16 +1058,6 @@ function SettingsPage({ onBack }: Props): JSX.Element {
             aria-modal="true"
             aria-labelledby="clear-data-dialog-title"
             className="w-full max-w-md rounded-xl border border-red-200 bg-white p-5 shadow-2xl dark:border-red-900 dark:bg-zinc-900"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                event.stopPropagation()
-                if (!clearingData) {
-                  setClearDataOpen(false)
-                  setClearDataInput('')
-                }
-              }
-            }}
           >
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden="true" />
@@ -1077,11 +1082,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  if (clearingData) return
-                  setClearDataOpen(false)
-                  setClearDataInput('')
-                }}
+                onClick={requestCloseClearData}
                 disabled={clearingData}
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >

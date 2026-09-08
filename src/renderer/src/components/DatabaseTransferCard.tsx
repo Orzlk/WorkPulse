@@ -1,7 +1,8 @@
 import { Database, Download, Upload } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useToast } from './Toast'
 import { useI18n } from '../stores/languageStore'
+import { useOverlayStack } from './OverlayStack'
 
 interface DatabaseImportPreview {
   schema_version: number
@@ -40,6 +41,39 @@ export function DatabaseTransferCard(): JSX.Element {
   const toast = useToast()
   const [preview, setPreview] = useState<DatabaseImportReview | null>(null)
   const [busy, setBusy] = useState<'export' | 'import' | 'merge' | 'archive-export' | 'archive-import' | 'archive-merge' | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const overlayStack = useOverlayStack()
+  const requestClose = (): boolean => {
+    if (busy === 'merge' || busy === 'archive-merge') return false
+    setPreview(null)
+    return true
+  }
+
+  useEffect(() => {
+    if (!preview) return
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialogRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true)
+      previousFocusRef.current?.focus()
+    }
+  }, [preview])
+
+  useEffect(() => {
+    if (!preview) return
+    return overlayStack.register({ id: 'database-import-preview', priority: 200, requestClose })
+  }, [overlayStack, preview, requestClose])
 
   const exportDatabase = async (): Promise<void> => {
     if (busy) return
@@ -148,7 +182,7 @@ export function DatabaseTransferCard(): JSX.Element {
 
       {preview && (
         <div className="settings-transfer-backdrop" role="presentation">
-          <div className="settings-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="database-import-preview-title">
+          <div ref={dialogRef} tabIndex={-1} className="settings-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="database-import-preview-title">
             <h3 id="database-import-preview-title">{t('settings.databaseImportPreview')}</h3>
             <p>{t('settings.databaseImportPreviewHelp')}</p>
             <div className="settings-transfer-summary">
@@ -157,7 +191,7 @@ export function DatabaseTransferCard(): JSX.Element {
               {preview.archive && <span>{t('settings.databaseArchiveAttachments', { count: preview.attachments ?? 0 })}</span>}
             </div>
             <div className="settings-transfer-dialog-actions">
-              <button type="button" onClick={() => setPreview(null)} disabled={busy === 'merge'}>{t('common.cancel')}</button>
+              <button type="button" onClick={requestClose} disabled={busy === 'merge'}>{t('common.cancel')}</button>
               <button type="button" className="primary-action" onClick={() => { void mergeDatabase() }} disabled={busy === 'merge' || busy === 'archive-merge'}>
                 {busy === 'merge' || busy === 'archive-merge' ? t('settings.databaseMerging') : t('settings.databaseImportConfirm')}
               </button>

@@ -24,7 +24,7 @@ export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
   const { t, resolvedLanguage } = useI18n()
   const overlayStack = useOverlayStack()
 
-  useEffect(() => overlayStack.register({ id: 'global-search', priority: 20, requestClose: () => onClose?.() }), [onClose, overlayStack])
+  useEffect(() => overlayStack.register({ id: 'global-search', priority: 20, requestClose: () => { onClose?.(); return true } }), [onClose, overlayStack])
 
   const runSearch = (text: string, offset: number, append: boolean): void => {
     controllerRef.current?.abort()

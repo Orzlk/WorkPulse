@@ -8,6 +8,8 @@ import { useI18n } from '../stores/languageStore'
 import { useToast } from './Toast'
 import { extractHashTags } from '../lib/workspaceInteractions'
 import type { TaskPriority } from '../lib/kanbanTypes'
+import { buildTaskCreateRoute } from '../lib/taskCreateRoute'
+import { useOverlayStack } from './OverlayStack'
 
 type Mode = 'log' | 'inbox' | 'task'
 interface Props { initialMode: Mode; onClose: () => void; returnFocusRef?: RefObject<HTMLElement> }
@@ -36,6 +38,7 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
   const fetchProjects = useProjectStore((state) => state.fetch)
   const toast = useToast()
   const { t } = useI18n()
+  const overlayStack = useOverlayStack()
   const tags = extractHashTags(value).tags
 
   useEffect(() => {
@@ -64,12 +67,16 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
     element.style.overflowY = content > 200 ? 'auto' : 'hidden'
   }, [value, mode])
 
+  const requestClose = (): boolean => {
+    if (status === 'running') return false
+    if (value.trim() && !window.confirm(t('workspace.quickDiscardConfirm'))) return false
+    onClose()
+    return true
+  }
+
+  useEffect(() => overlayStack.register({ id: 'quick-create', priority: 80, requestClose }), [overlayStack, requestClose])
+
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      onClose()
-      return
-    }
     if (event.key !== 'Tab' || !dialogRef.current) return
     const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
     if (focusable.length === 0) return
@@ -104,7 +111,8 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
   }
 
   const openFullTaskForm = (): void => {
-    void window.api.taskCreateWindow.open()
+    const draft = { content: value, projectId, priority }
+    void window.api.taskCreateWindow.open({ ...draft, route: buildTaskCreateRoute(draft) })
     onClose()
   }
 
@@ -114,9 +122,9 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
       ? t('workspace.quickTaskPlaceholder')
       : t('workspace.quickLogPlaceholder')
 
-  return <div className="quick-create-backdrop" role="presentation" onMouseDown={onClose}>
+  return <div className="quick-create-backdrop" role="presentation" onMouseDown={requestClose}>
     <section ref={dialogRef} className="quick-create-panel" role="dialog" aria-modal="true" aria-labelledby="quick-create-title" tabIndex={-1} onKeyDown={handleDialogKeyDown} onMouseDown={(event) => event.stopPropagation()}>
-      <div className="quick-create-header"><div><p className="workspace-kicker">{t('workspace.quickKicker')}</p><h2 id="quick-create-title">{t('workspace.quickDialogTitle')}</h2></div><button onClick={onClose} aria-label={t('workspace.close')}><X aria-hidden="true" /></button></div>
+      <div className="quick-create-header"><div><p className="workspace-kicker">{t('workspace.quickKicker')}</p><h2 id="quick-create-title">{t('workspace.quickDialogTitle')}</h2></div><button onClick={requestClose} aria-label={t('workspace.close')}><X aria-hidden="true" /></button></div>
       <div className="quick-create-tabs" role="tablist" aria-label={t('workspace.createType')}>{modes.map(({ id, labelKey, Icon }) => <button role="tab" aria-selected={mode === id} key={id} onClick={() => setMode(id)}><Icon aria-hidden="true" />{t(labelKey)}</button>)}</div>
       <label className="quick-create-content-label" htmlFor="quick-create-content">{t('workspace.quickContentLabel')}</label>
       <textarea id="quick-create-content" ref={inputRef} rows={1} value={value} disabled={status === 'running'} onChange={(event) => setValue(event.target.value)} className="quick-create-input" placeholder={placeholder} />

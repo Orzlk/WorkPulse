@@ -9,7 +9,7 @@ import { tMain, type AppLanguage } from './i18n'
 import { configureAutoUpdater, registerUpdateIpc, startUpdateCheck } from './updater'
 import { RepositoryScheduler, RepositoryService } from './services/repositoryService'
 import { buildWorkLogEditorQuery, shouldPromptWorkLogEditorClose } from './workLogEditorWindow'
-import { buildTaskCreateQuery, buildTaskCreateTitleBarOverlay, shouldPromptTaskCreateClose } from './taskCreateWindow'
+import { buildTaskCreateQuery, buildTaskCreateTitleBarOverlay, parseTaskCreateDraft, shouldPromptTaskCreateClose, type TaskCreateDraft } from './taskCreateWindow'
 import { readMainWindowSize, saveMainWindowSize } from './windowState'
 import { resolveAttachmentPath } from './attachments/attachmentStorage'
 import { ReportService } from './reports/reportService'
@@ -381,7 +381,7 @@ function createWorkLogEditorWindow(publicId: string, parent: BrowserWindow | nul
   }
 }
 
-function createTaskCreateWindow(parent: BrowserWindow | null): void {
+function createTaskCreateWindow(parent: BrowserWindow | null, draft?: TaskCreateDraft): void {
   if (taskCreateWindow && !taskCreateWindow.isDestroyed()) {
     if (taskCreateWindow.isMinimized()) taskCreateWindow.restore()
     taskCreateWindow.focus()
@@ -446,7 +446,7 @@ function createTaskCreateWindow(parent: BrowserWindow | null): void {
     }
   })
 
-  const query = buildTaskCreateQuery()
+  const query = buildTaskCreateQuery(draft)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     editorWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}${query}`)
   } else {
@@ -483,8 +483,8 @@ function registerWorkLogEditorIpc(): void {
 }
 
 function registerTaskCreateIpc(): void {
-  ipcMain.handle('task-create:open', (event) => {
-    createTaskCreateWindow(BrowserWindow.fromWebContents(event.sender))
+  ipcMain.handle('task-create:open', (event, draft: unknown) => {
+    createTaskCreateWindow(BrowserWindow.fromWebContents(event.sender), parseTaskCreateDraft(draft))
     return true
   })
 

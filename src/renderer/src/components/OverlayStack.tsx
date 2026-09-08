@@ -4,7 +4,7 @@ export interface OverlayRegistration {
   id: string
   priority: number
   dirty?: boolean
-  requestClose: () => void | boolean | Promise<void | boolean>
+  requestClose: () => boolean | Promise<boolean>
 }
 
 export interface OverlayStackApi {
@@ -37,10 +37,10 @@ export function createOverlayStack(): OverlayStackApi {
       if (!overlay) return false
       const result = overlay.requestClose()
       if (result && typeof (result as Promise<unknown>).then === 'function') {
-        void (result as Promise<void | boolean>).then((closed) => {
-          if (closed !== false && overlays.get(overlay.id)?.order === overlay.order) overlays.delete(overlay.id)
+        void (result as Promise<boolean>).then((closed) => {
+          if (closed === true && overlays.get(overlay.id)?.order === overlay.order) overlays.delete(overlay.id)
         })
-      } else if (result !== false && overlays.get(overlay.id)?.order === overlay.order) {
+      } else if (result === true && overlays.get(overlay.id)?.order === overlay.order) {
         overlays.delete(overlay.id)
       }
       return true

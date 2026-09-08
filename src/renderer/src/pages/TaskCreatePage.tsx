@@ -5,13 +5,14 @@ import { useI18n, useLanguageStore } from '../stores/languageStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useProjectStore } from '../stores/projectStore'
 import type { ChecklistItem, TaskPriority } from '../lib/kanbanTypes'
+import type { TaskCreateDraft } from '../lib/taskCreateRoute'
 
-function TaskCreatePage(): JSX.Element {
-  const [title, setTitle] = useState('')
+function TaskCreatePage({ draft }: { draft: TaskCreateDraft | null }): JSX.Element {
+  const [title, setTitle] = useState(draft?.content ?? '')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState<TaskPriority>('medium')
+  const [priority, setPriority] = useState<TaskPriority>(draft?.priority ?? 'medium')
   const [dueDate, setDueDate] = useState('')
-  const [projectId, setProjectId] = useState('')
+  const [projectId, setProjectId] = useState(draft?.projectId ?? '')
   const [tags, setTags] = useState('')
   const [checklist, setChecklist] = useState<ChecklistItem[]>([])
   const [checklistDraft, setChecklistDraft] = useState('')

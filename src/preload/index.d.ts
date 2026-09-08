@@ -213,6 +213,7 @@ interface SearchResult {
 }
 
 type QuickCreateType = 'log' | 'task'
+type TaskCreateDraft = { content: string; projectId: string; priority: 'low' | 'medium' | 'high'; route?: string }
 type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type AppLanguage = 'system' | 'zh' | 'en'
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
@@ -247,7 +248,7 @@ export interface API {
     close: () => void
   }
   taskCreateWindow: {
-    open: () => Promise<boolean>
+    open: (draft?: TaskCreateDraft) => Promise<boolean>
     setDirty: (isDirty: boolean) => void
     notifyChanged: (publicId: string) => void
     close: (discard?: boolean) => void

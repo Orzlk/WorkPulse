@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type { API } from './index.d'
 
 type QuickCreateType = 'log' | 'task'
+type TaskCreateDraft = { content: string; projectId: string; priority: 'low' | 'medium' | 'high'; route?: string }
 type NavigatePage = 'worklog' | 'kanban' | 'report' | 'stats' | 'settings' | 'inbox' | 'projects' | 'repositories'
 type AppLanguage = 'system' | 'zh' | 'en'
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error'
@@ -246,7 +247,7 @@ const api = {
     }
   },
   taskCreateWindow: {
-    open: () => ipcRenderer.invoke('task-create:open') as Promise<boolean>,
+    open: (draft?: TaskCreateDraft) => ipcRenderer.invoke('task-create:open', draft) as Promise<boolean>,
     setDirty: (isDirty: boolean) => {
       ipcRenderer.send('task-create:set-dirty', isDirty)
     },

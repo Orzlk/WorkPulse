@@ -5,11 +5,13 @@ import ReactMarkdown from 'react-markdown'
 import { useToast } from '../components/Toast'
 import { buildReportExportName, getHistoryReportState, getLatestCompleteReportAnchor, getReportGenerationError, getReportPresetAnchor, getRetryReportRequest, hasReportPreviewData, isReportScopeAll, toggleReportScope, type WorkflowReportType } from '../lib/reportWorkflow'
 import { findReportByPublicId } from '../lib/reportNavigation'
+import { registerNavigationGuard } from '../lib/navigationGuard'
 import { useI18n } from '../stores/languageStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useRepositoryStore } from '../stores/repositoryStore'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
+import { useOverlayStack } from '../components/OverlayStack'
 
 type Status = 'idle' | 'no_key' | 'generating' | 'success' | 'error' | 'no_data'
 type Stage = 'idle' | 'reading' | 'git' | 'grouping' | 'generating' | 'failed'
@@ -30,6 +32,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const toast = useToast()
   const { t } = useI18n()
+  const overlayStack = useOverlayStack()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
   const repositories = useRepositoryStore((state) => state.items)
@@ -130,8 +133,34 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const chooseType = (next: WorkflowReportType): void => {
     setType(next); setAnchorDate(getLatestCompleteReportAnchor(next, timeZone))
   }
+  const isEditDirty = Boolean(editing && active && content !== active.content)
+  const discardEdit = (): void => {
+    setContent(active?.content ?? '')
+    setEditing(false)
+  }
+  const requestDiscardEdit = (): boolean => {
+    if (!isEditDirty) return true
+    if (!window.confirm(t('report.discardChangesConfirm'))) return false
+    discardEdit()
+    return true
+  }
+  const requestCloseReportEdit = (): boolean => {
+    if (!requestDiscardEdit()) return false
+    discardEdit()
+    return true
+  }
+  useEffect(() => {
+    if (!editing) return
+    return overlayStack.register({ id: 'report-editor', priority: 90, dirty: isEditDirty, requestClose: requestCloseReportEdit })
+  }, [editing, isEditDirty, overlayStack])
+  useEffect(() => registerNavigationGuard({
+    id: 'report-editor',
+    priority: 90,
+    request: requestDiscardEdit
+  }), [isEditDirty])
   const generate = async (input: typeof request | MouseEvent<HTMLButtonElement> = request, bypassEmptyPreview = false): Promise<void> => {
     if (status === 'no_key' || previewLoading) return
+    if (!requestDiscardEdit()) return
     if (!bypassEmptyPreview && !hasReportPreviewData(preview)) {
       setStatus('no_data'); setStage('idle'); return
     }
@@ -173,6 +202,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   }
   const retryActiveReport = (): void => {
     if (!active || active.status !== 'error') return
+    if (!requestDiscardEdit()) return
     const retryRequest = getRetryReportRequest(active)
     setType(retryRequest.type)
     setAnchorDate(retryRequest.anchorDate)
@@ -192,6 +222,17 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const copy = async (): Promise<void> => {
     try { await navigator.clipboard.writeText(content); setCopied(true); window.setTimeout(() => setCopied(false), 2000); toast.success(t('report.copied')) } catch { toast.error(t('report.copyFailed')) }
   }
+  const openHistoryReport = (report: Report): void => {
+    if (!requestDiscardEdit()) return
+    const state = getHistoryReportState(report)
+    setViewing(report); setActive(report); setContent(report.content)
+    setStatus(state.status === 'error' ? 'error' : state.status === 'ready' ? 'success' : 'generating')
+    setError(state.errorMessage ?? ''); setStage(state.status === 'error' ? 'failed' : 'idle'); setEditing(false)
+  }
+  const leaveHistory = (): void => {
+    if (!requestDiscardEdit()) return
+    setViewing(null); setActive(null); setContent(''); setStatus('idle'); setEditing(false)
+  }
   const displayScope = (ids: string[], values: Array<{ public_id: string; name: string }>, fallback: string): string => {
     const names = values.filter((item) => ids.includes(item.public_id)).map((item) => item.name)
     return names.length ? names.join('、') : fallback
@@ -200,9 +241,9 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const isHistory = viewing !== null
 
   return <div className="mx-auto max-w-6xl space-y-6 pb-10">
-    <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={isHistory ? [{ label: t('nav.report'), onClick: () => { setViewing(null); setActive(null); setContent(''); setStatus('idle'); setEditing(false) } }, { label: t('report.history'), current: true }] : [{ label: t('nav.report'), current: true }]} title={t('report.workflowTitle')} description={t('report.workflowSubtitle')} />
+    <WorkspacePageHeader ariaLabel={t('workspace.breadcrumbLabel')} items={isHistory ? [{ label: t('nav.report'), onClick: leaveHistory }, { label: t('report.history'), current: true }] : [{ label: t('nav.report'), current: true }]} title={t('report.workflowTitle')} description={t('report.workflowSubtitle')} />
     <WorkspaceSectionTabs ariaLabel={t('workspace.sectionNavigation')} items={[{ id: 'reports', label: t('nav.report'), active: true }, { id: 'stats', label: t('nav.stats'), onClick: onOpenStats }]} />
-    {isHistory ? <HistoryHeader report={viewing} onBack={() => { setViewing(null); setActive(null); setContent(''); setStatus('idle'); setEditing(false) }} t={t} timeZone={timeZone} /> : <>
+    {isHistory ? <HistoryHeader report={viewing} onBack={leaveHistory} t={t} timeZone={timeZone} /> : <>
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold tracking-[0.16em] text-zinc-500">{t('report.kicker')}</p><h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('report.workflowTitle')}</h1><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{t('report.workflowSubtitle')}</p></div><span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{timeZone}</span></div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -223,8 +264,8 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
     {status === 'error' && <Notice tone="error" title={error} detail={active ? t('report.errorWithRetryCount', { count: active.retry_count }) : t('report.error.retryHint')} action={<button type="button" onClick={() => active?.status === 'error' ? retryActiveReport() : void generate()} className="min-h-9 rounded-md px-2 text-sm font-medium underline underline-offset-4 focus:outline-none focus:ring-2 focus:ring-red-500">{t('common.retry')}</button>} />}
     {status === 'no_data' && !isHistory && <Notice tone="neutral" title={t('report.noDataTitle')} detail={t('report.noDataSubtitle')} />}
     {!hasSourceData && !previewLoading && status === 'idle' && !isHistory && <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('report.previewEmpty')}</p>}
-    {status === 'success' && content && <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800" role="group" aria-label={t('report.viewMode')}><button type="button" aria-pressed={!editing} onClick={() => setEditing(false)} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${!editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Eye className="h-4 w-4" aria-hidden="true" />{t('report.preview')}</button><button type="button" aria-pressed={editing} onClick={() => setEditing(true)} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Pencil className="h-4 w-4" aria-hidden="true" />{t('report.edit')}</button></div>{active && <span className="text-xs text-zinc-500">{t('report.version', { version: active.version })}</span>}</div>{editing ? <textarea aria-label={t('report.edit')} value={content} onChange={(event) => setContent(event.target.value)} className="min-h-[360px] w-full rounded-lg border border-zinc-300 bg-white p-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" /> : <div className="prose prose-zinc max-w-none dark:prose-invert" role="article"><ReactMarkdown>{content}</ReactMarkdown></div>}<div className="mt-5 flex flex-wrap gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-700"><button type="button" onClick={copy} className="ui-button text-sm">{copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}{copied ? t('report.copiedState') : t('report.copy')}</button><button type="button" onClick={async () => { const report = viewing ?? active; if (report && await window.api.export.report(content, buildReportExportName(report))) toast.success(t('report.exported')) }} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Download className="h-4 w-4" aria-hidden="true" />{t('common.export')}</button>{editing && <button type="button" onClick={save} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Save className="h-4 w-4" aria-hidden="true" />{t('report.saveCurrentVersion')}</button>}{!isHistory && <button type="button" onClick={generate} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><RefreshCw className="h-4 w-4" aria-hidden="true" />{t('report.regenerate')}</button>}</div></section>}
-    {!isHistory && <section className="border-t border-zinc-200 pt-5 dark:border-zinc-700"><button type="button" onClick={() => setHistoryOpen((value) => !value)} aria-expanded={historyOpen} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:text-zinc-200"><Clock3 className="h-4 w-4" aria-hidden="true" />{t('report.history')}<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-normal dark:bg-zinc-800">{history.length}</span>{historyOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}</button>{historyOpen && <div className="mt-3 space-y-2">{history.map((report) => <button key={report.public_id} type="button" onClick={() => { const state = getHistoryReportState(report); setViewing(report); setActive(report); setContent(report.content); setStatus(state.status === 'error' ? 'error' : state.status === 'ready' ? 'success' : 'generating'); setError(state.errorMessage ?? ''); setStage(state.status === 'error' ? 'failed' : 'idle'); setEditing(false) }} className="flex w-full items-start justify-between gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left hover:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"><span className="min-w-0"><span className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200"><FileText className="h-4 w-4" aria-hidden="true" />{report.type === 'weekly' ? t('report.weekly') : t('report.monthly')} · {report.display_start} {t('common.to')} {report.display_end_inclusive}<Badge status={report.status} t={t} /></span><span className="mt-1 block truncate text-xs text-zinc-500">{t('report.historyScope', { projects: displayScope(report.project_scope, projects, t('report.allProjects')), repositories: displayScope(report.repository_scope, repositories, t('report.allRepositories')) })}</span></span><span className="shrink-0 text-right text-xs text-zinc-500">{t('report.version', { version: report.version })}<br />{formatTime(report.generated_at, timeZone)}</span></button>)}</div>}</section>}
+    {status === 'success' && content && <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800" role="group" aria-label={t('report.viewMode')}><button type="button" aria-pressed={!editing} onClick={() => { if (requestDiscardEdit()) setEditing(false) }} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${!editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Eye className="h-4 w-4" aria-hidden="true" />{t('report.preview')}</button><button type="button" aria-pressed={editing} onClick={() => setEditing(true)} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 ${editing ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-600 dark:text-zinc-300'}`}><Pencil className="h-4 w-4" aria-hidden="true" />{t('report.edit')}</button></div>{active && <span className="text-xs text-zinc-500">{t('report.version', { version: active.version })}</span>}</div>{editing ? <textarea aria-label={t('report.edit')} value={content} onChange={(event) => setContent(event.target.value)} className="min-h-[360px] w-full rounded-lg border border-zinc-300 bg-white p-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100" /> : <div className="prose prose-zinc max-w-none dark:prose-invert" role="article"><ReactMarkdown>{content}</ReactMarkdown></div>}<div className="mt-5 flex flex-wrap gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-700"><button type="button" onClick={copy} className="ui-button text-sm">{copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}{copied ? t('report.copiedState') : t('report.copy')}</button><button type="button" onClick={async () => { const report = viewing ?? active; if (report && await window.api.export.report(content, buildReportExportName(report))) toast.success(t('report.exported')) }} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Download className="h-4 w-4" aria-hidden="true" />{t('common.export')}</button>{editing && <button type="button" onClick={save} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><Save className="h-4 w-4" aria-hidden="true" />{t('report.saveCurrentVersion')}</button>}{!isHistory && <button type="button" onClick={() => void generate()} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-200"><RefreshCw className="h-4 w-4" aria-hidden="true" />{t('report.regenerate')}</button>}</div></section>}
+    {!isHistory && <section className="border-t border-zinc-200 pt-5 dark:border-zinc-700"><button type="button" onClick={() => setHistoryOpen((value) => !value)} aria-expanded={historyOpen} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:text-zinc-200"><Clock3 className="h-4 w-4" aria-hidden="true" />{t('report.history')}<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-normal dark:bg-zinc-800">{history.length}</span>{historyOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}</button>{historyOpen && <div className="mt-3 space-y-2">{history.map((report) => <button key={report.public_id} type="button" onClick={() => openHistoryReport(report)} className="flex w-full items-start justify-between gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left hover:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"><span className="min-w-0"><span className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200"><FileText className="h-4 w-4" aria-hidden="true" />{report.type === 'weekly' ? t('report.weekly') : t('report.monthly')} · {report.display_start} {t('common.to')} {report.display_end_inclusive}<Badge status={report.status} t={t} /></span><span className="mt-1 block truncate text-xs text-zinc-500">{t('report.historyScope', { projects: displayScope(report.project_scope, projects, t('report.allProjects')), repositories: displayScope(report.repository_scope, repositories, t('report.allRepositories')) })}</span></span><span className="shrink-0 text-right text-xs text-zinc-500">{t('report.version', { version: report.version })}<br />{formatTime(report.generated_at, timeZone)}</span></button>)}</div>}</section>}
   </div>
 }
 

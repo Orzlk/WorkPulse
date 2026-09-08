@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { extractHashTags } from '../lib/workspaceInteractions'
 import { useI18n } from '../stores/languageStore'
 import type { KanbanColumn, KanbanTask, TaskPriority, TaskUpdates } from '../lib/kanbanTypes'
+import { registerNavigationGuard } from '../lib/navigationGuard'
 import { useOverlayStack } from './OverlayStack'
 
 interface TaskDetailDrawerProps {
@@ -39,7 +40,6 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     checklist: task.checklist
   }))
   const drawerRef = useRef<HTMLElement>(null)
-  const requestCloseRef = useRef<() => void>(() => undefined)
   const overlayStack = useOverlayStack()
 
   const currentSnapshot = JSON.stringify({ title, description, priority, dueDate, projectId, tags, checklist })
@@ -62,12 +62,12 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     }
   }
 
-  const requestClose = (): void => {
-    if (saving) return
-    if (isDirty && !window.confirm(t('kanban.discardChangesConfirm'))) return
+  const requestClose = (): boolean => {
+    if (saving) return false
+    if (isDirty && !window.confirm(t('kanban.discardChangesConfirm'))) return false
     onClose()
+    return true
   }
-  requestCloseRef.current = requestClose
 
   useEffect(() => overlayStack.register({
     id: `task-detail-${task.public_id}`,
@@ -76,16 +76,16 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     requestClose
   }), [isDirty, overlayStack, task.public_id])
 
+  useEffect(() => registerNavigationGuard({
+    id: `task-detail-${task.public_id}`,
+    priority: 100,
+    request: requestClose
+  }), [isDirty, task.public_id])
+
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
     drawerRef.current?.focus()
     const handleDocumentKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        requestCloseRef.current()
-        return
-      }
       if (event.key !== 'Tab' || !drawerRef.current) return
       const focusable = Array.from(drawerRef.current.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter((element) => !element.hasAttribute('disabled'))
       if (focusable.length === 0) return
@@ -121,13 +121,7 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
   }
 
   return createPortal(<div className="hallmark-app portal-root task-detail-overlay fixed inset-0 bg-black/25" onMouseDown={(event) => event.target === event.currentTarget && requestClose()}>
-    <aside ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('kanban.taskDetails')} className="absolute right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        requestClose()
-        return
-      }
+    <aside ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('kanban.taskDetails')} className="absolute right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault()
         void handleSave().catch(() => undefined)

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { buildTaskCreateRoute, parseTaskCreateRoute } from '../../src/renderer/src/lib/taskCreateRoute'
 
 const quickCreate = readFileSync('src/renderer/src/components/QuickCreate.tsx', 'utf8')
 const i18n = readFileSync('src/renderer/src/lib/i18n.ts', 'utf8')
@@ -30,5 +31,16 @@ describe('quick create panel', () => {
     expect(quickCreate).not.toContain("onKeyDown={(event) => {")
     expect(i18n).toContain("'workspace.quickKeyboardHelp': 'Enter 换行 · Esc 关闭'")
     expect(i18n).toContain("'workspace.quickKeyboardHelp': 'Enter for a newline · Esc to close'")
+  })
+
+  it('passes a task draft to the complete task form without losing its project or priority', () => {
+    const route = buildTaskCreateRoute({ content: 'Ship the guard', projectId: 'project-1', priority: 'high' })
+
+    expect(parseTaskCreateRoute(route)).toEqual({
+      isTaskCreate: true,
+      draft: { content: 'Ship the guard', projectId: 'project-1', priority: 'high' }
+    })
+    expect(quickCreate).toContain('buildTaskCreateRoute')
+    expect(quickCreate).toContain('useOverlayStack')
   })
 })

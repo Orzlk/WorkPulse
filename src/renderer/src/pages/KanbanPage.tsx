@@ -26,6 +26,7 @@ import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import { KanbanTaskCard, TaskCardOverlay } from '../components/KanbanTaskCard'
 import { TaskDetailDrawer } from '../components/TaskDetailDrawer'
+import { useOverlayStack } from '../components/OverlayStack'
 
 const SYSTEM_COLUMN_STYLES: Record<string, string> = { todo: 'kanban-column-border--todo', in_progress: 'kanban-column-border--progress', done: 'kanban-column-border--done' }
 
@@ -50,15 +51,20 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
   const submittingRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef(onCancel)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const overlayStack = useOverlayStack()
   cancelRef.current = onCancel
+  const requestClose = async (): Promise<boolean> => {
+    if (!submittingRef.current) {
+      await submit(() => cancelRef.current())
+      return true
+    }
+    return false
+  }
   useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     dialogRef.current?.focus()
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        if (!submittingRef.current) void cancelRef.current()
-      }
       if (event.key !== 'Tab') return
       const dialog = dialogRef.current
       if (!dialog) return
@@ -75,7 +81,10 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
       }
     }
     document.addEventListener('keydown', handleKeyDown, true)
-    return () => document.removeEventListener('keydown', handleKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true)
+      previousFocusRef.current?.focus()
+    }
   }, [])
   const submit = async (action: () => Promise<void>): Promise<void> => {
     if (submittingRef.current) return
@@ -86,8 +95,9 @@ function CompleteDialog({ task, onConfirm, onCancel, onOnlyComplete }: { task: K
   const confirm = async (): Promise<void> => {
     await submit(() => onConfirm(content))
   }
+  useEffect(() => overlayStack.register({ id: 'complete-dialog', priority: 200, requestClose }), [overlayStack, requestClose])
   return createPortal(
-    <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !submitting && void submit(onCancel)}>
+    <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void requestClose()}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="complete-task-title" className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
         <h3 id="complete-task-title" className="mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('kanban.completeTitle')}</h3>
         <p className="mb-4 text-sm text-zinc-500">{t('kanban.completePrompt')}</p>

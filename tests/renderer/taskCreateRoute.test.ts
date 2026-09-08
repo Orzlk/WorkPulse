@@ -4,10 +4,10 @@ import { parseTaskCreateRoute } from '../../src/renderer/src/lib/taskCreateRoute
 
 describe('parseTaskCreateRoute', () => {
   it('recognizes the independent task creation window', () => {
-    expect(parseTaskCreateRoute('?window=task-create')).toEqual({ isTaskCreate: true })
+    expect(parseTaskCreateRoute('?window=task-create')).toEqual({ isTaskCreate: true, draft: null })
   })
 
   it.each(['', '?window=main', '?window=worklog-editor'])('returns the main app route for %s', (search) => {
-    expect(parseTaskCreateRoute(search)).toEqual({ isTaskCreate: false })
+    expect(parseTaskCreateRoute(search)).toEqual({ isTaskCreate: false, draft: null })
   })
 })
