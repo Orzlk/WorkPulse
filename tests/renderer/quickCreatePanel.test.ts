@@ -4,6 +4,8 @@ import { buildTaskCreateRoute, parseTaskCreateRoute } from '../../src/renderer/s
 
 const quickCreate = readFileSync('src/renderer/src/components/QuickCreate.tsx', 'utf8')
 const i18n = readFileSync('src/renderer/src/lib/i18n.ts', 'utf8')
+const mainIndex = readFileSync('src/main/index.ts', 'utf8')
+const taskCreatePage = readFileSync('src/renderer/src/pages/TaskCreatePage.tsx', 'utf8')
 
 describe('quick create panel', () => {
   it('unifies log, inbox, and task creation in one panel', () => {
@@ -42,5 +44,10 @@ describe('quick create panel', () => {
     })
     expect(quickCreate).toContain('buildTaskCreateRoute')
     expect(quickCreate).toContain('useOverlayStack')
+  })
+
+  it('delivers a later quick-create draft to an already-open task form', () => {
+    expect(mainIndex).toContain("taskCreateWindow.webContents.send('task-create:draft', draft)")
+    expect(taskCreatePage).toContain('window.api.on.taskCreateDraft')
   })
 })

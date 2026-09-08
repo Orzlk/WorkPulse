@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   Eye,
   EyeOff,
@@ -159,7 +159,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
   const [clearDataInput, setClearDataInput] = useState('')
   const [clearingData, setClearingData] = useState(false)
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('ai')
-  const clearDataTriggerRef = useRef<HTMLButtonElement>(null)
+  const clearDataTriggerRef = useRef<HTMLButtonElement | null>(null)
   const overlayStack = useOverlayStack()
   const toast = useToast()
   const { theme, setTheme } = useThemeStore()
@@ -492,6 +492,11 @@ function SettingsPage({ onBack }: Props): JSX.Element {
 
   const clearDataLanguage: 'zh' | 'en' = resolvedLanguage === 'zh' ? 'zh' : 'en'
   const canConfirmClearData = isClearDataConfirmationValid(clearDataInput, clearDataLanguage)
+  const openClearData = (event: ReactMouseEvent<HTMLButtonElement>): void => {
+    clearDataTriggerRef.current = event.currentTarget
+    setClearDataInput('')
+    setClearDataOpen(true)
+  }
   const requestCloseClearData = (): boolean => {
     if (clearingData) return false
     setClearDataOpen(false)
@@ -940,10 +945,7 @@ function SettingsPage({ onBack }: Props): JSX.Element {
                   <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t('settings.clearDataKeep')}</p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setClearDataInput('')
-                      setClearDataOpen(true)
-                    }}
+                    onClick={openClearData}
                     className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50"
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />

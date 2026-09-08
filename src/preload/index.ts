@@ -410,6 +410,11 @@ const api = {
         ipcRenderer.removeListener('quick-create:task', taskHandler)
       }
     },
+    taskCreateDraft: (cb: (draft: TaskCreateDraft) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, draft: TaskCreateDraft) => cb(draft)
+      ipcRenderer.on('task-create:draft', handler)
+      return () => ipcRenderer.removeListener('task-create:draft', handler)
+    },
     navigate: (cb: (page: NavigatePage) => void) => {
       const pages: NavigatePage[] = ['worklog', 'kanban', 'report', 'stats', 'settings', 'inbox', 'projects', 'repositories']
       const handlers = pages.map((page) => {

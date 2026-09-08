@@ -59,6 +59,12 @@ function TaskCreatePage({ draft }: { draft: TaskCreateDraft | null }): JSX.Eleme
     return () => window.api.taskCreateWindow.setDirty(false)
   }, [isDirty])
 
+  useEffect(() => window.api.on.taskCreateDraft((nextDraft) => {
+    setTitle(nextDraft.content)
+    setProjectId(nextDraft.projectId)
+    setPriority(nextDraft.priority)
+  }), [])
+
   const handleSave = async (): Promise<void> => {
     const normalizedTitle = title.trim()
     if (!normalizedTitle || saving) return

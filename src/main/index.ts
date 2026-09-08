@@ -383,6 +383,7 @@ function createWorkLogEditorWindow(publicId: string, parent: BrowserWindow | nul
 
 function createTaskCreateWindow(parent: BrowserWindow | null, draft?: TaskCreateDraft): void {
   if (taskCreateWindow && !taskCreateWindow.isDestroyed()) {
+    if (draft) taskCreateWindow.webContents.send('task-create:draft', draft)
     if (taskCreateWindow.isMinimized()) taskCreateWindow.restore()
     taskCreateWindow.focus()
     return

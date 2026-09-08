@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Calendar, Check, Plus, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { extractHashTags } from '../lib/workspaceInteractions'
@@ -40,10 +40,12 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     checklist: task.checklist
   }))
   const drawerRef = useRef<HTMLElement>(null)
+  const closeStateRef = useRef({ saving, isDirty: false })
   const overlayStack = useOverlayStack()
 
   const currentSnapshot = JSON.stringify({ title, description, priority, dueDate, projectId, tags, checklist })
   const isDirty = currentSnapshot !== savedSnapshot
+  closeStateRef.current = { saving, isDirty }
 
   useEffect(() => {
     const nextTags = task.tag_names.map((tag) => `#${tag}`).join(' ')
@@ -62,25 +64,25 @@ export function TaskDetailDrawer({ task, columns, projects, onClose, onSave, onM
     }
   }
 
-  const requestClose = (): boolean => {
-    if (saving) return false
-    if (isDirty && !window.confirm(t('kanban.discardChangesConfirm'))) return false
+  const requestClose = useCallback((): boolean => {
+    if (closeStateRef.current.saving) return false
+    if (closeStateRef.current.isDirty && !window.confirm(t('kanban.discardChangesConfirm'))) return false
     onClose()
     return true
-  }
+  }, [onClose, t])
 
   useEffect(() => overlayStack.register({
     id: `task-detail-${task.public_id}`,
     priority: 100,
     dirty: isDirty,
     requestClose
-  }), [isDirty, overlayStack, task.public_id])
+  }), [overlayStack, requestClose, task.public_id])
 
   useEffect(() => registerNavigationGuard({
     id: `task-detail-${task.public_id}`,
     priority: 100,
     request: requestClose
-  }), [isDirty, task.public_id])
+  }), [requestClose, task.public_id])
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null

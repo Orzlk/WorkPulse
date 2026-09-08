@@ -255,6 +255,7 @@ export interface API {
   }
   on: {
     quickCreate: (cb: (type: QuickCreateType) => void) => () => void
+    taskCreateDraft: (cb: (draft: TaskCreateDraft) => void) => () => void
     navigate: (cb: (page: NavigatePage) => void) => () => void
     updateStatus: (cb: (state: AppUpdateState) => void) => () => void
     worklogEditorChanged: (cb: (publicId: string) => void) => () => void
