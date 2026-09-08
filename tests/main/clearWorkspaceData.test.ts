@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -154,7 +154,7 @@ describe('clearWorkspaceData', () => {
     expect(readFileSync(join(attachmentRoot, 'must-remain.png'), 'utf8')).toBe('attachment-data')
   })
 
-  it('restores the attachment directory and database data when staged-directory cleanup fails', async () => {
+  it('keeps cleared database data and leaves attachments isolated when final cleanup fails', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'workpulse-clear-stage-discard-'))
     directories.push(directory)
     userDataPath = directory
@@ -169,12 +169,50 @@ describe('clearWorkspaceData', () => {
     mkdirSync(attachmentRoot)
     writeFileSync(join(attachmentRoot, 'cleared.png'), 'attachment-data')
 
-    await expect(clearWorkspaceData(async () => join(directory, 'backup.zip'), () => {
+    const result = await clearWorkspaceData(async () => join(directory, 'backup.zip'), () => {
       const staged = stageAttachmentsForClear(attachmentRoot)
-      return { restore: staged.restore, discard: () => { throw new Error('attachment directory is locked') } }
-    })).rejects.toThrow('attachment directory is locked')
+      return {
+        prepare: staged.prepare,
+        restore: staged.restore,
+        finalize: () => { throw new Error('attachment directory is locked') }
+      }
+    })
 
-    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'staged-discard-log'").get()).toEqual({ content: 'must clear' })
-    expect(readFileSync(join(attachmentRoot, 'cleared.png'), 'utf8')).toBe('attachment-data')
+    expect(result.deleted.work_logs).toBe(1)
+    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'staged-discard-log'").get()).toBeUndefined()
+    expect(existsSync(attachmentRoot)).toBe(false)
+    const isolatedDirectory = readdirSync(directory).find((entry) => entry.startsWith('.attachments-clearing-'))
+    expect(isolatedDirectory).toBeDefined()
+    expect(readFileSync(join(directory, isolatedDirectory!, 'cleared.png'), 'utf8')).toBe('attachment-data')
+  })
+
+  it('restores the attachment directory and database data when the database commit fails after staging', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'workpulse-clear-commit-failure-'))
+    directories.push(directory)
+    userDataPath = directory
+    await initDatabase()
+    const database = getDatabase()
+    const context = database.prepare('SELECT workspace_id FROM users ORDER BY id LIMIT 1').get() as { workspace_id: number }
+    database.prepare(`
+      INSERT INTO work_logs (public_id, workspace_id, content, category, created_at, updated_at)
+      VALUES ('commit-failure-log', ?, 'must remain', '', '2026-09-07T00:00:00.000Z', '2026-09-07T00:00:00.000Z')
+    `).run(context.workspace_id)
+    const logRow = database.prepare("SELECT id FROM work_logs WHERE public_id = 'commit-failure-log'").get() as { id: number }
+    database.exec(`
+      CREATE TABLE commit_failures (
+        id INTEGER PRIMARY KEY,
+        work_log_id INTEGER NOT NULL,
+        FOREIGN KEY (work_log_id) REFERENCES work_logs(id) DEFERRABLE INITIALLY DEFERRED
+      )
+    `)
+    database.prepare('INSERT INTO commit_failures (work_log_id) VALUES (?)').run(logRow.id)
+    const attachmentRoot = join(directory, 'attachments')
+    mkdirSync(attachmentRoot)
+    writeFileSync(join(attachmentRoot, 'commit-failure.png'), 'attachment-data')
+
+    await expect(clearWorkspaceData(async () => join(directory, 'backup.zip'), () => stageAttachmentsForClear(attachmentRoot))).rejects.toThrow('FOREIGN KEY constraint failed')
+
+    expect(database.prepare("SELECT content FROM work_logs WHERE public_id = 'commit-failure-log'").get()).toEqual({ content: 'must remain' })
+    expect(readFileSync(join(attachmentRoot, 'commit-failure.png'), 'utf8')).toBe('attachment-data')
   })
 })

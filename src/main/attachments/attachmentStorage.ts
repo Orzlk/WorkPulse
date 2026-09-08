@@ -19,8 +19,9 @@ export interface SavedAttachment {
 }
 
 export interface StagedAttachmentClear {
+  prepare(): void
   restore(): void
-  discard(): void
+  finalize(): void
 }
 
 function extensionFor(input: AttachmentInput): string {
@@ -76,20 +77,23 @@ export function clearAttachments(root: string): void {
 
 export function stageAttachmentsForClear(root: string): StagedAttachmentClear {
   const source = resolve(root)
-  if (!existsSync(source)) return { restore: () => {}, discard: () => {} }
   const staged = join(dirname(source), `.${basename(source)}-clearing-${randomUUID()}`)
-  renameSync(source, staged)
-  let active = true
+  let prepared = false
   return {
-    restore: () => {
-      if (!active) return
-      renameSync(staged, source)
-      active = false
+    prepare: () => {
+      if (prepared || !existsSync(source)) return
+      renameSync(source, staged)
+      prepared = true
     },
-    discard: () => {
-      if (!active) return
+    restore: () => {
+      if (!prepared) return
+      renameSync(staged, source)
+      prepared = false
+    },
+    finalize: () => {
+      if (!prepared) return
       rmSync(staged, { recursive: true, force: true })
-      active = false
+      prepared = false
     }
   }
 }

@@ -268,19 +268,21 @@ export async function clearWorkspaceData(
   let deleted: Record<string, number>
   try {
     deleted = db.transaction(() => {
+      stagedAttachments?.prepare()
       const counts: Record<string, number> = {}
       for (const operation of CLEAR_WORKSPACE_OPERATIONS) {
         const row = db.prepare(operation.countSql).get(context.workspace_id) as { count: number }
         counts[operation.table] = row.count
         db.prepare(operation.deleteSql).run(context.workspace_id)
       }
-      stagedAttachments?.discard()
       return counts
     })()
   } catch (error) {
     try { stagedAttachments?.restore() } catch { /* Preserve the original database error. */ }
     throw error
   }
+
+  try { stagedAttachments?.finalize() } catch { /* Keep the isolated directory for a later cleanup attempt. */ }
 
   return { backupPath, deleted }
 }
