@@ -76,6 +76,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
   const timers = useRef<number[]>([])
   const activeStreamId = useRef<string | null>(null)
   const generationId = useRef(0)
+  const focusRequestId = useRef(0)
   const translateRef = useRef(t)
   translateRef.current = t
   const request = useMemo(() => ({ type, anchorDate, timeZone, projectIds, repositoryIds }), [anchorDate, projectIds, repositoryIds, timeZone, type])
@@ -121,6 +122,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
       const requestId = activeStreamId.current
       if (requestId) void window.api.report.cancel(requestId)
       generationId.current += 1
+      focusRequestId.current += 1
       activeStreamId.current = null
     }
   }, [fetchProjects, fetchRepositories])
@@ -131,6 +133,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
       onReportFocusHandled?.()
       return
     }
+    const focusRequest = ++focusRequestId.current
     void (async () => {
       const requestId = activeStreamId.current
       generationId.current += 1
@@ -139,6 +142,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
       if (requestId) {
         try { await window.api.report.cancel(requestId) } catch { /* 聚焦历史失败不应阻止查看 */ }
       }
+      if (focusRequest !== focusRequestId.current) return
       const state = getHistoryReportState(report)
       setViewing(report)
       setActive(report)
@@ -150,6 +154,7 @@ function ReportPage({ projectId, focusReportId, onReportFocusHandled, onProjectC
       setHistoryOpen(true)
       onReportFocusHandled?.()
     })()
+    return () => { focusRequestId.current += 1 }
   }, [focusReportId, history, historyLoaded, onReportFocusHandled])
   useEffect(() => {
     let closed = false

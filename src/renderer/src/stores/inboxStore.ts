@@ -4,6 +4,7 @@ import type { AsyncStatus, InboxFilter, InboxItem } from '../lib/workspaceTypes'
 
 const PAGE_SIZE = 40
 const requestGate = createLatestRequestGate()
+const lookupGate = createLatestRequestGate()
 type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'include_in_reports'> & {
   tag_names: string[]
   ai_suggestion: InboxItem['ai_suggestion']
@@ -73,8 +74,9 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     await get().fetch(filter)
   },
   loadByPublicId: async (publicId) => {
+    const requestId = lookupGate.next()
     const item = await window.api.inbox.get(publicId)
-    if (!item) return null
+    if (!item || !lookupGate.isCurrent(requestId)) return null
     set((state) => ({
       items: [item, ...state.items.filter((current) => current.public_id !== item.public_id)],
       total: Math.max(state.total, 1),

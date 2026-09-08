@@ -41,6 +41,7 @@ interface WorkLogStore {
 
 const PAGE_SIZE = 50
 const requestGate = createLatestRequestGate()
+const lookupGate = createLatestRequestGate()
 
 export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   logs: [],
@@ -77,8 +78,9 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   },
 
   loadByPublicId: async (publicId) => {
+    const requestId = lookupGate.next()
     const log = await window.api.worklog.get(publicId)
-    if (!log) return null
+    if (!log || !lookupGate.isCurrent(requestId)) return null
     set((state) => ({
       logs: [log, ...state.logs.filter((item) => item.public_id !== log.public_id)].sort((a, b) => b.created_at.localeCompare(a.created_at)),
       pinnedPublicIds: state.logs.some((item) => item.public_id === log.public_id) ? state.pinnedPublicIds : [...state.pinnedPublicIds, log.public_id]
