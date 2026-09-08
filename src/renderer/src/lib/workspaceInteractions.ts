@@ -1,5 +1,6 @@
 export interface PublicItem {
-  public_id: string
+  public_id?: string
+  id?: string | number
 }
 
 export function extractHashTags(content: string): { content: string; tags: string[] } {
@@ -224,14 +225,22 @@ export function mergePage<T extends PublicItem>(existing: T[], incoming: T[], to
   hasMore: boolean
 } {
   const items = [...existing]
-  const existingIds = new Set(existing.map((item) => item.public_id))
+  const existingIds = new Set(existing.flatMap(getStableItemIds))
   for (const item of incoming) {
-    if (!existingIds.has(item.public_id)) {
-      existingIds.add(item.public_id)
+    const itemIds = getStableItemIds(item)
+    if (!itemIds.some((id) => existingIds.has(id))) {
+      itemIds.forEach((id) => existingIds.add(id))
       items.push(item)
     }
   }
   return { items, hasMore: items.length < total }
+}
+
+function getStableItemIds(item: PublicItem): string[] {
+  const ids: string[] = []
+  if (item.public_id) ids.push(`public:${item.public_id}`)
+  if (item.id !== undefined && item.id !== null) ids.push(`id:${item.id}`)
+  return ids
 }
 
 export interface RepositoryScanSummary {

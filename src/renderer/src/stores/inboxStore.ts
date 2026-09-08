@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { mergePage } from '../lib/workspaceInteractions'
+import { createLatestRequestGate, mergePage } from '../lib/workspaceInteractions'
 import type { AsyncStatus, InboxFilter, InboxItem } from '../lib/workspaceTypes'
 
 const PAGE_SIZE = 40
-let fetchPromise: Promise<void> | null = null
+const requestGate = createLatestRequestGate()
 type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'include_in_reports'> & {
   tag_names: string[]
   ai_suggestion: InboxItem['ai_suggestion']
@@ -12,6 +12,7 @@ type InboxInput = Pick<InboxItem, 'content' | 'project_id' | 'include_in_reports
 interface InboxStore {
   items: InboxItem[]
   total: number
+  nextOffset: number
   pinnedPublicIds: string[]
   status: AsyncStatus
   error: string | null
@@ -30,31 +31,41 @@ interface InboxStore {
 }
 
 export const useInboxStore = create<InboxStore>((set, get) => ({
-  items: [], total: 0, pinnedPublicIds: [], status: 'idle', error: null, selectedId: null, filter: 'all',
+  items: [], total: 0, nextOffset: 0, pinnedPublicIds: [], status: 'idle', error: null, selectedId: null, filter: 'all',
   fetch: async (nextFilter = get().filter) => {
-    if (fetchPromise) return fetchPromise
-    fetchPromise = (async () => {
-      set({ status: 'running', error: null })
-      try {
-        const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0, state: nextFilter === 'all' ? undefined : nextFilter })
-        set({ items: page.items, total: page.total, pinnedPublicIds: [], status: 'success', filter: nextFilter })
-      } catch (error) {
-        set({ status: 'error', error: 'workspace.errorInboxLoad' })
+    const requestId = requestGate.next()
+    set({ status: 'running', error: null, filter: nextFilter, pinnedPublicIds: [] })
+    try {
+      const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0, state: nextFilter === 'all' ? undefined : nextFilter })
+      if (requestGate.isCurrent(requestId)) {
+        const current = get()
+        const pinnedItems = current.pinnedPublicIds
+          .map((id) => current.items.find((item) => item.public_id === id))
+          .filter((item): item is InboxItem => Boolean(item))
+        const merged = mergePage(pinnedItems, page.items, page.total)
+        const incomingIds = new Set(page.items.map((item) => item.public_id))
+        set({ items: merged.items, total: page.total, nextOffset: page.items.length, pinnedPublicIds: current.pinnedPublicIds.filter((id) => !incomingIds.has(id)), status: 'success' })
       }
-    })()
-    try { await fetchPromise } finally { fetchPromise = null }
+    } catch (error) {
+      if (requestGate.isCurrent(requestId)) set({ status: 'error', error: 'workspace.errorInboxLoad' })
+    }
   },
   loadMore: async () => {
     const state = get()
-    const offset = Math.max(0, state.items.length - state.pinnedPublicIds.length)
+    const offset = state.nextOffset
     if (state.status === 'running' || offset >= state.total) return
+    const requestId = requestGate.next()
+    const filter = state.filter
     set({ status: 'running', error: null })
     try {
-      const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset, state: state.filter === 'all' ? undefined : state.filter })
-      const merged = mergePage(state.items, page.items, page.total)
-      set({ ...merged, total: page.total, status: 'success' })
+      const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset, state: filter === 'all' ? undefined : filter })
+      if (!requestGate.isCurrent(requestId)) return
+      const current = get()
+      const merged = mergePage(current.items, page.items, page.total)
+      const incomingIds = new Set(page.items.map((item) => item.public_id))
+      set({ items: merged.items, total: page.total, nextOffset: offset + page.items.length, pinnedPublicIds: current.pinnedPublicIds.filter((id) => !incomingIds.has(id)), status: 'success', error: null })
     } catch (error) {
-      set({ status: 'error', error: 'workspace.errorInboxLoad' })
+      if (requestGate.isCurrent(requestId)) set({ status: 'error', error: 'workspace.errorInboxLoad' })
     }
   },
   setFilter: async (filter) => {
@@ -79,15 +90,16 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     const item = await window.api.inbox.create(input)
     const state = get()
     if (state.filter === 'all' || state.filter === item.state) {
-      set({ items: [item, ...state.items], total: state.total + 1, status: 'success' })
+      set({ items: [item, ...state.items], total: state.total + 1, nextOffset: state.nextOffset + 1, status: 'success' })
     }
     return item
   },
   suggestAi: async (input) => {
     const result = await window.api.inbox.aiOrganize(input)
     const state = get()
+    const requestId = requestGate.next()
     const page = await window.api.inbox.list({ limit: PAGE_SIZE, offset: 0, state: state.filter === 'all' ? undefined : state.filter })
-    set({ items: page.items, total: page.total, status: 'success', selectedId: null })
+    if (requestGate.isCurrent(requestId)) set({ items: page.items, total: page.total, nextOffset: page.items.length, pinnedPublicIds: [], status: 'success', selectedId: null })
     return { processed: result.processed, updated: result.updated, failed: result.failed }
   },
   organize: async (publicId, options) => {

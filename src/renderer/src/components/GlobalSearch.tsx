@@ -21,13 +21,21 @@ export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
   const gate = useMemo(createLatestRequestGate, [])
   const controllerRef = useRef<AbortController | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const resultRefs = useRef<Array<HTMLButtonElement | null>>([])
   const { t, resolvedLanguage } = useI18n()
   const overlayStack = useOverlayStack()
 
   useEffect(() => overlayStack.register({ id: 'global-search', priority: 20, requestClose: () => { onClose?.(); return true } }), [onClose, overlayStack])
+  useEffect(() => {
+    inputRef.current?.focus()
+    return () => controllerRef.current?.abort()
+  }, [])
 
   const runSearch = (text: string, offset: number, append: boolean): void => {
     controllerRef.current?.abort()
+    controllerRef.current = null
+    gate.next()
     const requestId = gate.next()
     const controller = new AbortController()
     controllerRef.current = controller
@@ -61,6 +69,9 @@ export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
   useEffect(() => {
     if (activeIndex !== null && activeIndex >= items.length) setActiveIndex(null)
   }, [activeIndex, items.length])
+  useEffect(() => {
+    if (activeIndex !== null) resultRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex])
 
   const sourceLabel = (source: SearchResult['source']): string => {
     const key = {
@@ -81,6 +92,7 @@ export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
       <Search aria-hidden="true" className="global-search-icon" />
       <input
         id="global-search-input"
+        ref={inputRef}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder={t('workspace.searchPlaceholder')}
@@ -108,7 +120,7 @@ export function GlobalSearch({ onOpenResult, onClose }: Props): JSX.Element {
         </div>
         <div id="global-search-results" className="global-search-results" role="listbox" aria-label={t('workspace.searchResults')}>
           {items.map((item, index) => <div role="option" aria-selected={activeIndex === index} id={`global-search-result-${index}`} key={`${item.source}:${item.public_id}`}>
-            <button className={`global-search-result ${activeIndex === index ? 'is-active' : ''}`} onClick={() => onOpenResult(item)}>
+            <button ref={(element) => { resultRefs.current[index] = element }} className={`global-search-result ${activeIndex === index ? 'is-active' : ''}`} onClick={() => onOpenResult(item)}>
               <span className="search-result-content"><strong>{item.title}</strong><span>{item.excerpt}</span></span>
               <span className="search-result-meta">
                 <span>{sourceLabel(item.source)}</span>

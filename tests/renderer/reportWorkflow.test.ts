@@ -9,6 +9,7 @@ import {
   hasReportPreviewData,
   toggleReportScope
 } from '../../src/renderer/src/lib/reportWorkflow'
+import { appendGenerationChunk, createReportContentState, selectHistoricalReport } from '../../src/renderer/src/pages/ReportPage'
 
 describe('report workflow helpers', () => {
   it('uses the latest complete Monday-to-Sunday week in the user timezone', () => {
@@ -74,5 +75,14 @@ describe('report workflow helpers', () => {
   it('recognizes an empty preview before generation', () => {
     expect(hasReportPreviewData({ work_log_count: 0, task_count: 0, inbox_count: 0, git_commit_count: 0 })).toBe(false)
     expect(hasReportPreviewData({ work_log_count: 1, task_count: 0, inbox_count: 0, git_commit_count: 0 })).toBe(true)
+  })
+
+  it('keeps old generation chunks out of a selected historical report', () => {
+    const generating = appendGenerationChunk(createReportContentState(), 'partial generation')
+    const historical = selectHistoricalReport(generating, 'saved history')
+    const staleChunk = appendGenerationChunk(historical, ' stale')
+
+    expect(staleChunk.generationContent).toBe('partial generation stale')
+    expect(staleChunk.viewContent).toBe('saved history')
   })
 })

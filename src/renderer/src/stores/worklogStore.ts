@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { WorkItemAssociations } from '../lib/workspaceTypes'
-import { createLatestRequestGate } from '../lib/workspaceInteractions'
+import { createLatestRequestGate, mergePage } from '../lib/workspaceInteractions'
 
 interface WorkLog {
   id: number
@@ -18,6 +18,7 @@ interface WorkLogStore {
   loading: boolean
   error: string | null
   hasMore: boolean
+  nextOffset: number
   searchKeyword: string
   tagFilter: string
   projectFilter: string
@@ -46,6 +47,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
   loading: false,
   error: null,
   hasMore: true,
+  nextOffset: 0,
   searchKeyword: '',
   tagFilter: '',
   projectFilter: '',
@@ -55,10 +57,18 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
 
   fetchLogs: async (tagPath = get().tagFilter, projectPublicId = get().projectFilter) => {
     const requestId = requestGate.next()
-    set({ loading: true, tagFilter: tagPath, projectFilter: projectPublicId })
+    set({ loading: true, tagFilter: tagPath, projectFilter: projectPublicId, pinnedPublicIds: [] })
     try {
       const logs = await window.api.worklog.list(PAGE_SIZE, 0, tagPath || undefined, projectPublicId || undefined)
-      if (requestGate.isCurrent(requestId)) set({ logs, hasMore: logs.length >= PAGE_SIZE, error: null, pinnedPublicIds: [] })
+      if (requestGate.isCurrent(requestId)) {
+        const current = get()
+        const pinnedLogs = current.pinnedPublicIds
+          .map((id) => current.logs.find((log) => log.public_id === id))
+          .filter((log): log is WorkLog => Boolean(log))
+        const merged = mergePage(pinnedLogs, logs, Number.MAX_SAFE_INTEGER)
+        const incomingIds = new Set(logs.map((log) => log.public_id))
+        set({ logs: merged.items, hasMore: logs.length >= PAGE_SIZE, nextOffset: logs.length, error: null, pinnedPublicIds: current.pinnedPublicIds.filter((id) => !incomingIds.has(id)) })
+      }
     } catch (error) {
       if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
@@ -78,14 +88,20 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
 
   loadMore: async () => {
     if (get().loading || !get().hasMore || get().searchKeyword) return
+    const state = get()
     const requestId = requestGate.next()
-    const offset = Math.max(0, get().logs.length - get().pinnedPublicIds.length)
-    const tagPath = get().tagFilter
-    const projectPublicId = get().projectFilter
+    const offset = state.nextOffset
+    const tagPath = state.tagFilter
+    const projectPublicId = state.projectFilter
     set({ loading: true })
     try {
       const more = await window.api.worklog.list(PAGE_SIZE, offset, tagPath || undefined, projectPublicId || undefined)
-      if (requestGate.isCurrent(requestId)) set({ logs: [...get().logs, ...more], hasMore: more.length >= PAGE_SIZE, error: null })
+      if (requestGate.isCurrent(requestId)) {
+        const current = get()
+        const merged = mergePage(current.logs, more, Number.MAX_SAFE_INTEGER)
+        const incomingIds = new Set(more.map((log) => log.public_id))
+        set({ logs: merged.items, hasMore: more.length >= PAGE_SIZE, nextOffset: offset + more.length, pinnedPublicIds: current.pinnedPublicIds.filter((id) => !incomingIds.has(id)), error: null })
+      }
     } catch (error) {
       if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
@@ -98,7 +114,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     set({ loading: true, searchKeyword: keyword, tagFilter: tagPath, projectFilter: projectPublicId })
     try {
       const logs = await window.api.worklog.search(keyword, tagPath || undefined, projectPublicId || undefined)
-      if (requestGate.isCurrent(requestId)) set({ logs, error: null, pinnedPublicIds: [] })
+      if (requestGate.isCurrent(requestId)) set({ logs, hasMore: false, nextOffset: logs.length, error: null, pinnedPublicIds: [] })
     } catch (error) {
       if (requestGate.isCurrent(requestId)) set({ error: 'worklog.saveError' })
     } finally {
@@ -138,7 +154,7 @@ export const useWorkLogStore = create<WorkLogStore>((set, get) => ({
     } else if (get().tagFilter || get().projectFilter) {
       await get().fetchLogs(get().tagFilter, get().projectFilter)
     } else {
-      set({ logs: [log, ...get().logs] })
+      set({ logs: [log, ...get().logs], nextOffset: get().nextOffset + 1 })
     }
     return log
   },

@@ -115,6 +115,17 @@ describe('workspace interactions', () => {
     expect(result.hasMore).toBe(true)
   })
 
+  it('uses numeric ids when a list item has no public id', () => {
+    const result = mergePage(
+      [{ id: 1 }, { id: 2 }] as any,
+      [{ id: 2 }, { id: 3 }] as any,
+      3
+    )
+
+    expect(result.items.map((item: { id: number }) => item.id)).toEqual([1, 2, 3])
+    expect(result.hasMore).toBe(false)
+  })
+
   it('summarizes successful and failed repository scans for a retryable UI state', () => {
     expect(summarizeRepositoryScan([
       { repository_id: 'repo-1', status: 'succeeded', inserted_count: 3 },
