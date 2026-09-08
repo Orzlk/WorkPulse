@@ -58,6 +58,36 @@ describe('AI provider response validation', () => {
     await expect(callAnthropic({ ...request, fetchImpl: anthropicFetch })).resolves.toBe('核心功能已完成')
     await expect(callDeepSeek({ ...request, fetchImpl })).resolves.toBe('核心功能已完成')
   })
+
+  it('为 OpenCode endpoint 发送会话标识和客户端标识', async () => {
+    let headers: Headers | undefined
+    await callOpenAI({
+      ...request,
+      baseUrl: 'https://opencode.ai/zen/go/v1',
+      sessionId: 'report-session-1',
+      fetchImpl: async (_url, init) => {
+        headers = new Headers(init?.headers)
+        return response({ choices: [{ message: { content: '已连接' } }] })
+      }
+    })
+
+    expect(headers?.get('x-opencode-session')).toBe('report-session-1')
+    expect(headers?.get('user-agent')).toBe('WorkPulse/0.0.1')
+  })
+
+  it('为 OpenCode 请求自动生成会话标识', async () => {
+    let headers: Headers | undefined
+    await callOpenAI({
+      ...request,
+      baseUrl: 'https://opencode.ai/zen/go/v1',
+      fetchImpl: async (_url, init) => {
+        headers = new Headers(init?.headers)
+        return response({ choices: [{ message: { content: '已连接' } }] })
+      }
+    })
+
+    expect(headers?.get('x-opencode-session')).toMatch(/^[0-9a-f-]{36}$/)
+  })
 })
 
 describe('AI provider connection test', () => {

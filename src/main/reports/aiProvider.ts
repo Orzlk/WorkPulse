@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto'
+
 export const AI_PROVIDER_RESPONSE_ERROR = 'AI provider response is invalid'
+const WORKPULSE_USER_AGENT = 'WorkPulse/0.0.1'
 
 export type AiProviderName = 'openai' | 'anthropic' | 'deepseek'
 
@@ -32,6 +35,7 @@ export interface ProviderRequest {
   baseUrl: string
   model: string
   messages: ProviderMessage[]
+  sessionId?: string
   signal?: AbortSignal
   fetchImpl?: typeof fetch
   onChunk?: (chunk: string) => void
@@ -162,9 +166,22 @@ async function request(
   const requestBody = input.onChunk && body && typeof body === 'object'
     ? { ...(body as Record<string, unknown>), stream: true }
     : body
+  const requestHeaders = (() => {
+    try {
+      const hostname = new URL(url).hostname
+      if (hostname !== 'opencode.ai' && !hostname.endsWith('.opencode.ai')) return headers
+    } catch {
+      return headers
+    }
+    return {
+      ...headers,
+      'User-Agent': WORKPULSE_USER_AGENT,
+      'x-opencode-session': input.sessionId ?? randomUUID()
+    }
+  })()
   const response = await fetchImpl(url, {
     method: 'POST',
-    headers,
+    headers: requestHeaders,
     body: JSON.stringify(requestBody),
     signal: input.signal
   }) as unknown as ProviderResponse
