@@ -134,7 +134,7 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
       />
       <section className="inbox-capture" aria-label={t('workspace.quickCapture')}>
         <Inbox aria-hidden="true" />
-        <textarea className="inbox-capture-input" ref={inputRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+        <textarea className="inbox-capture-input" ref={inputRef} rows={4} maxLength={20000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey)) {
             event.preventDefault()
             void save()
