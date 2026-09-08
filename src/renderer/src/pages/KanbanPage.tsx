@@ -27,6 +27,7 @@ import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import { KanbanTaskCard, TaskCardOverlay } from '../components/KanbanTaskCard'
 import { TaskDetailDrawer } from '../components/TaskDetailDrawer'
 import { useOverlayStack } from '../components/OverlayStack'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const SYSTEM_COLUMN_STYLES: Record<string, string> = { todo: 'kanban-column-border--todo', in_progress: 'kanban-column-border--progress', done: 'kanban-column-border--done' }
 
@@ -38,6 +39,10 @@ interface PendingComplete {
   sourceTaskIds: number[]
   sourceStatus?: TaskStatus
 }
+
+type PendingDelete =
+  | { type: 'task'; task: KanbanTask }
+  | { type: 'column'; column: KanbanColumn }
 
 function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id })
@@ -128,6 +133,7 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null)
   const [draggingTask, setDraggingTask] = useState<KanbanTask | null>(null)
   const [pendingComplete, setPendingComplete] = useState<PendingComplete | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const [localTasks, setLocalTasks] = useState<KanbanTask[]>([])
   const isDraggingRef = useRef(false)
   const dragRefreshPendingRef = useRef(false)
@@ -215,7 +221,29 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
   }
   const handleUpdate = async (id: number, updates: TaskUpdates): Promise<void> => { try { await updateTask(id, updates) } catch { toast.error(t('kanban.saveFailed')); throw new Error('task update failed') } }
   const handleMove = async (id: number, target: string): Promise<void> => { const move = prepareMove(id, target); if (!move) return; if (move.task.status === 'done') { setPendingComplete(move); return }; try { await persistMove(move) } catch { toast.error(t('kanban.moveFailed')) } }
-  const handleDelete = async (id: number): Promise<void> => { const task = localTasks.find((item) => item.id === id); if (!task || !window.confirm(t('kanban.deleteTaskConfirm', { title: task.title }))) return; try { await deleteTask(id); if (activeTask?.id === id) setActiveTask(null); toast.successWithAction(t('kanban.deletedToast'), t('kanban.undo'), () => { void handleUndoDelete(id) }) } catch { toast.error(t('kanban.deleteFailed')) } }
+  const handleDelete = async (id: number): Promise<void> => { const task = localTasks.find((item) => item.id === id); if (task) setPendingDelete({ type: 'task', task }) }
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDelete) return
+    if (pendingDelete.type === 'task') {
+      const taskId = pendingDelete.task.id
+      try {
+        await deleteTask(taskId)
+        if (activeTask?.id === taskId) setActiveTask(null)
+        setPendingDelete(null)
+        toast.successWithAction(t('kanban.deletedToast'), t('kanban.undo'), () => { void handleUndoDelete(taskId) })
+      } catch {
+        toast.error(t('kanban.deleteFailed'))
+      }
+      return
+    }
+    try {
+      await window.api.kanban.columns.delete(pendingDelete.column.public_id)
+      await Promise.all([fetchColumns(), fetchTasks()])
+      setPendingDelete(null)
+    } catch {
+      toast.error(t('kanban.deleteFailed'))
+    }
+  }
   const handleUndoDelete = async (id?: number): Promise<void> => { try { await undoDelete(id); toast.success(t('kanban.restoredToast')) } catch { toast.error(t('kanban.restoreFailed')) } }
   const handleUndoComplete = async (move: PendingComplete): Promise<void> => {
     const reopen = buildReopenTaskMove({ taskId: move.task.id, targetColumn: move.target, targetStatus: move.task.status, orderedIds: move.orderedIds, sourceColumn: move.sourceColumn, sourceTaskIds: move.sourceTaskIds, sourceStatus: move.sourceStatus })
@@ -243,7 +271,7 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
   }
   const createColumn = async (): Promise<void> => { if (!newColumnName.trim()) return; try { await window.api.kanban.columns.create(newColumnName.trim()); setNewColumnName(''); await fetchColumns() } catch { toast.error(t('kanban.saveFailed')) } }
   const renameColumn = async (column: KanbanColumn): Promise<void> => { if (!editingColumnName.trim()) return; try { await window.api.kanban.columns.update(column.public_id, editingColumnName.trim()); setEditingColumnId(null); await fetchColumns() } catch { toast.error(t('kanban.saveFailed')) } }
-  const removeColumn = async (column: KanbanColumn): Promise<void> => { if (!window.confirm(t('kanban.deleteColumnConfirm', { name: column.name }))) return; try { await window.api.kanban.columns.delete(column.public_id); await Promise.all([fetchColumns(), fetchTasks()]) } catch { toast.error(t('kanban.deleteFailed')) } }
+  const removeColumn = (column: KanbanColumn): void => { setPendingDelete({ type: 'column', column }) }
   const clearFilters = (): void => { setQuery(''); setShowDone(true); setProjectFilter(''); setPriorityFilter('all'); setDueFilter('all'); setSort('manual') }
 
   return (
@@ -266,6 +294,17 @@ function KanbanPage({ focusPublicId, onFocusHandled }: { focusPublicId?: string 
       <DragOverlay>{draggingTask ? <TaskCardOverlay task={draggingTask} /> : null}</DragOverlay>
       {activeTask && <TaskDetailDrawer task={activeTask} columns={columns} projects={projects} onClose={() => setActiveTask(null)} onSave={handleUpdate} onMove={async (id, target) => { await handleMove(id, target); setActiveTask(null) }} onReopen={handleReopen} onDelete={handleDelete} columnName={columnName} />}
       {pendingComplete && <CompleteDialog task={pendingComplete.task} onConfirm={handleComplete} onCancel={handleCancelComplete} onOnlyComplete={handleCompleteOnly} />}
+      {pendingDelete && <ConfirmDialog
+        title={pendingDelete.type === 'task' ? t('kanban.deleteTask') : t('kanban.deleteColumn')}
+        message={pendingDelete.type === 'task'
+          ? t('kanban.deleteTaskConfirm', { title: pendingDelete.task.title })
+          : t('kanban.deleteColumnConfirm', { name: pendingDelete.column.name })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />}
     </DndContext>
   )
 }

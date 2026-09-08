@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FolderGit2, GitBranch, MoreHorizontal, Pause, Pencil, Play, RefreshCw, ServerCog, Trash2, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useProjectStore } from '../stores/projectStore'
@@ -10,6 +10,7 @@ import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import type { Repository } from '../lib/workspaceTypes'
 import type { TranslationKey } from '../lib/i18n'
 import { registerNavigationGuard } from '../lib/navigationGuard'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 interface RepositoryForm {
   name: string
@@ -37,6 +38,8 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
   const [editingRepository, setEditingRepository] = useState<Repository | null>(null)
   const [editForm, setEditForm] = useState<RepositoryForm>(emptyRepositoryForm)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+  const discardResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const toast = useToast()
   const { t } = useI18n()
 
@@ -76,25 +79,24 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
     editForm.project_id !== (editingRepository.project_id ?? '')
   ))
 
-  const requestCloseEdit = (): void => {
-    if (savingEdit) return
-    if (isEditDirty && !window.confirm(t('workspace.repositoryEditDiscardConfirm'))) return
+  const requestCloseEdit = async (): Promise<boolean> => {
+    if (savingEdit || discardConfirmOpen) return false
+    if (isEditDirty) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        discardResolverRef.current = resolve
+        setDiscardConfirmOpen(true)
+      })
+      if (!confirmed) return false
+    }
     setEditingRepository(null)
+    return true
   }
 
   useEffect(() => registerNavigationGuard({
     id: 'repository-editor',
     priority: 80,
-    request: () => {
-      if (!editingRepository) return true
-      if (savingEdit) return false
-      if (!isEditDirty || window.confirm(t('workspace.repositoryEditDiscardConfirm'))) {
-        setEditingRepository(null)
-        return true
-      }
-      return false
-    }
-  }), [editForm, editingRepository, isEditDirty, savingEdit])
+    request: requestCloseEdit
+  }), [editForm, editingRepository, isEditDirty, savingEdit, discardConfirmOpen])
 
   useEffect(() => {
     if (!editingRepository) return
@@ -160,6 +162,7 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
   }
 
   const translatedError = error ? t(error as TranslationKey) : ''
+  const pendingDeleteRepository = items.find((repository) => repository.public_id === deletingId) ?? null
   const updateRepository = async (id: string, enabled: boolean): Promise<void> => {
     setOperation({ kind: 'update', id })
     setOperationError('')
@@ -230,10 +233,10 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
     <section className="repository-list">{items.map((repository) => <article className="repository-card" key={repository.public_id} id={`repository-${repository.public_id}`} tabIndex={-1}>
       <div className="repository-card-header">
         <div className="repository-card-identity"><span className="repository-card-icon"><FolderGit2 aria-hidden="true" /></span><div><p className="workspace-kicker">{t('workspace.repositoriesKicker')}</p><h3>{repository.name}</h3></div></div>
-        {deletingId === repository.public_id ? <div className="repository-delete-confirm"><span>{t('workspace.repositoryDeleteConfirm', { name: repository.name })}</span><button className="danger-action" onClick={() => void deleteRepository(repository.public_id)} disabled={isBusy}>{t('common.confirm')}</button><button onClick={() => setDeletingId(null)} disabled={isBusy}>{t('common.cancel')}</button></div> : <div className="repository-card-menu">
+      <div className="repository-card-menu">
           <button className="repository-menu-trigger" aria-label={t('workspace.repositoryMenu')} aria-haspopup="menu" aria-expanded={openMenuId === repository.public_id} onClick={() => setOpenMenuId(openMenuId === repository.public_id ? null : repository.public_id)}><MoreHorizontal aria-hidden="true" /></button>
           {openMenuId === repository.public_id && <div className="repository-card-menu-popover" role="menu"><button role="menuitem" onClick={() => startEdit(repository)}><Pencil aria-hidden="true" />{t('workspace.repositoryEdit')}</button><button role="menuitem" onClick={() => requestDelete(repository.public_id)}><Trash2 aria-hidden="true" />{t('workspace.repositoryDelete')}</button></div>}
-        </div>}
+        </div>
       </div>
       <code className="repository-card-path">{repository.local_path}</code>
       <div className="repository-card-meta"><span className="repository-card-chip"><GitBranch aria-hidden="true" />{repository.branch ?? t('workspace.branchUnknown')}</span><span className="repository-card-chip">{repository.project_id ? projectNames.get(repository.project_id) : t('workspace.unassigned')}</span><span className={`repository-card-chip ${repository.enabled ? 'is-enabled' : 'is-paused'}`}>{repository.enabled ? t('workspace.enabled') : t('workspace.paused')}</span></div>
@@ -244,6 +247,8 @@ function RepositoriesPage({ focusPublicId, onFocusHandled, onOpenProjects }: { f
     {items.length === 0 && status !== 'running' && <div className="empty-state"><ServerCog aria-hidden="true" /><p>{t('workspace.noRepositories')}</p></div>}
     {items.length < total && <button className="load-more" onClick={() => void loadMore()} disabled={status === 'running' || isBusy}>{t('workspace.loadMore')}</button>}
     {editingRepository && <div className="repository-edit-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseEdit() }}><div className="repository-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="repository-edit-title"><div className="repository-edit-heading"><div><p className="workspace-kicker">{t('workspace.repositoryEdit')}</p><h3 id="repository-edit-title">{editingRepository.name}</h3></div><button type="button" aria-label={t('common.close')} onClick={requestCloseEdit}><X aria-hidden="true" /></button></div><label>{t('workspace.repositoryName')}<input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label><label>{t('workspace.localPath')}<input value={editForm.local_path} onChange={(event) => setEditForm({ ...editForm, local_path: event.target.value })} /></label><label>{t('workspace.remoteUrl')}<input value={editForm.remote_url} onChange={(event) => setEditForm({ ...editForm, remote_url: event.target.value })} placeholder="https://..." /></label><label>{t('workspace.project')}<select value={editForm.project_id} onChange={(event) => setEditForm({ ...editForm, project_id: event.target.value })}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label><div className="repository-edit-actions"><button type="button" onClick={requestCloseEdit} disabled={savingEdit}>{t('common.cancel')}</button><button type="button" className="primary-action" onClick={() => void saveEdit()} disabled={savingEdit || !editForm.name.trim() || !editForm.local_path.trim()}>{savingEdit ? t('common.saving') : t('common.save')}</button></div></div></div>}
+    {pendingDeleteRepository && <ConfirmDialog title={t('workspace.repositoryDelete')} message={t('workspace.repositoryDeleteConfirm', { name: pendingDeleteRepository.name })} confirmLabel={t('common.delete')} cancelLabel={t('common.cancel')} danger onConfirm={() => deleteRepository(pendingDeleteRepository.public_id)} onCancel={() => setDeletingId(null)} />}
+    {discardConfirmOpen && <ConfirmDialog title={t('common.close')} message={t('workspace.repositoryEditDiscardConfirm')} confirmLabel={t('common.discard')} cancelLabel={t('common.cancel')} danger onConfirm={() => { discardResolverRef.current?.(true); discardResolverRef.current = null; setDiscardConfirmOpen(false) }} onCancel={() => { discardResolverRef.current?.(false); discardResolverRef.current = null; setDiscardConfirmOpen(false) }} />}
   </div>
 }
 

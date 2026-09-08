@@ -35,6 +35,12 @@ describe('Inbox capture and delete workflow', () => {
     expect(i18n).toContain("'workspace.deleteInbox'")
   })
 
+  it('opens the shared confirmation dialog before deleting an inbox item', () => {
+    expect(page).toContain('<ConfirmDialog')
+    expect(page).toContain('setPendingDeleteId(publicId)')
+    expect(page).not.toContain('window.confirm')
+  })
+
   it('keeps completion pending while an asynchronous confirmation is saving', () => {
     expect(kanban).toContain('onConfirm: (content: string) => Promise<void>')
     expect(kanban).toContain('submit(() => onConfirm(content))')

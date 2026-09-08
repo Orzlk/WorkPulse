@@ -99,7 +99,7 @@ function TaskCreatePage({ draft }: { draft: TaskCreateDraft | null }): JSX.Eleme
   }
 
   const handleDescriptionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void handleSave()
     }
@@ -129,12 +129,12 @@ function TaskCreatePage({ draft }: { draft: TaskCreateDraft | null }): JSX.Eleme
       <main className="worklog-editor-main task-create-main">
         <label className="task-create-field">
           <span>{t('kanban.taskTitle')}</span>
-          <input ref={titleRef} value={title} onChange={(event) => setTitle(event.target.value)} onKeyDown={handleTitleKeyDown} placeholder={t('kanban.newTaskTitlePlaceholder')} disabled={saving} />
+          <input ref={titleRef} value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} onKeyDown={handleTitleKeyDown} placeholder={t('kanban.newTaskTitlePlaceholder')} disabled={saving} />
         </label>
 
         <label className="task-create-field task-create-description-field">
           <span>{t('kanban.descriptionPlaceholder')}</span>
-          <textarea ref={descriptionRef} value={description} onChange={(event) => setDescription(event.target.value)} onKeyDown={handleDescriptionKeyDown} placeholder={t('kanban.newDescriptionPlaceholder')} rows={4} disabled={saving} />
+          <textarea ref={descriptionRef} value={description} maxLength={20000} onChange={(event) => setDescription(event.target.value)} onKeyDown={handleDescriptionKeyDown} placeholder={t('kanban.newDescriptionPlaceholder')} rows={4} disabled={saving} />
           <em>{t('kanban.newTaskDescriptionHelp')}</em>
         </label>
 

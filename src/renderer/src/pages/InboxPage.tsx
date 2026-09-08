@@ -8,6 +8,7 @@ import { useI18n } from '../stores/languageStore'
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader'
 import { WorkspaceSectionTabs } from '../components/WorkspaceSectionTabs'
 import { RecordsSidebar } from '../components/RecordsSidebar'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import type { InboxFilter } from '../lib/workspaceTypes'
 
 function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: string | null; onFocusHandled?: () => void; onOpenRecords?: () => void }): JSX.Element {
@@ -16,6 +17,7 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
   const [projectId, setProjectId] = useState('')
   const [saving, setSaving] = useState(false)
   const [aiOrganizing, setAiOrganizing] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const { items, total, status, error, selectedId, filter: inboxFilter, fetch, setFilter: setInboxFilter, loadByPublicId, loadMore, select, create, suggestAi, organize, ignore, remove } = useInboxStore()
   const projects = useProjectStore((state) => state.items)
   const fetchProjects = useProjectStore((state) => state.fetch)
@@ -72,11 +74,16 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
     try { await ignore(publicId); toast.success(t('workspace.ignored')) } catch { toast.error(t('workspace.ignoreFailed')) }
   }
 
-  const handleDelete = async (publicId: string): Promise<void> => {
-    if (!window.confirm(t('workspace.deleteInboxConfirm'))) return
+  const handleDelete = (publicId: string): void => {
+    setPendingDeleteId(publicId)
+  }
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDeleteId) return
     try {
-      await remove(publicId)
+      await remove(pendingDeleteId)
       toast.success(t('workspace.inboxDeleted'))
+      setPendingDeleteId(null)
     } catch {
       toast.error(t('workspace.deleteInboxFailed'))
     }
@@ -128,7 +135,7 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
       <section className="inbox-capture" aria-label={t('workspace.quickCapture')}>
         <Inbox aria-hidden="true" />
         <textarea className="inbox-capture-input" ref={inputRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey)) {
             event.preventDefault()
             void save()
           }
@@ -163,6 +170,15 @@ function InboxPage({ focusId, onFocusHandled, onOpenRecords }: { focusId?: strin
         </aside>
       </div>
       </main>
+      {pendingDeleteId && <ConfirmDialog
+        title={t('workspace.deleteInbox')}
+        message={t('workspace.deleteInboxConfirm')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDeleteId(null)}
+      />}
     </div>
   )
 }

@@ -11,6 +11,7 @@ import type { AsyncStatus, Project, ProjectActivityItem } from '../lib/workspace
 import type { KanbanColumn, KanbanTask, TaskUpdates } from '../lib/kanbanTypes'
 import { PROJECT_COLOR_OPTIONS } from '../lib/projectColors'
 import { registerNavigationGuard } from '../lib/navigationGuard'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 function ProjectColorPicker({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
   const { t } = useI18n()
@@ -89,8 +90,11 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
   const [activityStatus, setActivityStatus] = useState<AsyncStatus>('idle')
   const [activityReloadKey, setActivityReloadKey] = useState(0)
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null)
+  const [pendingConfirmation, setPendingConfirmation] = useState<{ type: 'task'; task: KanbanTask } | { type: 'project'; project: Project } | null>(null)
   const [taskColumns, setTaskColumns] = useState<KanbanColumn[]>([])
   const [taskLoading, setTaskLoading] = useState(false)
+  const [discardConfirmTarget, setDiscardConfirmTarget] = useState<'create' | 'project' | null>(null)
+  const discardResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const projectDrawerRef = useRef<HTMLElement>(null)
   const projectFocusRestoreRef = useRef<HTMLElement | null>(null)
   const toast = useToast()
@@ -103,17 +107,22 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
   ))
   const isCreateDirty = createOpen && Boolean(name.trim() || description.trim() || color !== PROJECT_COLOR_OPTIONS[0].value)
 
-  const requestCloseProject = (): boolean => {
-    if (savingEdit) return false
-    if (isProjectEditDirty && !window.confirm(t('workspace.projectEditDiscardConfirm'))) return false
+  const askDiscard = (target: 'create' | 'project'): Promise<boolean> => new Promise((resolve) => {
+    discardResolverRef.current = resolve
+    setDiscardConfirmTarget(target)
+  })
+
+  const requestCloseProject = async (): Promise<boolean> => {
+    if (savingEdit || discardConfirmTarget) return false
+    if (isProjectEditDirty && !await askDiscard('project')) return false
     setSelectedProjectId(null)
     setEditing(false)
     return true
   }
 
-  const requestCloseCreate = (): boolean => {
-    if (!isCreateDirty) return true
-    if (!window.confirm(t('workspace.projectEditDiscardConfirm'))) return false
+  const requestCloseCreate = async (): Promise<boolean> => {
+    if (discardConfirmTarget) return false
+    if (isCreateDirty && !await askDiscard('create')) return false
     setCreateOpen(false)
     return true
   }
@@ -136,7 +145,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
         setProjectMenuId(null)
         return
       }
-      if (event.key === 'Escape' && selectedProjectId && !activeTask) requestCloseProject()
+      if (event.key === 'Escape' && selectedProjectId && !activeTask) void requestCloseProject()
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
@@ -326,28 +335,39 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
 
   const handleTaskDelete = async (id: number): Promise<void> => {
     const task = activeTask?.id === id ? activeTask : null
-    if (!task || !window.confirm(t('kanban.deleteTaskConfirm', { title: task.title }))) return
-    try {
-      const deleted = await window.api.task.delete(id)
-      if (!deleted) throw new Error('Task not found')
-      setActiveTask(null)
-      void fetch()
-      setActivityReloadKey((value) => value + 1)
-    } catch {
-      toast.error(t('kanban.deleteFailed'))
-    }
+    if (!task) return
+    setPendingConfirmation({ type: 'task', task })
   }
 
-  const handleDeleteProject = async (project: Project): Promise<void> => {
-    setProjectMenuId(null)
-    if (!window.confirm(t('workspace.deleteProjectConfirm', { name: project.name }))) return
+  const confirmPendingAction = async (): Promise<void> => {
+    if (!pendingConfirmation) return
+    if (pendingConfirmation.type === 'task') {
+      try {
+        const deleted = await window.api.task.delete(pendingConfirmation.task.id)
+        if (!deleted) throw new Error('Task not found')
+        setActiveTask(null)
+        setPendingConfirmation(null)
+        void fetch()
+        setActivityReloadKey((value) => value + 1)
+      } catch {
+        toast.error(t('kanban.deleteFailed'))
+      }
+      return
+    }
     try {
-      await archive(project.public_id)
-      if (selectedProjectId === project.public_id) closeProject()
+      await archive(pendingConfirmation.project.public_id)
+      setPendingConfirmation(null)
+      if (selectedProjectId === pendingConfirmation.project.public_id) closeProject()
+      void fetch()
       toast.success(t('workspace.projectDeleted'))
     } catch {
       toast.error(t('workspace.projectDeleteFailed'))
     }
+  }
+
+  const handleDeleteProject = (project: Project): void => {
+    setProjectMenuId(null)
+    setPendingConfirmation({ type: 'project', project })
   }
 
   const openProjectEditor = (project: Project): void => {
@@ -383,7 +403,7 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
         </button>
         {projectMenuId === project.public_id && <div className="project-menu-panel" role="menu" aria-label={t('workspace.projectMenu', { name: project.name })}>
           <button type="button" role="menuitem" onClick={() => openProjectEditor(project)}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button>
-          <button type="button" role="menuitem" className="danger-action" onClick={() => void handleDeleteProject(project)}><Trash2 aria-hidden="true" />{t('workspace.deleteProject')}</button>
+          <button type="button" role="menuitem" className="danger-action" onClick={() => handleDeleteProject(project)}><Trash2 aria-hidden="true" />{t('workspace.deleteProject')}</button>
         </div>}
       </div>
       <button type="button" className="project-card-main" onClick={() => openProject(project)} aria-label={t('workspace.openProject', { name: project.name })}>
@@ -397,21 +417,21 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
     {items.length === 0 && status !== 'running' && <div className="empty-state"><FolderKanban aria-hidden="true" /><p>{t('workspace.noProjects')}</p></div>}
     {items.length < total && <button className="load-more" onClick={() => void loadMore()} disabled={status === 'running'}>{t('workspace.loadMore')}</button>}
 
-    {createOpen && <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseCreate() }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="project-create-title" className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestCloseCreate() } }}>
+    {createOpen && <div className="hallmark-app portal-root fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void requestCloseCreate() }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="project-create-title" className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void requestCloseCreate() } }}>
         <h2 id="project-create-title" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{t('workspace.newProject')}</h2>
         <label className="mt-4 block text-xs font-medium text-zinc-500">{t('workspace.projectName')}<input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void submit()} placeholder={t('workspace.projectNamePlaceholder')} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
         <label className="mt-3 block text-xs font-medium text-zinc-500">{t('workspace.projectDescription')}<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('workspace.optional')} rows={3} className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-800" /></label>
         <div className="project-color-field mt-3"><span className="text-xs font-medium text-zinc-500">{t('workspace.color')}</span><ProjectColorPicker value={color} onChange={setColor} /></div>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className="ui-button text-xs" onClick={requestCloseCreate}>{t('common.cancel')}</button>
+          <button type="button" className="ui-button text-xs" onClick={() => void requestCloseCreate()}>{t('common.cancel')}</button>
           <button type="button" className="ui-button ui-button--primary text-xs" onClick={() => void submit()} disabled={!name.trim()}><Plus className="h-3.5 w-3.5" />{t('common.create')}</button>
         </div>
       </div>
     </div>}
-    {selectedProject && <div className="project-detail-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) requestCloseProject() }}>
-      <aside ref={projectDrawerRef} className="project-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="project-detail-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestCloseProject() } }}>
-        <header className="project-detail-header"><div><p className="workspace-kicker">{t('workspace.projectDetails')}</p><span className="project-detail-title"><span className="project-detail-color-dot" style={{ backgroundColor: selectedProject.color, '--project-color': selectedProject.color } as CSSProperties} aria-hidden="true" /><h3 id="project-detail-title">{selectedProject.name}</h3></span></div><button type="button" className="project-detail-close" onClick={requestCloseProject} aria-label={t('workspace.closeProject')}><X aria-hidden="true" /></button></header>
+    {selectedProject && <div className="project-detail-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) void requestCloseProject() }}>
+      <aside ref={projectDrawerRef} className="project-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="project-detail-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void requestCloseProject() } }}>
+        <header className="project-detail-header"><div><p className="workspace-kicker">{t('workspace.projectDetails')}</p><span className="project-detail-title"><span className="project-detail-color-dot" style={{ backgroundColor: selectedProject.color, '--project-color': selectedProject.color } as CSSProperties} aria-hidden="true" /><h3 id="project-detail-title">{selectedProject.name}</h3></span></div><button type="button" className="project-detail-close" onClick={() => void requestCloseProject()} aria-label={t('workspace.closeProject')}><X aria-hidden="true" /></button></header>
         {editing ? <div className="project-detail-edit">
           <label>{t('workspace.projectName')}<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label>
           <label>{t('workspace.projectDescription')}<textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} rows={5} /></label>
@@ -421,11 +441,21 @@ function ProjectsPage({ onOpenReports, onOpenRepositories }: { onOpenReports: (p
            <p className="project-detail-description">{selectedProject.description || t('workspace.noDescription')}</p>
            <div className="project-detail-metrics" aria-label={t('workspace.projectActivity')}><div><strong>{selectedProject.summary.work_logs}</strong><span>{t('workspace.projectLogs')}</span></div><div><strong>{selectedProject.summary.tasks}</strong><span>{t('workspace.projectTasks')}</span></div><div><strong>{selectedProject.summary.git_commits}</strong><span>{t('workspace.projectCommits')}</span></div><div><strong>{selectedProject.summary.reports}</strong><span>{t('workspace.projectReportsCount')}</span></div></div>
            <ProjectActivityTimeline items={activityItems} status={activityStatus} onRetry={() => setActivityReloadKey((value) => value + 1)} onTaskClick={(publicId) => { void handleOpenTask(publicId) }} />
-            <div className="project-detail-actions"><button type="button" onClick={startEdit}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button><button type="button" className="primary-action" onClick={() => { if (requestCloseProject()) onOpenReports(selectedProject.public_id) }}><ArrowUpRight aria-hidden="true" />{t('workspace.projectReports')}</button></div>
+            <div className="project-detail-actions"><button type="button" onClick={startEdit}><Pencil aria-hidden="true" />{t('workspace.editProject')}</button><button type="button" className="primary-action" onClick={() => { void requestCloseProject().then((closed) => { if (closed) onOpenReports(selectedProject.public_id) }) }}><ArrowUpRight aria-hidden="true" />{t('workspace.projectReports')}</button></div>
         </>}
       </aside>
     </div>}
     {activeTask && <TaskDetailDrawer task={activeTask} columns={taskColumns} projects={items.map((project) => ({ public_id: project.public_id, name: project.name }))} onClose={() => setActiveTask(null)} onSave={handleTaskSave} onMove={handleTaskMove} onReopen={handleTaskReopen} onDelete={handleTaskDelete} columnName={(columnKey) => taskColumns.find((column) => column.column_key === columnKey)?.name ?? columnKey} />}
+    {discardConfirmTarget && <ConfirmDialog title={t('common.close')} message={t('workspace.projectEditDiscardConfirm')} confirmLabel={t('common.discard')} cancelLabel={t('common.cancel')} danger onConfirm={() => { discardResolverRef.current?.(true); discardResolverRef.current = null; setDiscardConfirmTarget(null) }} onCancel={() => { discardResolverRef.current?.(false); discardResolverRef.current = null; setDiscardConfirmTarget(null) }} />}
+    {pendingConfirmation && <ConfirmDialog
+      title={pendingConfirmation.type === 'task' ? t('kanban.deleteTask') : t('workspace.deleteProject')}
+      message={pendingConfirmation.type === 'task' ? t('kanban.deleteTaskConfirm', { title: pendingConfirmation.task.title }) : t('workspace.deleteProjectConfirm', { name: pendingConfirmation.project.name })}
+      confirmLabel={t('common.delete')}
+      cancelLabel={t('common.cancel')}
+      danger
+      onConfirm={confirmPendingAction}
+      onCancel={() => setPendingConfirmation(null)}
+    />}
   </div>
 }
 

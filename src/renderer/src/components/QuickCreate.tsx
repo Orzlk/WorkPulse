@@ -10,6 +10,7 @@ import { extractHashTags } from '../lib/workspaceInteractions'
 import type { TaskPriority } from '../lib/kanbanTypes'
 import { buildTaskCreateRoute } from '../lib/taskCreateRoute'
 import { useOverlayStack } from './OverlayStack'
+import { ConfirmDialog } from './ConfirmDialog'
 
 type Mode = 'log' | 'inbox' | 'task'
 interface Props { initialMode: Mode; onClose: () => void; returnFocusRef?: RefObject<HTMLElement> }
@@ -28,6 +29,7 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
   const [projectId, setProjectId] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle')
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -69,7 +71,10 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
 
   const requestClose = (): boolean => {
     if (status === 'running') return false
-    if (value.trim() && !window.confirm(t('workspace.quickDiscardConfirm'))) return false
+    if (value.trim()) {
+      setDiscardConfirmOpen(true)
+      return false
+    }
     onClose()
     return true
   }
@@ -110,6 +115,13 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
     }
   }
 
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      void submit()
+    }
+  }
+
   const openFullTaskForm = (): void => {
     const draft = { content: value, projectId, priority }
     void window.api.taskCreateWindow.open({ ...draft, route: buildTaskCreateRoute(draft) })
@@ -127,7 +139,7 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
       <div className="quick-create-header"><div><p className="workspace-kicker">{t('workspace.quickKicker')}</p><h2 id="quick-create-title">{t('workspace.quickDialogTitle')}</h2></div><button onClick={requestClose} aria-label={t('workspace.close')}><X aria-hidden="true" /></button></div>
       <div className="quick-create-tabs" role="tablist" aria-label={t('workspace.createType')}>{modes.map(({ id, labelKey, Icon }) => <button role="tab" aria-selected={mode === id} key={id} onClick={() => setMode(id)}><Icon aria-hidden="true" />{t(labelKey)}</button>)}</div>
       <label className="quick-create-content-label" htmlFor="quick-create-content">{t('workspace.quickContentLabel')}</label>
-      <textarea id="quick-create-content" ref={inputRef} rows={1} value={value} disabled={status === 'running'} onChange={(event) => setValue(event.target.value)} className="quick-create-input" placeholder={placeholder} />
+      <textarea id="quick-create-content" ref={inputRef} rows={1} value={value} maxLength={10000} disabled={status === 'running'} onChange={(event) => setValue(event.target.value)} onKeyDown={handleInputKeyDown} className="quick-create-input" placeholder={placeholder} />
       <div className="quick-create-meta">{tags.length > 0 ? <span>{tags.map((tag) => <i key={tag}>#{tag}</i>)}</span> : <span>{t('workspace.quickHelp')}</span>}</div>
       <div className="quick-create-associations">
         <label>{t('workspace.project')}<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">{t('workspace.unassigned')}</option>{projects.map((project) => <option key={project.public_id} value={project.public_id}>{project.name}</option>)}</select></label>
@@ -135,5 +147,6 @@ export function QuickCreate({ initialMode, onClose, returnFocusRef }: Props): JS
       </div>
       <footer><span aria-live="polite">{status === 'success' ? t('workspace.quickSaveSuccess') : status === 'error' ? t('workspace.quickSaveError') : t('workspace.quickKeyboardHelp')}</span><div className="quick-create-footer-actions">{mode === 'task' && <button className="ui-button text-xs" onClick={openFullTaskForm}>{t('workspace.quickTaskFullForm')}</button>}<button className="primary-action" onClick={() => void submit()} disabled={!value.trim() || status === 'running'}>{status === 'running' ? t('workspace.saving') : t('common.save')}</button></div></footer>
     </section>
+    {discardConfirmOpen && <ConfirmDialog title={t('common.close')} message={t('workspace.quickDiscardConfirm')} confirmLabel={t('common.discard')} cancelLabel={t('common.cancel')} danger onConfirm={() => { setDiscardConfirmOpen(false); onClose() }} onCancel={() => setDiscardConfirmOpen(false)} />}
   </div>
 }

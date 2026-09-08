@@ -846,6 +846,56 @@
   background: rgba(30, 34, 39, .34);
 }
 
+.hallmark-app.ui-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(30, 34, 39, .34);
+}
+
+.hallmark-app .ui-modal {
+  width: min(100%, 440px);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-lg);
+  color: var(--ui-color-text);
+}
+
+.hallmark-app .ui-confirm-dialog {
+  padding: 20px;
+}
+
+.hallmark-app .ui-confirm-dialog h2 {
+  margin: 0;
+  color: var(--ui-color-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.hallmark-app .ui-confirm-dialog__message {
+  margin-top: 10px;
+  color: var(--ui-color-text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.hallmark-app .ui-confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.hallmark-app .ui-confirm-dialog button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-color-primary) 24%, transparent);
+}
+
 .hallmark-app .empty-state {
   border-color: var(--ui-color-border-strong);
   border-radius: var(--ui-radius-lg);

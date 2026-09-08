@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import * as kanbanBoard from '../../src/renderer/src/lib/kanbanBoard'
 import { filterAndSortTasks } from '../../src/renderer/src/lib/kanbanBoard'
+import { readFileSync } from 'node:fs'
+
+const kanbanPage = readFileSync('src/renderer/src/pages/KanbanPage.tsx', 'utf8')
 
 const tasks = [
   {
@@ -45,6 +48,13 @@ const tasks = [
 ]
 
 describe('看板视图筛选与排序', () => {
+  it('routes task and column deletion through the shared confirmation dialog', () => {
+    expect(kanbanPage).toContain('<ConfirmDialog')
+    expect(kanbanPage).toContain("type: 'task'")
+    expect(kanbanPage).toContain("type: 'column'")
+    expect(kanbanPage).not.toContain('window.confirm')
+  })
+
   it('searches title, description and tags without mutating the source list', () => {
     const result = filterAndSortTasks(tasks, { query: '发布', showDone: true, sort: 'manual' })
 
