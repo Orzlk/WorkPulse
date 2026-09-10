@@ -14,6 +14,7 @@
 |---------|------|
 | ![AI 报告](docs/screenshots/workpulse-report.png) | ![统计](docs/screenshots/workpulse-stats.png) |
 
+
 ## 功能
 
 **工作日志** — 输入你刚做了什么，按回车，完成。支持 `#标签` 自动分类、全文搜索、撤销删除，以及带分类信息的 CSV/Markdown 导出；也可以直接导入 Flomo HTML 笔记，保留原始时间、标签、Markdown 格式和图片附件。图片会复制到 WorkPulse 附件目录；音频、视频、缺失或不支持格式的附件不会复制，并在导入结果中提示。
